@@ -1,0 +1,173 @@
+                                      1 ;--------------------------------------------------------
+                                      2 ; File Created by SDCC : free open source ANSI-C Compiler
+                                      3 ; Version 4.2.0 #13081 (Linux)
+                                      4 ;--------------------------------------------------------
+                                      5 	.module hello
+                                      6 	.optsdcc -mz80
+                                      7 	
+                                      8 ;--------------------------------------------------------
+                                      9 ; Public variables in this module
+                                     10 ;--------------------------------------------------------
+                                     11 	.globl _main
+                                     12 	.globl _print
+                                     13 	.globl _wait_key
+                                     14 	.globl _putchar_msx
+                                     15 	.globl _set_screen
+                                     16 ;--------------------------------------------------------
+                                     17 ; special function registers
+                                     18 ;--------------------------------------------------------
+                                     19 ;--------------------------------------------------------
+                                     20 ; ram data
+                                     21 ;--------------------------------------------------------
+                                     22 	.area _DATA
+                                     23 ;--------------------------------------------------------
+                                     24 ; ram data
+                                     25 ;--------------------------------------------------------
+                                     26 	.area _INITIALIZED
+                                     27 ;--------------------------------------------------------
+                                     28 ; absolute external ram data
+                                     29 ;--------------------------------------------------------
+                                     30 	.area _DABS (ABS)
+                                     31 ;--------------------------------------------------------
+                                     32 ; global & static initialisations
+                                     33 ;--------------------------------------------------------
+                                     34 	.area _HOME
+                                     35 	.area _GSINIT
+                                     36 	.area _GSFINAL
+                                     37 	.area _GSINIT
+                                     38 ;--------------------------------------------------------
+                                     39 ; Home
+                                     40 ;--------------------------------------------------------
+                                     41 	.area _HOME
+                                     42 	.area _HOME
+                                     43 ;--------------------------------------------------------
+                                     44 ; code
+                                     45 ;--------------------------------------------------------
+                                     46 	.area _CODE
+                                     47 ;hello.c:21: void set_screen(uint8_t mode) __z88dk_fastcall
+                                     48 ;	---------------------------------
+                                     49 ; Function set_screen
+                                     50 ; ---------------------------------
+      000000                         51 _set_screen::
+                                     52 ;hello.c:35: __endasm;
+      000000 DD E5            [15]   53 	push	ix
+      000002 FD E5            [15]   54 	push	iy
+      000004 08               [ 4]   55 	ex	af, af'
+      000005 7D               [ 4]   56 	ld	a, l
+      000006 FD 21 C0 FC      [14]   57 	ld	iy, #0xFCC0 ; EXPTBL & 0xFF00: main-ROM slot
+      00000A DD 21 5F 00      [14]   58 	ld	ix, #0x005F ; CHGMOD
+      00000E CD 1C 00         [17]   59 	call	0x001C ; CALSLT
+      000011 08               [ 4]   60 	ex	af, af'
+      000012 FD E1            [14]   61 	pop	iy
+      000014 DD E1            [14]   62 	pop	ix
+                                     63 ;hello.c:36: }
+      000016 C9               [10]   64 	ret
+                                     65 ;hello.c:39: void putchar_msx(char c) __z88dk_fastcall
+                                     66 ;	---------------------------------
+                                     67 ; Function putchar_msx
+                                     68 ; ---------------------------------
+      000017                         69 _putchar_msx::
+                                     70 ;hello.c:53: __endasm;
+      000017 DD E5            [15]   71 	push	ix
+      000019 FD E5            [15]   72 	push	iy
+      00001B 08               [ 4]   73 	ex	af, af'
+      00001C 7D               [ 4]   74 	ld	a, l
+      00001D FD 21 C0 FC      [14]   75 	ld	iy, #0xFCC0
+      000021 DD 21 A2 00      [14]   76 	ld	ix, #0x00A2 ; CHPUT
+      000025 CD 1C 00         [17]   77 	call	0x001C ; CALSLT
+      000028 08               [ 4]   78 	ex	af, af'
+      000029 FD E1            [14]   79 	pop	iy
+      00002B DD E1            [14]   80 	pop	ix
+                                     81 ;hello.c:54: }
+      00002D C9               [10]   82 	ret
+                                     83 ;hello.c:57: char wait_key(void) __naked
+                                     84 ;	---------------------------------
+                                     85 ; Function wait_key
+                                     86 ; ---------------------------------
+      00002E                         87 _wait_key::
+                                     88 ;hello.c:66: __endasm;
+      00002E FD 21 C0 FC      [14]   89 	ld	iy, #0xFCC0
+      000032 DD 21 9F 00      [14]   90 	ld	ix, #0x009F ; CHGET
+      000036 CD 1C 00         [17]   91 	call	0x001C ; CALSLT
+      000039 6F               [ 4]   92 	ld	l, a ; CHGET returns keycode in A;
+                                     93 ;	put it in L as C return value
+      00003A C9               [10]   94 	ret
+                                     95 ;hello.c:67: }
+                                     96 ;hello.c:70: void print(const char *s)
+                                     97 ;	---------------------------------
+                                     98 ; Function print
+                                     99 ; ---------------------------------
+      00003B                        100 _print::
+      00003B EB               [ 4]  101 	ex	de, hl
+                                    102 ;hello.c:72: while (*s)
+      00003C                        103 00101$:
+      00003C 1A               [ 7]  104 	ld	a, (de)
+      00003D B7               [ 4]  105 	or	a, a
+      00003E C8               [11]  106 	ret	Z
+                                    107 ;hello.c:73: putchar_msx(*s++);
+      00003F 6F               [ 4]  108 	ld	l, a
+                                    109 ;	spillPairReg hl
+                                    110 ;	spillPairReg hl
+      000040 13               [ 6]  111 	inc	de
+      000041 D5               [11]  112 	push	de
+      000042 CDr17r00         [17]  113 	call	_putchar_msx
+      000045 D1               [10]  114 	pop	de
+                                    115 ;hello.c:74: }
+      000046 18 F4            [12]  116 	jr	00101$
+                                    117 ;hello.c:80: int main(void)
+                                    118 ;	---------------------------------
+                                    119 ; Function main
+                                    120 ; ---------------------------------
+      000048                        121 _main::
+                                    122 ;hello.c:82: set_screen(SCREEN1_WIDTH == 32 ? 1 : 0);
+      000048 2E 01            [ 7]  123 	ld	l, #0x01
+                                    124 ;	spillPairReg hl
+                                    125 ;	spillPairReg hl
+      00004A CDr00r00         [17]  126 	call	_set_screen
+                                    127 ;hello.c:84: print("HELLO WORLD!\r\n\r\n");
+      00004D 21r6Br00         [10]  128 	ld	hl, #___str_0
+      000050 CDr3Br00         [17]  129 	call	_print
+                                    130 ;hello.c:85: print("FROM RISKYMSX2 CARTRIDGE\r\n\r\n");
+      000053 21r7Cr00         [10]  131 	ld	hl, #___str_1
+      000056 CDr3Br00         [17]  132 	call	_print
+                                    133 ;hello.c:86: print("PRESS ANY KEY TO EXIT...");
+      000059 21r99r00         [10]  134 	ld	hl, #___str_2
+      00005C CDr3Br00         [17]  135 	call	_print
+                                    136 ;hello.c:88: wait_key();
+      00005F CDr2Er00         [17]  137 	call	_wait_key
+                                    138 ;hello.c:90: set_screen(0);          /* back to SCREEN 0 for BASIC */
+      000062 2E 00            [ 7]  139 	ld	l, #0x00
+                                    140 ;	spillPairReg hl
+                                    141 ;	spillPairReg hl
+      000064 CDr00r00         [17]  142 	call	_set_screen
+                                    143 ;hello.c:92: return 0;               /* RET to BIOS, boot continues into BASIC */
+      000067 11 00 00         [10]  144 	ld	de, #0x0000
+                                    145 ;hello.c:93: }
+      00006A C9               [10]  146 	ret
+      00006B                        147 ___str_0:
+      00006B 48 45 4C 4C 4F 20 57   148 	.ascii "HELLO WORLD!"
+             4F 52 4C 44 21
+      000077 0D                     149 	.db 0x0d
+      000078 0A                     150 	.db 0x0a
+      000079 0D                     151 	.db 0x0d
+      00007A 0A                     152 	.db 0x0a
+      00007B 00                     153 	.db 0x00
+      00007C                        154 ___str_1:
+      00007C 46 52 4F 4D 20 52 49   155 	.ascii "FROM RISKYMSX2 CARTRIDGE"
+             53 4B 59 4D 53 58 32
+             20 43 41 52 54 52 49
+             44 47 45
+      000094 0D                     156 	.db 0x0d
+      000095 0A                     157 	.db 0x0a
+      000096 0D                     158 	.db 0x0d
+      000097 0A                     159 	.db 0x0a
+      000098 00                     160 	.db 0x00
+      000099                        161 ___str_2:
+      000099 50 52 45 53 53 20 41   162 	.ascii "PRESS ANY KEY TO EXIT..."
+             4E 59 20 4B 45 59 20
+             54 4F 20 45 58 49 54
+             2E 2E 2E
+      0000B1 00                     163 	.db 0x00
+                                    164 	.area _CODE
+                                    165 	.area _INITIALIZER
+                                    166 	.area _CABS (ABS)
