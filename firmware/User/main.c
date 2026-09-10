@@ -58,5 +58,9 @@ int main (void) {
      * floating so the MSX's own reset circuit handles it. The MSX boots
      * on its own and runs the cart handler whenever ~SLTSL falls. */
 
-    CartServiceLoop();
+    /* Cart service runs from EXTI0_IRQHandler (installed in Init_Cart).
+     * Main loop just idles - the IRQ fires on every PE0 edge. */
+    for (;;) {
+        __asm__ volatile ("wfi");
+    }
 }

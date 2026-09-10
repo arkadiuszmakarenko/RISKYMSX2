@@ -84,10 +84,41 @@ void Init_Cart(void)
      * as a floating input (default state of GPIOE->CFGLR = 0x44444444 above)
      * so the MSX's own reset circuit controls it. */
 
-    /* No EXTI setup - the cart service runs as a polling loop from main,
-     * not as an interrupt. This eliminates EXTI latency (5-15 cycles on
-     * WCH parts) and the interrupt entry/exit overhead (~10 cycles),
-     * giving the tightest possible SLTSL-fall-to-data-on-bus delay. */
+    /* Route PE0 -> EXTI0 and fire on the falling edge (SLTSL is active-low).
+     * Rising edge also fires - the handler releases the data bus on rise.
+     * Both triggers must be enabled for the two-phase serve/release cycle. */
+    AFIO->EXTICR[0] = (AFIO->EXTICR[0] & ~(0xFU << 0)) |
+                       (AFIO_EXTICR1_EXTI0_PE << 0);
+    EXTI->INTENR  = (EXTI->INTENR  & ~EXTI_INTENR_MR0) | EXTI_INTENR_MR0;
+    EXTI->RTENR   = (EXTI->RTENR   & ~EXTI_RTENR_TR0)  | EXTI_RTENR_TR0;
+    EXTI->FTENR   = (EXTI->FTENR   & ~EXTI_FTENR_TR0)  | EXTI_FTENR_TR0;
+    EXTI->INTFR   = EXTI_INTENR_MR0;  /* clear any stale pending bit */
+
+    /* Install Cart_EXTI0_Handler via the PFIC VTF (Vector-Table-Free) slot.
+     * The PFIC stores our handler's address in VTFADDR[0] and dispatches
+     * directly to it when EXTI0 fires - no vector-table fetch, no
+     * indirect jump through flash. Faster than the vector path.
+     *
+     * Three things all need to be true for VTF dispatch to fire:
+     *   1. Cart_EXTI0_Handler() is marked
+     *      __attribute__((interrupt("WCH-Interrupt-fast"))) so the
+     *      prologue/epilogue save mepc/mstatus and return via mret.
+     *      Without it the IRQ fires once and then the return PC is garbage.
+     *   2. SetVTFIRQ(...,ENABLE) writes the VTF slot (addr in VTFADDR[0],
+     *      IRQn in VTFIDR[0]). num=0 selects slot 0.
+     *   3. The IRQ is ALSO enabled in NVIC->IENR via NVIC_EnableIRQ().
+     *      VTF alone does NOT gate the IRQ - it only sets the dispatch
+     *      address. Without NVIC_EnableIRQ the pending bit never latches.
+     *   4. Global IRQs are enabled at the PFIC top level via __enable_irq(),
+     *      which writes 0x88 to PFIC.SCTLR. The QingKe V4 core has a
+     *      separate top-level gate from the per-IRQ enable.
+     *
+     * Belt-and-suspenders: set both VTF dispatch AND NVIC enable, then
+     * open the global gate. */
+    SetVTFIRQ((uint32_t)Cart_EXTI0_Handler, EXTI0_IRQn, 0, ENABLE);
+    NVIC_EnableIRQ(EXTI0_IRQn);
+    NVIC_SetPriority(EXTI0_IRQn, 0x00);  /* highest priority */
+    __enable_irq();
 }
 
 /*********************************************************************
@@ -157,65 +188,49 @@ void Cart_SetImageBase(uint32_t addr)
 }
 
 /*********************************************************************
- * @fn      CartServiceLoop
+ * @fn      Cart_EXTI0_Handler
  *
- * @brief   Forever-loop cart service. Polls PE0 (~SLTSL) directly with
- *          zero interrupt latency. Runs from .ramfunc (zero-wait-state
- *          SRAM) and never returns.
+ * @brief   EXTI0 IRQ: serves one MSX cartridge bus read on the falling
+ *          edge of ~SLTSL (PE0), and releases the data bus on the rising
+ *          edge. Runs from .ramfunc (zero-wait-state SRAM) and is
+ *          installed as the EXTI0 IRQ vector (PFIC priority 0).
  *
- *          Performance vs the old EXTI-driven RunCart32k:
- *            - Old: SLTSL fall -> EXTI detect -> vector fetch -> handler
- *                   entry -> read SLTSL again -> drive data. ~15-25 cycles
- *                   of latency before data hits PB8..15.
- *            - New: SLTSL fall -> read SLTSL -> drive data. ~3-5 cycles
- *                   of latency (just the GPIO read + branch + data drive).
+ *          Falling edge (~SLTSL low -> Z80 selected our slot):
+ *            1. Reconfigure PB8..15 CFGHR -> push-pull output.
+ *            2. Read cartpnt + offset, write to PB8..15 OUTDR << 8.
  *
- *          The loop:
- *            1. Spin reading GPIOE->INDR until bit0 (~SLTSL) goes low.
- *            2. Reconfigure PB8..15 CFGHR -> push-pull output.
- *            3. Read cartpnt + offset, write to PB8..15 OUTDR << 8.
- *            4. Spin reading GPIOE->INDR until bit0 (~SLTSL) goes high.
- *            5. Reconfigure PB8..15 CFGHR -> floating input (release bus).
- *            6. Goto 1.
+ *          Rising edge (~SLTSL high -> Z80 finished its bus cycle):
+ *            3. Reconfigure PB8..15 CFGHR -> floating input (release bus).
  *
- *          Step 1 is the tightest possible wait - just a GPIO bit-load
- *          and branch, with the compiler unrolling nothing (each iteration
- *          is one lbu + one andi + one branch).
+ *          Marked noinline + section(".ramfunc") so the body stays in
+ *          zero-wait-state internal SRAM and is not call-clobbered.
  *
- *          Marked noinline + section(".ramfunc") so:
- *            - The loop body stays as a real loop (no function-call overhead
- *              per iteration).
- *            - Code executes from zero-wait-state internal SRAM.
+ *          Also marked __attribute__((interrupt("WCH-Interrupt-fast")))
+ *          so the prologue saves/restore the right CSR state when the
+ *          PFIC dispatches us via the VTF (vector-table-free) slot.
+ *          Without this attribute, VTF dispatch returns into garbage
+ *          and the IRQ fires once then hangs.
  */
-void __attribute__((section(".ramfunc"), noinline)) CartServiceLoop(void)
+void __attribute__((section(".ramfunc"), noinline,
+                    interrupt("WCH-Interrupt-fast")))
+Cart_EXTI0_Handler(void)
 {
-    /* Outer loop: wait for SLTSL to fall, service it, wait for SLTSL to
-     * rise, release the bus, repeat. */
-    for (;;) {
-        /* Spin until ~SLTSL goes low. Volatile read so the compiler keeps
-         * the load (it can't constant-fold a memory-mapped register). */
-        while (((volatile uint16_t)GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
-            /* Tight poll - no body, just a GPIO bit-load per iteration. */
-        }
-
-        /* SLTSL just went low - the Z80 is selecting our slot.
-         * Drive the cart byte onto PB8..15 within ~3-5 cycles. */
+    /* Read SLTSL state at entry. Falling-edge fires when SLTSL goes low,
+     * rising-edge fires when SLTSL goes high. Branch on the current level. */
+    if ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        /* SLTSL fell - drive the addressed cart byte onto PB8..15. */
         GPIOB->CFGHR = CART_BUS_ON;
         GPIOB->OUTDR =
             ((uint32_t)(*(cartpnt +
                           ((uint16_t)GPIOD->INDR + bankOffsets0)))) << 8;
-
-        /* Hold data on the bus until SLTSL rises. The Z80 reads D0..7
-         * during T3 (after any Tw states) - our data stays stable on
-         * PB8..15 throughout this wait. */
-        while (((volatile uint16_t)GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
-            /* Tight poll - waiting for Z80 to finish its bus cycle. */
-        }
-
-        /* SLTSL rose - release the data bus back to high-Z so the MSX
-         * can use the bus for the next instruction. */
+    } else {
+        /* SLTSL rose - release the data bus back to high-Z. */
         GPIOB->CFGHR = CART_BUS_OFF;
     }
+
+    /* Clear the EXTI0 pending bit so the next edge can fire. Writing 1
+     * to INTFR bit 0 clears it (WCH PFIC-style edge-triggered EXTI). */
+    EXTI->INTFR = EXTI_INTENR_MR0;
 }
 
 #pragma GCC pop_options

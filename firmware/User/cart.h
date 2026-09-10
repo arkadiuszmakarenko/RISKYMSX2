@@ -40,10 +40,21 @@
 
 void Init_Cart(void);
 
-/* Forever-loop cart service. Polls PE0 (~SLTSL) directly with no EXTI
- * latency. Must run with interrupts globally disabled (or with no other
- * timing-critical code sharing the CPU). Returns only on impossible
- * conditions; in normal operation it never returns.
+/* EXTI0 interrupt handler. Dispatched directly by the PFIC via the VTF
+ * (vector-table-free) slot set up by Init_Cart(). Serves one Z80 read on
+ * the falling edge of ~SLTSL and releases the data bus on the rising
+ * edge. Runs from .ramfunc.
+ *
+ * Marked WCH-Interrupt-fast so the prologue/epilogue match what the VTF
+ * dispatcher expects. */
+void Cart_EXTI0_Handler(void) __attribute__((section(".ramfunc"), noinline,
+                                              interrupt("WCH-Interrupt-fast")));
+
+/* Legacy polling cart service. Not used by the EXTI-driven path, but
+ * retained so existing callers don't have to be updated. Must run with
+ * interrupts globally disabled (or with no other timing-critical code
+ * sharing the CPU). Returns only on impossible conditions; in normal
+ * operation it never returns.
  *
  * Marked __attribute__((section(".ramfunc"), noinline)) so the linker
  * keeps the loop body intact and runs it from zero-wait-state SRAM. */
