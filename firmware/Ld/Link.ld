@@ -15,6 +15,25 @@ MEMORY
 	*/
 	FLASH (rx) : ORIGIN = 0x00000000, LENGTH = 576K
 	RAM (xrw) : ORIGIN = 0x20000000+1024, LENGTH = 136K-1K
+/* Dedicated 32 KiB SRAM mirror of hello_rom[]. Lives at the very top
+	 * of RAM (above .stack). cartpnt points here at boot.
+	 *
+	 * Placement strategy:
+	 *   - RAM goes from 0x20000400 to 0x20000400 + 0x22000 = 0x20022400.
+	 *   - CARTROM occupies the top 32 KiB: 0x20014400 to 0x2001C400.
+	 *     Wait, that overlaps RAM. Recompute:
+	 *   - RAM end = 0x20022400.
+	 *   - CARTROM = top 32 KiB = 0x20014400 .. 0x2001C400, but that's
+	 *     OUTSIDE RAM. So CARTROM must be a sub-region of RAM.
+	 *   - CARTROM = [0x20014400, 0x2001C400), 32 KiB.
+	 *     Wait, that's also outside RAM (0x2001C400 > 0x20022400? No,
+	 *     0x2001C400 < 0x20022400 - 0x800 stack).
+	 *   - Final: CARTROM = 0x20014400 .. 0x2001C400 (32 KiB),
+	 *     .stack lives at 0x20021C00..0x20022400 (top 2 KiB of RAM),
+	 *     so there is no overlap. CARTROM sits between .bss (which
+	 *     ends somewhere below 0x20014000) and .stack.
+	 */
+	CARTROM (xrw) : ORIGIN = 0x20014400, LENGTH = 32K
 }
 
 
@@ -149,7 +168,7 @@ SECTIONS
   	    *(.sbss*)
         *(.gnu.linkonce.sb.*)
 		*(.bss*)
-     	*(.gnu.linkonce.b.*)		
+     	*(.gnu.linkonce.b.*)
 		*(COMMON*)
 		. = ALIGN(4);
 		PROVIDE( _ebss = .);
@@ -157,6 +176,38 @@ SECTIONS
 
 	PROVIDE( _end = _ebss);
 	PROVIDE( end = . );
+
+	/* Cart ROM mirror: a 32 KiB SRAM region (VMA = CARTROM SRAM) where the
+	 * MSX cart image is served from. cartpnt points here at boot.
+	 *
+	 * hello_rom[] in firmware/User/hello_rom.c is declared as a 1-byte
+	 * placeholder so the linker keeps the .cartrom section alive and
+	 * emits _cartrom_vma / _cartrom_lma / _cartrom_end for the startup
+	 * copy loop. The actual ROM image is uploaded at runtime via the
+	 * CLI's XLOAD/LOAD commands - main() calls ROM_Clear() before
+	 * Init_Cart() so the SRAM mirror starts as 0xFF (open bus), and
+	 * the XLOAD command writes the user-supplied .bin file into it.
+	 *
+	 * KEEP() is required because --gc-sections is enabled at link time
+	 * and the section is referenced only by the _cartrom_* PROVIDE
+	 * symbols, not by any C code (cart.c reads through the cartpnt
+	 * pointer, which is a runtime constant).
+	 *
+	 * Symbols exported for the startup copy loop:
+	 *   _cartrom_vma  - destination in SRAM (0x20014400)
+	 *   _cartrom_lma  - source in flash (4 bytes - just the placeholder)
+	 *   _cartrom_end  - end of both (~4 bytes worth of placeholder) */
+	.cartrom :
+	{
+		. = ALIGN(4);
+		PROVIDE(_cartrom_vma = .);
+		KEEP(*(.cartrom))
+		KEEP(*(.cartrom.*))
+		. = ALIGN(4);
+		PROVIDE(_cartrom_end = .);
+	} >CARTROM AT>FLASH
+
+	PROVIDE(_cartrom_lma = LOADADDR(.cartrom));
 
     .stack ORIGIN(RAM) + LENGTH(RAM) - __stack_size :
     {

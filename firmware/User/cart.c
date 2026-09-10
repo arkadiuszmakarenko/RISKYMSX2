@@ -1,37 +1,26 @@
 #include "cart.h"
 #include "psram.h"
+#include "ch32v4x7.h"
+#include "debug.h"
 
 #pragma GCC push_options
 #pragma GCC optimize("Ofast")
 
 /*
- * Cartridge image pointer. Initialized to point at the flash-resident
- * hello_rom[] (compile-time constant), but reassigned at runtime to the
- * PSRAM mirror once PSRAM_Init() succeeds. RunCart32k runs from .ramfunc
- * (zero-wait-state SRAM) and reads `*cartpnt` on every SLTSL assertion; an
- * 8-bit load from flash has 1-2 wait states while the same load from PSRAM
- * is 0-wait at 160 MHz, so the PSRAM path is the fast one.
+ * Cartridge image pointer. Hard-wired to the zero-wait-state internal
+ * SRAM mirror of hello_rom[] at SRAM_ROM_BASE. The startup copy loop in
+ * startup_ch32v4x7.S already copies hello_rom[] from flash LMA to this
+ * SRAM VMA at reset, so the cart handler can read cartpnt directly with
+ * no setup needed by main().
  *
- * Declared `restrict` because RunCart32k is the only reader.
+ * An 8-bit load from flash has 1-2 wait states while the same load from
+ * internal SRAM is 0-wait at 200 MHz, so SRAM is the fastest possible
+ * source for the cart handler (PSRAM is also 0-wait but adds bus
+ * contention with other peripherals and requires an init step).
+ *
+ * Declared `restrict` because Cart_EXTI0_Handler is the only reader.
  */
-extern const uint8_t hello_rom[];
-uint8_t *restrict cartpnt = (uint8_t *)&hello_rom[0];
-
-/*
- * Active image source. Initialised to FLASH so the cart handler is
- * immediately usable even if Init_Cart() runs before PSRAM_Init().
- * The atomic-pointer-write guarantee on RV32C / ARM means a single
- * aligned 32-bit store is observed atomically by RunCart32k.
- */
-static volatile Cart_ImageSrc g_cart_image_src = CART_IMG_FLASH;
-
-/*
- * Whether RunCart32k should assert the MSX WAIT line around its read.
- * Updated atomically by Cart_SetImageSource() so the IRQ can branch on it
- * without any range-check or function call. Avoids the cost of testing
- * cartpnt against the PSRAM window on every SLTSL assertion.
- */
-static volatile uint32_t g_cart_wait_active = 0U;
+uint8_t *restrict cartpnt = (uint8_t *)SRAM_ROM_BASE;
 
 /*
  * ROM32k: a single 32 KiB page mapped at Z80 0x4000..0xBFFF.
@@ -122,69 +111,93 @@ void Init_Cart(void)
 }
 
 /*********************************************************************
- * @fn      Cart_SetImageSource
+ * @fn      Cart_GetImageBase
  *
- * @brief   Switch cartpnt to one of the supported image sources.
- *          Atomically updates both cartpnt (the data pointer the fast IRQ
- *          dereferences) and the g_cart_image_src tracking variable.
- *
- *          Unknown source values fall back to FLASH (safe default).
+ * @brief   Diagnostic accessor. Returns the (constant) base address of
+ *          the cart image, which is always SRAM_ROM_BASE. Useful for
+ *          boot-time logging from main().
  */
-void Cart_SetImageSource(Cart_ImageSrc src)
-{
-    switch (src) {
-    case CART_IMG_PSRAM:
-        cartpnt = (uint8_t *)PSRAM_BUS_BASE;
-        g_cart_image_src = CART_IMG_PSRAM;
-        g_cart_wait_active = 1U;     /* PSRAM needs WAIT stretching */
-        break;
-    case CART_IMG_SRAM:
-        /* SRAM mirror not implemented in this build. */
-        cartpnt = (uint8_t *)&hello_rom[0];
-        g_cart_image_src = CART_IMG_FLASH;
-        g_cart_wait_active = 0U;
-        break;
-    case CART_IMG_FLASH:
-    default:
-        cartpnt = (uint8_t *)&hello_rom[0];
-        g_cart_image_src = CART_IMG_FLASH;
-        g_cart_wait_active = 0U;     /* flash is fast enough, no WAIT */
-        break;
-    }
-}
-
-/*********************************************************************
- * @fn      Cart_GetImageSource / Cart_GetImageBase
- *
- * @brief   Read-back helpers. Useful from main() for boot-time logging
- *          and from runtime code that wants to know where the cart data
- *          is currently being served from.
- */
-Cart_ImageSrc Cart_GetImageSource(void)
-{
-    return g_cart_image_src;
-}
-
 uint32_t Cart_GetImageBase(void)
 {
     return (uint32_t)cartpnt;
 }
 
 /*********************************************************************
- * @fn      Cart_SetImageBase (legacy)
+ * @fn      ROM_Clear
  *
- * @brief   Re-point cartpnt at a raw address. Pass 0 to revert to flash;
- *          pass PSRAM_BUS_BASE for the PSRAM mirror. Kept for backwards
- *          compatibility with code that already has a base address handy.
- *          New code should prefer Cart_SetImageSource().
+ * @brief   Zero the cart ROM mirror in SRAM (32 KiB at SRAM_ROM_BASE).
+ *          Called once at boot before the cart IRQ is enabled, so the
+ *          MSX sees a deterministic 0xFF byte pattern on every cart
+ *          read until an XLOAD upload populates the mirror.
+ *
+ *          0xFF is the MSX "open bus" pattern for an unpopulated slot,
+ *          so a freshly-booted cart behaves like a missing cart to the
+ *          MSX's BIOS - the BIOS prints "NO CARTRIDGE" and the user
+ *          knows to upload a ROM via the CLI.
+ *
+ *          Word-sized writes (32 bits at a time) keep this to ~8K
+ *          store instructions = ~1 ms at 200 MHz.
  */
-void Cart_SetImageBase(uint32_t addr)
+void ROM_Clear(void)
 {
-    if (addr == (uint32_t)PSRAM_BUS_BASE) {
-        Cart_SetImageSource(CART_IMG_PSRAM);
-    } else {
-        Cart_SetImageSource(CART_IMG_FLASH);
+    volatile uint32_t *p = (volatile uint32_t *)SRAM_ROM_BASE;
+    const uint32_t words = CART_ROM_SIZE / 4U;
+    for (uint32_t i = 0; i < words; i++) {
+        p[i] = 0xFFFFFFFFU;
     }
+}
+
+/*********************************************************************
+ * @fn      Cart_AssertMSXReset
+ *
+ * @brief   Pulse the MSX ~RESET line (PE4) low for the requested number
+ *          of milliseconds, then release it back to floating input.
+ *
+ *          ~RESET on the MSX is active-low and must be held low for at
+ *          least one full machine cycle (typically a few microseconds)
+ *          to be recognised; 100 ms gives a clean cold-boot.
+ *
+ *          PE4 is normally a floating input (see Init_Cart); we briefly
+ *          reconfigure it as push-pull output low, busy-wait, then put
+ *          it back to floating.
+ *
+ *          Cart bus activity continues during the wait - the Z80 inside
+ *          the MSX resets, then the BIOS re-reads from our cart.
+ */
+void Cart_AssertMSXReset(uint32_t ms)
+{
+    /* Use the standard SDK GPIO helpers so the CFGLR / OUTDR register
+     * sequencing is guaranteed correct (no chance of writing OUTDR while
+     * the pin is still in analog/floating-input mode and having the
+     * write ignored). */
+
+    /* 1. Reconfigure PE4 as push-pull output, 50 MHz, initially high
+     *    (inactive). Driving high first avoids any glitch on the line
+     *    if it was previously being read as an input. */
+    GPIO_InitTypeDef io = {0};
+    io.GPIO_Pin   = GPIO_Pin_4;
+    io.GPIO_Mode  = GPIO_Mode_Out_PP;
+    io.GPIO_Speed = GPIO_Speed_High;   /* ~50 MHz slew */
+    GPIO_Init(GPIOE, &io);
+    GPIO_SetBits(GPIOE, GPIO_Pin_4);   /* deasserted (high) */
+
+    /* 2. Drive low to assert MSX reset. */
+    GPIO_ResetBits(GPIOE, GPIO_Pin_4);
+
+    /* 3. Crude busy-wait using SysTick ticks. We're inside the USART1
+     *    IRQ (priority 0x40), so the cart EXTI0 (priority 0) preempts
+     *    freely, but SysTick is one of the few timers we can use without
+     *    extra config. Delay_Ms uses SysTick. */
+    Delay_Ms(ms);
+
+    /* 4. Release the line - drive high then switch back to floating
+     *    input so the MSX's own reset circuit takes over. */
+    GPIO_SetBits(GPIOE, GPIO_Pin_4);
+
+    /* Switch PE4 back to floating input (the cart is no longer driving
+     * the MSX reset line). */
+    io.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    GPIO_Init(GPIOE, &io);
 }
 
 /*********************************************************************

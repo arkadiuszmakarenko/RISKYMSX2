@@ -38,6 +38,26 @@
 #define CART_WAIT_DRIVEN   0x7U    /* nibble for "assert low" */
 #define CART_WAIT_NIBBLE_SHIFT 16U /* PE3 is bits[19:16] of GPIOE->CFGLR */
 
+/* Cart ROM mirror in zero-wait-state internal SRAM. The startup copy
+ * loop in startup_ch32v4x7.S copies hello_rom[] from flash LMA to this
+ * SRAM VMA at reset, so cartpnt can read from it without any flash
+ * wait states. The address is exported by the linker as _cartrom_vma
+ * (see Ld/Link.ld CARTROM region). */
+extern uint32_t _cartrom_vma;
+#define SRAM_ROM_BASE ((uint32_t)&_cartrom_vma)
+
+/* Cart ROM size in bytes. Must match hello_rom[]. */
+#define CART_ROM_SIZE 32768U
+
+/* Helper accessor - matches the old Cart_GetImageBase() return type
+ * (cart image source address). Now always SRAM. */
+static inline uint32_t Cart_GetRomMirrorBase(void) { return SRAM_ROM_BASE; }
+
+/* Zero the SRAM cart mirror. Called from main() before the cart IRQ
+ * is enabled, so the MSX sees an open-bus (0xFF) pattern until a
+ * CLI XLOAD/LOAD command populates it. */
+void ROM_Clear(void);
+
 void Init_Cart(void);
 
 /* EXTI0 interrupt handler. Dispatched directly by the PFIC via the VTF
@@ -60,35 +80,13 @@ void Cart_EXTI0_Handler(void) __attribute__((section(".ramfunc"), noinline,
  * keeps the loop body intact and runs it from zero-wait-state SRAM. */
 void CartServiceLoop(void) __attribute__((section(".ramfunc"), noinline));
 
-/*
- * Cartridge image source. The cart handler reads through a single pointer
- * (cartpnt) on every SLTSL assertion; switching the source here swaps that
- * pointer between the flash-resident hello_rom[] and the PSRAM mirror.
- *
- * CART_IMG_FLASH  - cartpnt = &hello_rom[0] (always available, slow)
- * CART_IMG_PSRAM  - cartpnt = PSRAM_BUS_BASE  (only valid after PSRAM_Init)
- * CART_IMG_SRAM   - cartpnt = some SRAM mirror (not implemented yet)
- */
-typedef enum {
-    CART_IMG_FLASH = 0,
-    CART_IMG_PSRAM = 1,
-    CART_IMG_SRAM  = 2
-} Cart_ImageSrc;
-
-/* Switch the cartridge image source. Must be called from a non-interrupt
- * context; the fast IRQ (RunCart32k) reads cartpnt on every Z80 bus cycle
- * so the switch must be atomic w.r.t. that handler. On a 32-bit aligned
- * pointer store on Cortex-M / RV32C, this is naturally atomic. */
-void Cart_SetImageSource(Cart_ImageSrc src);
-
-/* Read the currently active image source. */
-Cart_ImageSrc Cart_GetImageSource(void);
-
-/* Get the base address of the active image (for diagnostics / logging). */
+/* Get the base address of the active image (for diagnostics / logging).
+ * Always returns PSRAM_BUS_BASE - the cart source is hard-wired to PSRAM
+ * and there is no runtime selector. */
 uint32_t Cart_GetImageBase(void);
 
-/* Legacy raw-pointer switch retained for backwards compatibility.
- * Pass 0 to revert to flash; pass PSRAM_BUS_BASE for the PSRAM mirror. */
-void Cart_SetImageBase(uint32_t addr);
+/* Pulse the MSX ~RESET line (PE4) low for `ms` milliseconds, then release.
+ * Used by the CLI's RST command. */
+void Cart_AssertMSXReset(uint32_t ms);
 
 #endif

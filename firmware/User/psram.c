@@ -30,8 +30,6 @@
 #include "debug.h"
 #include "string.h"
 
-extern const uint8_t hello_rom[PSRAM_ROM_SIZE];
-
 /* ---------- PSRAM device MR encodings (copied from PSRAM/PSRAM/User/PSRAM.h) */
 #define PSRAM_MR_ADDR_0          0x00U  /* read latency / operating range */
 #define PSRAM_MR_ADDR_4          0x04U  /* write latency / operating range */
@@ -142,25 +140,6 @@ static void psram_set_rd_latency(uint32_t mr0_freq, uint32_t latency,
     }
 }
 
-/* Mirror hello_rom[] (32 KiB) into PSRAM using 32-bit word copies then a
- * byte-for-byte verify (covers endian/swap bugs the word loop can't see). */
-static uint8_t psram_copy_rom(void)
-{
-    const uint32_t *src32 = (const uint32_t *)hello_rom;
-    volatile uint32_t *dst32 = (volatile uint32_t *)PSRAM_BUS_BASE;
-    uint32_t words = PSRAM_ROM_SIZE / 4U;
-
-    for (uint32_t i = 0; i < words; i++) {
-        dst32[i] = src32[i];
-    }
-    const uint8_t *src8 = hello_rom;
-    volatile uint8_t *dst8 = (volatile uint8_t *)PSRAM_BUS_BASE;
-    if (memcmp((const void *)src8, (const void *)dst8, PSRAM_ROM_SIZE) != 0) {
-        return PSRAM_ERR_ROM_MIRROR;
-    }
-    return PSRAM_OK;
-}
-
 /* Self-test: write/read a known pattern at `offset`, return PSRAM_OK on match.
  * On mismatch, prints a one-line diagnostic via printf so the UART log shows
  * which byte offset failed and what was actually read back. */
@@ -184,13 +163,6 @@ static uint8_t psram_test_at(uint32_t offset)
         }
     }
     return PSRAM_OK;
-}
-
-static uint32_t g_psram_mirror_base = 0U;
-
-uint32_t PSRAM_GetRomMirrorBase(void)
-{
-    return g_psram_mirror_base;
 }
 
 uint8_t PSRAM_Init(void)
@@ -281,16 +253,5 @@ uint8_t PSRAM_Init(void)
     err |= psram_test_at(0x000000U);
     if (err == PSRAM_OK) err |= psram_test_at(0x100000U);
     if (err == PSRAM_OK) err |= psram_test_at(0x400000U);
-    if (err != PSRAM_OK) {
-        return err;
-    }
-
-    /* 6. Mirror hello_rom[] into PSRAM and verify byte-for-byte. */
-    err = psram_copy_rom();
-    if (err != PSRAM_OK) {
-        return err;
-    }
-
-    g_psram_mirror_base = PSRAM_BUS_BASE;
-    return PSRAM_OK;
+    return err;
 }

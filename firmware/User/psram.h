@@ -1,18 +1,16 @@
 /********************************** (C) COPYRIGHT *******************************
  * File Name          : psram.h
- * Description        : PSRAM bring-up, self-test, and ROM-image mirror
- *                      for the RISKYMSX2 cartridge handler.
+ * Description        : PSRAM bring-up and self-test for RISKYMSX2.
  *
- *                      After PSRAM_Init() returns nonzero (PASS), the
- *                      32 KiB hello_rom[] image has been DMA-equivalent-copied
- *                      into PSRAM at PSRAM_BASE (0x80000000). The application
- *                      can then point cartpnt at PSRAM_BASE for zero-wait-state
- *                      read access from the .ramfunc cartridge handler.
- *
- *                      The self-test uses a deterministic 1 KiB pattern and
- *                      runs CPU-side read/write checks at three PSRAM offsets
- *                      (start, mid, end-of-mapped-bank) before declaring the
- *                      chip healthy.
+ *                      The cart handler no longer reads from PSRAM - the
+ *                      cart image is mirrored into zero-wait-state
+ *                      internal SRAM at boot by the startup copy loop in
+ *                      startup_ch32v4x7.S (see Ld/Link.ld CARTROM
+ *                      region). PSRAM is left as a diagnostic peripheral:
+ *                      PSRAM_Init() initialises the FSMC/PSRAM controller
+ *                      and runs a multi-offset read/write self-test, then
+ *                      returns PSRAM_OK or a failure bitmask. main() may
+ *                      choose to call it (or not).
  *********************************************************************************/
 
 #ifndef __PSRAM_H
@@ -29,9 +27,6 @@
  * for the external memory bus address. */
 #define PSRAM_BUS_BASE   0x80000000UL
 
-/* Cart ROM size we mirror into PSRAM. Must match hello_rom[]. */
-#define PSRAM_ROM_SIZE   32768U
-
 /* Self-test pattern size. 1 KiB is enough to exercise multi-row addressing
  * on a 32 Mbit PSRAM (4 KiB page per row x 1024 rows). */
 #define PSRAM_TEST_SIZE  1024U
@@ -43,12 +38,10 @@
 #define PSRAM_ERR_INIT          0x02U /* Peripheral init register write rejected */
 #define PSRAM_ERR_TEST_PATTERN  0x04U /* Wrote pattern, readback mismatch */
 #define PSRAM_ERR_TEST_OFFSETS  0x08U /* Multi-offset test mismatch */
-#define PSRAM_ERR_ROM_MIRROR    0x10U /* hello_rom -> PSRAM copy mismatch */
 #define PSRAM_ERR_HCLK_TOO_HIGH 0x20U /* HCLK above what this PSRAM device supports */
 
-/* Public entry points. */
-uint8_t PSRAM_Init(void);                /* Init + self-test. Returns PSRAM_OK on success. */
-uint32_t PSRAM_GetRomMirrorBase(void);   /* 0x80000000 once Init has succeeded. */
+/* Public entry point. */
+uint8_t PSRAM_Init(void);  /* Init + self-test. Returns PSRAM_OK on success. */
 
 #ifdef __cplusplus
 }
