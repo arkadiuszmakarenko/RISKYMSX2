@@ -35,7 +35,8 @@ User/main.o: ../User/main.c \
  /home/makaron/Repo/RISKYMSX2/firmware/Peripheral/inc/ch32v4x7_usart.h \
  /home/makaron/Repo/RISKYMSX2/firmware/Peripheral/inc/ch32v4x7_wwdg.h \
  /home/makaron/Repo/RISKYMSX2/firmware/Peripheral/inc/ch32v4x7_usb.h \
- /home/makaron/Repo/RISKYMSX2/firmware/User/ch32v4x7_it.h ../User/cart.h
+ /home/makaron/Repo/RISKYMSX2/firmware/User/ch32v4x7_it.h ../User/cart.h \
+ ../User/psram.h
 /home/makaron/Repo/RISKYMSX2/firmware/Debug/debug.h:
 /home/makaron/Repo/RISKYMSX2/firmware/Peripheral/inc/ch32v4x7.h:
 /home/makaron/Repo/RISKYMSX2/firmware/Core/core_riscv.h:
@@ -74,3 +75,4 @@ User/main.o: ../User/main.c \
 /home/makaron/Repo/RISKYMSX2/firmware/Peripheral/inc/ch32v4x7_usb.h:
 /home/makaron/Repo/RISKYMSX2/firmware/User/ch32v4x7_it.h:
 ../User/cart.h:
+../User/psram.h:

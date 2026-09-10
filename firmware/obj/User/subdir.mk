@@ -9,6 +9,7 @@ C_SRCS += \
 ../User/ch32v4x7_it.c \
 ../User/hello_rom.c \
 ../User/main.c \
+../User/psram.c \
 ../User/system_ch32v4x7.c 
 
 C_DEPS += \
@@ -16,6 +17,7 @@ C_DEPS += \
 ./User/ch32v4x7_it.d \
 ./User/hello_rom.d \
 ./User/main.d \
+./User/psram.d \
 ./User/system_ch32v4x7.d 
 
 OBJS += \
@@ -23,6 +25,7 @@ OBJS += \
 ./User/ch32v4x7_it.o \
 ./User/hello_rom.o \
 ./User/main.o \
+./User/psram.o \
 ./User/system_ch32v4x7.o 
 
 DIR_OBJS += \

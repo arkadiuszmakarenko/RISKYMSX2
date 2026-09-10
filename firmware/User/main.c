@@ -20,6 +20,7 @@
 
 #include "debug.h"
 #include "cart.h"
+#include "psram.h"
 
 /* Global typedef */
 
@@ -45,8 +46,17 @@ int main (void) {
 
     /* Start MSX cartridge emulation (ROM32k hello ROM on slot-select). */
     Init_Cart();
-    printf ("Cart init done\r\n");
 
-    while (1) {
-    }
+    /* Bring up PSRAM and mirror hello_rom[32768] into it at PSRAM_BUS_BASE.
+     * Always use the PSRAM mirror - no flash fallback, no comparison. */
+    PSRAM_Init();
+    Cart_SetImageSource(CART_IMG_PSRAM);
+    printf ("PSRAM: mirror=0x%08x, cart reads from PSRAM\r\n",
+            (unsigned)PSRAM_GetRomMirrorBase());
+
+    /* MSX reset is no longer controlled by the cart - Init_Cart() leaves PE4
+     * floating so the MSX's own reset circuit handles it. The MSX boots
+     * on its own and runs the cart handler whenever ~SLTSL falls. */
+
+    CartServiceLoop();
 }
