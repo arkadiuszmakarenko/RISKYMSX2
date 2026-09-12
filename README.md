@@ -1,3 +1,4 @@
+
 # RISKYMSX2
 
 The RISKYMSX2 cartridge PROTOTYPE by Arek Makarenko is a compact MSX flash ROM cartridge based on the inexpensive CH32V467VCT6 RISC-V MCU which can be easily programmed from a MSX computer using a FAT formatted USB pen drive containing ROM files.
@@ -6,6 +7,7 @@ This chip is 200Mhz with 8MB PSRAM onboard, USB HS, and I will be figting to mee
 DO NOT BUILD AT THIS STAGE unless you can create own firmware!
 
 
+<<<<<<< HEAD
 Piout ChatGPT
 U1 CONNECTIONS
 KiCad 10 schematic: RISKYMSX2.kicad_sch
@@ -120,3 +122,6 @@ Notes:
 - X1 = the crystal connected to U1 pins 12 and 13.
 
 Important: In this schematic U1 pin 34 (PC5) is NC; A0 is U1 pin 81 (PD0).
+=======
+<img width="1167" height="826" alt="Screenshot from 2026-08-22 15-25-02" src="https://github.com/user-attachments/assets/4b711d65-d632-4d83-b889-175446aa83a0" />
+>>>>>>> 920e6b2be6f260394af7e6f48916e51129308a6d
