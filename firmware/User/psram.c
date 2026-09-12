@@ -25,44 +25,67 @@
  *********************************************************************************/
 
 #include "psram.h"
+#include "cart.h"
 #include "ch32v4x7.h"
 #include "ch32v4x7_psram.h"
 #include "debug.h"
-#include "string.h"
+#include <string.h>
+
+/* Cart image from hello_rom.c. Declared with an INCOMPLETE array type
+ * and a separate length symbol: the definition is a 1-byte placeholder
+ * (no embedded ROM), and taking sizeof() on a 32768-declared extern
+ * would always report 32768 - the placeholder branch would be dead
+ * code and the full-32K copy would read past the 1-byte object in
+ * flash. Use hello_rom_len to decide which path to take. */
+extern const uint8_t  hello_rom[];
+extern const uint32_t hello_rom_len;
 
 /* ---------- PSRAM device MR encodings (copied from PSRAM/PSRAM/User/PSRAM.h) */
 #define PSRAM_MR_ADDR_0          0x00U  /* read latency / operating range */
 #define PSRAM_MR_ADDR_4          0x04U  /* write latency / operating range */
 #define PSRAM_MR_ADDR_8          0x08U  /* Hfreq_En / variable-latency enable */
 
-/* MR0 read-operating-range codes (3 bits, encoded in MR0[4:2]). */
-#define MR0_READ_166M            ((uint32_t)0x3)
-#define MR0_READ_200M            ((uint32_t)0x4)
-#define MR0_READ_250M            ((uint32_t)0x6)
-#define MR0_READ_300M            ((uint32_t)0x7)
-
-/* MR4 write-operating-range codes (3 bits, encoded in MR4[7:5]). */
-#define MR4_WRITE_166M           ((uint32_t)0x6)
-#define MR4_WRITE_200M           ((uint32_t)0x1)
-#define MR4_WRITE_250M           ((uint32_t)0x3)
-#define MR4_WRITE_300M           ((uint32_t)0x7)
-
-/* Variable-latency vs fixed-latency selection (MR0[5]). */
+/* Variable-latency vs fixed-latency read mode (MR0[5]). */
 #define READ_LATENCY_VARIABLE    ((uint32_t)0x0)
-#define READ_LATENCY_FIXED       ((uint32_t)0x1)
 
-/* Latency in clocks (MR0[2:0]). */
-#define LATENCY_166M             ((uint32_t)0x6)
-#define LATENCY_200M             ((uint32_t)0x7)
-#define LATENCY_250M             ((uint32_t)0x9)
-#define LATENCY_300M             ((uint32_t)0xb)
-
-/* Hfreq_En - enables the high-frequency path in the device, used at >=333 MHz. */
+/* Hfreq_En - enables the device's high-frequency IO path. REQUIRED for the
+ * 333M/400M operating-range codes: those code values alias with the 66M/109M
+ * bands, and it is the MR8 Hfreq bit that tells the device which table to
+ * decode them from. Writing a 400M code without Hfreq_En leaves the device
+ * configured for the 109M band - the IO compensation runs low-frequency
+ * mode while 400 MHz DDR arrives, and reads corrupt intermittently. */
 #define HFREQ_EN                 ((uint32_t)0x01)
 
-/* Latency for the peripheral's PSRAM->LATENCY register (the AHB bridge
- * wait-states). Match the device MR0 latency we're programming. */
-#define PERIPH_LATENCY_200M      LATENCY_200M
+/* Operating-range band table. The PSRAM device is clocked at 2x HCLK
+ * (dual-edge / DDR: the WCH "PSRAM_300MHz_HSE" reference runs HCLK 150 MHz
+ * with the 300M codes), so the band must be selected by the DEVICE clock,
+ * not HCLK. Codes and the peripheral-LATENCY pairing are copied verbatim
+ * from PSRAM/PSRAM/User/PSRAM.h (MR0 codes <<2, MR4 codes <<5):
+ *
+ *   device MHz top | MR0 read | MR4 write | periph LATENCY | Hfreq
+ *   ---------------+----------+-----------+----------------+------
+ *   66 / 109 / 133 / 166 / 200 / 225 / 250 / 300   (Hfreq = 0)
+ *   333 / 400                                     (Hfreq = 1)  */
+typedef struct {
+    uint32_t dev_mhz_max;      /* highest device clock this band covers */
+    uint32_t mr0_read;         /* MR0[4:2] read operating-range code     */
+    uint32_t mr4_write;        /* MR4[7:5] write operating-range code    */
+    uint32_t periph_latency;   /* PSRAM->LATENCY value paired w/ band     */
+    uint8_t  hfreq;            /* MR8 Hfreq_En required for this band     */
+} Psram_Band;
+
+static const Psram_Band psram_bands[] = {
+    {  66U, 0x0U, 0x0U, 0x03U, 0U },  /* 66M           */
+    { 109U, 0x1U, 0x4U, 0x04U, 0U },  /* 109M          */
+    { 133U, 0x2U, 0x2U, 0x05U, 0U },  /* 133M          */
+    { 166U, 0x3U, 0x6U, 0x06U, 0U },  /* 166M          */
+    { 200U, 0x4U, 0x1U, 0x07U, 0U },  /* 200M          */
+    { 225U, 0x5U, 0x5U, 0x08U, 0U },  /* 225M          */
+    { 250U, 0x6U, 0x3U, 0x09U, 0U },  /* 250M          */
+    { 300U, 0x7U, 0x7U, 0x0BU, 0U },  /* 300M (WCH ref) */
+    { 333U, 0x0U, 0x0U, 0x0CU, 1U },  /* 333M + Hfreq  */
+    { 400U, 0x1U, 0x4U, 0x10U, 1U },  /* 400M + Hfreq  */
+};
 
 /* ---------- PSRAM peripheral primitives (mirror WCH reference) */
 #define PSRAM_CMD_MR_RESET       ((PSRAM->CMD1_CFG >> 16) & 0xFFU)
@@ -98,18 +121,18 @@ static void psram_write_reg(uint32_t addr, uint16_t data)
 }
 
 /* Replicate of WCH SetWrLatency(). Writes MR4 with the write-operating-
- * range code and the peripheral LATENCY register with the latency. */
-static void psram_set_wr_latency(uint32_t mr4_freq, uint32_t latency)
+ * range code and the peripheral LATENCY register with the band-paired
+ * latency. The hfreq flag selects the 333M/400M bands: those code values
+ * must be paired with the MR8 Hfreq_En bit, otherwise the device decodes
+ * them as the 66M/109M bands (see the HFREQ_EN comment above). */
+static void psram_set_wr_latency(uint32_t mr4_freq, uint32_t latency,
+                                 uint8_t hfreq)
 {
     psram_write_reg(PSRAM_MR_ADDR_4, (uint16_t)(mr4_freq << 5));
     PSRAMSetWrLatency(latency);
     psram_wait_busy();
 
-    /* For >= 333 MHz parts the WCH reference enables the Hfreq path in MR8.
-     * We run at <= 200 MHz so we don't need it, but keeping the structure
-     * makes the diff against the reference obvious. */
-    if ((mr4_freq == 0x0U) /* MR4_Write_333M */
-     || (mr4_freq == 0x4U) /* MR4_Write_400M */) {
+    if (hfreq) {
         psram_write_reg(PSRAM_MR_ADDR_8, (uint16_t)(HFREQ_EN << 5));
     }
 }
@@ -126,7 +149,7 @@ static void psram_set_wr_latency(uint32_t mr4_freq, uint32_t latency)
  * HCLK. The WCH reference's `SetRdLatency()` only writes (freq<<2); we do
  * the same. */
 static void psram_set_rd_latency(uint32_t mr0_freq, uint32_t latency,
-                                 uint32_t latency_type)
+                                 uint32_t latency_type, uint8_t hfreq)
 {
     (void)latency_type;
 
@@ -134,10 +157,59 @@ static void psram_set_rd_latency(uint32_t mr0_freq, uint32_t latency,
     PSRAMSetRdLatency(latency);
     psram_wait_busy();
 
-    if ((mr0_freq == 0x0U) /* MR0_Read_333M */
-     || (mr0_freq == 0x1U) /* MR0_Read_400M */) {
+    if (hfreq) {
         psram_write_reg(PSRAM_MR_ADDR_8, (uint16_t)(HFREQ_EN << 5));
     }
+}
+
+/* Mirror hello_rom[] (32 KiB) into PSRAM using 32-bit word copies then a
+ * byte-for-byte verify (covers endian/swap bugs the word loop can't see).
+ * After the ROM mirror, fill the rest of the cart image window with
+ * 0xFF (the MSX "open bus" pattern) so uninitialised bank regions read
+ * deterministically. The total cart window is PSRAM_CART_SIZE (8 MiB)
+ * defined in cart.h; this function knows about it but the low-level
+ * PSRAM self-test does not. */
+static uint8_t psram_copy_rom(void)
+{
+    /* If hello_rom is the placeholder, fill PSRAM with 0xFF (the MSX
+     * "open bus" pattern for an unpopulated slot) so the cart handler
+     * returns a deterministic, non-garbage value before any XLOAD upload.
+     * The placeholder signals "no embedded ROM" so the CLI is the only
+     * way to populate the cart. Decide via hello_rom_len, NOT sizeof -
+     * see the extern declaration at the top of this file. */
+    if (hello_rom_len < PSRAM_ROM_SIZE) {
+        printf ("PSRAM: hello_rom is placeholder (%u bytes); "
+                "filling PSRAM with 0xFF.\r\n",
+                (unsigned)hello_rom_len);
+        volatile uint32_t *dst32 = (volatile uint32_t *)PSRAM_BUS_BASE;
+        uint32_t words = PSRAM_CART_SIZE / 4U;
+        for (uint32_t i = 0; i < words; i++) dst32[i] = 0xFFFFFFFFU;
+        return PSRAM_OK;
+    }
+
+    const uint32_t *src32 = (const uint32_t *)hello_rom;
+    volatile uint32_t *dst32 = (volatile uint32_t *)PSRAM_BUS_BASE;
+    uint32_t words = PSRAM_ROM_SIZE / 4U;
+
+    for (uint32_t i = 0; i < words; i++) {
+        dst32[i] = src32[i];
+    }
+    const uint8_t *src8 = hello_rom;
+    volatile uint8_t *dst8 = (volatile uint8_t *)PSRAM_BUS_BASE;
+    if (memcmp((const void *)src8, (const void *)dst8, PSRAM_ROM_SIZE) != 0) {
+        return PSRAM_ERR_ROM_MIRROR;
+    }
+
+    /* Fill the rest of the cart window (above the embedded ROM) with
+     * 0xFF. Bank-switching mappers can map up to 1 MiB; the remainder
+     * is unused but must read 0xFF, not random PSRAM cell state, so
+     * that any accidental read returns the open-bus pattern. */
+    if (PSRAM_CART_SIZE > PSRAM_ROM_SIZE) {
+        volatile uint32_t *fill = (volatile uint32_t *)(PSRAM_BUS_BASE + PSRAM_ROM_SIZE);
+        uint32_t fill_words = (PSRAM_CART_SIZE - PSRAM_ROM_SIZE) / 4U;
+        for (uint32_t i = 0; i < fill_words; i++) fill[i] = 0xFFFFFFFFU;
+    }
+    return PSRAM_OK;
 }
 
 /* Self-test: write/read a known pattern at `offset`, return PSRAM_OK on match.
@@ -165,17 +237,26 @@ static uint8_t psram_test_at(uint32_t offset)
     return PSRAM_OK;
 }
 
+static uint32_t g_psram_mirror_base = 0U;
+
+uint32_t PSRAM_GetRomMirrorBase(void)
+{
+    return g_psram_mirror_base;
+}
+
 uint8_t PSRAM_Init(void)
 {
     PSRAMInitTypeDef       psram_init_struct = {0};
     PSRAMTimingInitTypeDef psram_timing      = {0};
 
-    /* 0. HCLK ceiling. The PSRAM device clock is derived from HCLK/2.
-     *    Most Octal PSRAMs top out at 133-200 MHz device clock. Empirically
-     *    the WCH reference design works up to 200 MHz HCLK (=100 MHz device
-     *    clock); above that, the device's data-valid window narrows below
-     *    what the CH32V4x7 PSRAM controller can reliably sample. Bail out
-     *    cleanly so the cart handler falls back to the flash image. */
+    /* 0. HCLK ceiling. The PSRAM device is driven by the HB-bus clock, and
+     *    HCLK is the core clock on this chip (SystemCoreClockUpdate:
+     *    HCLKClock = SystemCoreClock), so core speed and PSRAM speed are
+     *    the same knob - there is no independent PSRAM divider. The device
+     *    clock is 2x HCLK (dual-edge) and the MR operating-range table tops
+     *    out at the 400M band, so above 200 MHz HCLK there is no valid band
+     *    to program (at 240 MHz reads return the 0xA0 corruption pattern).
+     *    Bail out cleanly so the cart handler falls back to the flash image. */
     if (SystemCoreClock > 200000000U) {
         return PSRAM_ERR_HCLK_TOO_HIGH;
     }
@@ -188,25 +269,30 @@ uint8_t PSRAM_Init(void)
      *    Note: PSRAM_EXIT_LPMD is left at 0 (matches WCH reference); the
      *    mode-register writes below wake the device from low-power mode.
      *
-     *    The WCH-recommended tRC/tCPH/tXLPD values (0x14/0x0C/0x07) are
-     *    expressed in AHB clock cycles and only meet the PSRAM device's
-     *    timing at <=120 MHz HCLK. At 175/200/240 MHz the read-write cycle
-     *    time shrinks below the device spec and reads return corrupted data.
-     *    Scale tRC and tCPH to keep at least 125 ns of read-write cycle
-     *    time and 60 ns of CS-high pulse width regardless of HCLK; tXLPD is
-     *    device-internal and stays at the fixed WCH-recommended value.
+     *    UNITS GOTCHA (200 MHz instability, root cause #2): RM 34.2.1.2 says
+     *    TRC/TCPH count PSRAM clock periods, and the PSRAM clock is 2x HCLK
+     *    (dual-edge device). The old code computed the cycle counts from
+     *    HCLK, halving every enforced interval: at HCLK 200, TCPH=12
+     *    delivered only 30 ns of CE#-high time, below the 32 ns minimum
+     *    from the RM's own example ("333 MHz -> minimum 12 for 32 ns").
+ *    HCLK 175 delivered 34 ns and worked; HCLK 200 delivered 30 ns and
+     *    corrupted intermittently. Compute from the DEVICE clock instead.
      *
-     *    Formula: cycles = ceil(ns * HCLK_hz / 1e9), with extra headroom for
-     *    board-level skew on long-cycle PSRAM parts. */
+     *    Targets: tRC 150 ns (RM floor is 60 ns; keep the conservative
+     *    margin - it only costs boot-time copies, the Z80 hot path does
+     *    one isolated read per ~1 us cycle and is not tRC-bound), and tCPH
+     *    40 ns (RM floor 32 ns; matches the WCH default 0x0C at a 300 MHz
+     *    device clock = 40 ns). tXLPD is device-internal (HSI units) and
+     *    stays at the fixed WCH-recommended value.
+     *
+     *    NOTE: must use 64-bit math. This target is RV32 (ilp32), so
+     *    `unsigned long` is only 32 bits; `150UL * 400_000_000UL` would
+     *    overflow silently and yield garbage. */
     {
-        uint32_t hclk_hz = SystemCoreClock;     /* already updated in main() */
-        /* 150 ns minimum tRC, rounded up to next cycle.
-         * NOTE: must use 64-bit math. This target is RV32 (ilp32), so
-         * `unsigned long` is only 32 bits; `150UL * 175_000_000UL` would
-         * overflow silently and yield garbage. */
-        uint64_t hclk64 = (uint64_t)hclk_hz;
-        uint32_t trc_cycles  = (uint32_t)(((150ULL * hclk64) + 999999999ULL) / 1000000000ULL);
-        uint32_t tcph_cycles = (uint32_t)((( 60ULL * hclk64) + 999999999ULL) / 1000000000ULL);
+        uint32_t devclk_hz = SystemCoreClock * 2U;  /* PSRAM clock = 2x HCLK */
+        uint64_t dev64     = (uint64_t)devclk_hz;
+        uint32_t trc_cycles  = (uint32_t)(((150ULL * dev64) + 999999999ULL) / 1000000000ULL);
+        uint32_t tcph_cycles = (uint32_t)((( 40ULL * dev64) + 999999999ULL) / 1000000000ULL);
 
         /* Floor at WCH defaults so slow boards still work. */
         if (trc_cycles  < 0x14U)  trc_cycles  = 0x14U;
@@ -231,20 +317,51 @@ uint8_t PSRAM_Init(void)
     psram_global_reset();
     Delay_Ms(1);
 
-    /* 4. Program write/read latency. Use the 300 MHz timings from the WCH
-     *    reference; the PSRAM device auto-detects the actual incoming clock
-     *    and the WCH example successfully reads/writes at 150 MHz HCLK with
-     *    exactly this setting. Variable-latency read mode matches the WCH
-     *    reference. */
-    psram_set_wr_latency(MR4_WRITE_300M, LATENCY_300M);
-    psram_set_rd_latency(MR0_READ_300M, LATENCY_300M,
-                         READ_LATENCY_VARIABLE);
+    /* 4. Program the operating-range band that matches the actual DEVICE
+     *    clock (2x HCLK). 200 MHz instability, root cause #1: the old code
+     *    hardcoded the WCH reference's 300M codes, valid only up to a
+     *    300 MHz device clock. At HCLK 200 the device runs 400 MHz - 33%
+     *    past the selected band - and the MR8 Hfreq_En bit that the 400M
+     *    code requires was never set, so the device's IO/timing compensation
+     *    ran in low-frequency mode while 400 MHz DDR arrived (intermittent
+     *    corruption). HCLK 175 (350 MHz device) was 17% past the band and
+     *    only worked by silicon margin.
+     *
+     *    The peripheral LATENCY (AHB bridge wait-states) is paired with the
+     *    band exactly like the WCH reference (Latency_400M = 0x10 with the
+     *    400M band). Variable-latency read mode matches the reference. */
+    uint32_t dev_mhz = (SystemCoreClock * 2U) / 1000000U;
+    const Psram_Band *band = NULL;
+    for (uint32_t i = 0;
+         i < (uint32_t)(sizeof(psram_bands) / sizeof(psram_bands[0]));
+         i++) {
+        if (dev_mhz <= psram_bands[i].dev_mhz_max) {
+            band = &psram_bands[i];
+            break;
+        }
+    }
+    if (band == NULL) {
+        /* No MR band covers this device clock. Step 0 already rejects
+         * HCLK > 200 MHz, so this is defensive only. */
+        return PSRAM_ERR_HCLK_TOO_HIGH;
+    }
 
-    printf ("PSRAM diag: HCLK=%u trc=0x%02x tcph=0x%02x CTLR=0x%08x TIMING=0x%08x LATENCY=0x%08x STATUS=0x%08x\r\n",
+    psram_set_wr_latency (band->mr4_write, band->periph_latency,
+                          band->hfreq);
+    psram_set_rd_latency (band->mr0_read, band->periph_latency,
+                          READ_LATENCY_VARIABLE, band->hfreq);
+
+    printf ("PSRAM diag: HCLK=%u devclk=%uMHz band<=%uM hfreq=%u mr0=0x%x mr4=0x%x lat=0x%02x trc=0x%02x tcph=0x%02x TIMING=0x%08x LATENCY=0x%08x STATUS=0x%08x\r\n",
             (unsigned)SystemCoreClock,
+            (unsigned)dev_mhz,
+            (unsigned)band->dev_mhz_max,
+            (unsigned)band->hfreq,
+            (unsigned)band->mr0_read,
+            (unsigned)band->mr4_write,
+            (unsigned)band->periph_latency,
             (unsigned)psram_timing.PSRAM_trc,
             (unsigned)psram_timing.PSRAM_tcph,
-            (unsigned)PSRAM->CTLR, (unsigned)PSRAM->TIMING,
+            (unsigned)PSRAM->TIMING,
             (unsigned)PSRAM->LATENCY, (unsigned)PSRAM->STATUS);
 
     /* 5. Multi-offset self-test. Three addresses hit three different
@@ -253,5 +370,16 @@ uint8_t PSRAM_Init(void)
     err |= psram_test_at(0x000000U);
     if (err == PSRAM_OK) err |= psram_test_at(0x100000U);
     if (err == PSRAM_OK) err |= psram_test_at(0x400000U);
-    return err;
+    if (err != PSRAM_OK) {
+        return err;
+    }
+
+    /* 6. Mirror hello_rom[] into PSRAM and verify byte-for-byte. */
+    err = psram_copy_rom();
+    if (err != PSRAM_OK) {
+        return err;
+    }
+
+    g_psram_mirror_base = PSRAM_BUS_BASE;
+    return PSRAM_OK;
 }

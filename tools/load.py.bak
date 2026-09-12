@@ -1,40 +1,25 @@
 #!/usr/bin/env python3
 """
-load.py - upload a .bin / .rom file into the RISKYMSX2 PSRAM cart image
-window via the CLI XLOAD command, then optionally select a mapper.
+load.py - upload a .bin file into a RISKYMSX2 cart image window via the
+CLI XLOAD command.
 
-The cart image lives entirely in PSRAM (8 MiB at 0x80000000). The mapper
-that interprets Z80 reads is selected separately via `MAP <name>`:
+Two interchangeable 32 KiB windows back the cart bus:
+  sram  - internal zero-wait-state SRAM (default; works at any HCLK)
+  psram - external octal PSRAM @ 0x80000000 (needs PSRAM_Init() to have
+          passed on the cart)
 
-  ROM16k       16 KiB image mirrored at 0x4000 and 0x8000
-  ROM32k       32 KiB image at 0x4000..0xBFFF  (default)
-  ROM48k       48 KiB image at 0x4000..0xFFFF
-  KONAMI       Konami mapper, banks switch only at 0x6000/0x8000/0xA000
-  KONAMINOSCC  Konami mapper, any write to 0x4000..0xBFFF selects a bank
-  KONAMISCC    Konami-with-SCC mapper (KONAMINOSCC banks + SCC sound
-               chip: 0x9800..0x98FF is the SCC-I register window)
-  ASCII8k      ASCII 8k mapper
-  ASCII16k     ASCII 16k mapper
-  NEO8         NEO 8 mapper
-  NEO16        NEO 16 mapper
-  NONE         bus floats (no mapper; Z80 reads 0xFF)
+Pick with --src sram|psram. The script first sends `SRC <name>` so the
+cart switches its active EXTI0 handler + window (LOAD/XLOAD/DUMP all
+target the active window), then streams the binary, then optionally
+pulses MSX ~RESET so the MSX boots the new image.
 
 Usage:
-    # Upload a 32 KiB ROM and boot with the default mapper (ROM32k):
-    python3 load.py /dev/ttyACM0 game.rom
+    python3 load.py /dev/ttyACM0 firmware.bin [--src sram] [--addr 0]
+    python3 load.py Zaxxon.rom --src psram   # port auto-detected
 
-    # Upload a Konami-mapped ROM:
-    python3 load.py /dev/ttyACM0 nemesis.rom --map KONAMI
-
-    # Upload at a non-zero offset within the PSRAM window:
-    python3 load.py /dev/ttyACM0 manbow.rom --map ASCII16k --addr 0x10000
-
-    # Port auto-detected if omitted:
-    python3 load.py nemesis.rom --map KONAMI
-
-Protocol (USART1, 115200 8N1):
-    host ->  "MAP <name>\r\n"
-    cart -> "OK MAP <name> @ <hex>\r\n> "      (or ERR if PSRAM not ready)
+Protocol:
+    host ->  "SRC <sram|psram>\r\n"
+    cart -> "OK <name> @ <hexaddr>\r\n"      (or ERR if psram not ready)
     host ->  "XLOAD <addr> <len>\r\n"
     cart -> "READY\r\n"
     host ->  <len> raw bytes (no framing)
@@ -42,7 +27,7 @@ Protocol (USART1, 115200 8N1):
     host ->  "RST <ms>\r\n"   (only if --reset-ms > 0)
 
 After this command runs, the MSX is in reset for <ms> ms and then boots
-the newly-uploaded cart image under the requested mapper.
+the newly-uploaded cart image.
 """
 
 import argparse
@@ -51,12 +36,10 @@ import serial
 import sys
 import time
 
-# Mapper names accepted by the cart's MAP command. Kept in sync with
-# firmware/User/cart.h:Cart_MapperNames[].
-MAPPERS = ("NONE", "ROM16k", "ROM32k", "ROM48k", "KONAMI", "KONAMINOSCC",
-           "ASCII8k", "ASCII16k", "NEO8", "NEO16", "KONAMISCC")
-
 PROMPT = b"\r\n> "
+# The device emits "> " on a fresh line and "OK ...\r\n> " on success.
+# We drain to "\r\n> " (CRLF + "> ") so we never false-match the ">"
+# that starts the echoed command or the response line itself.
 
 def check_port_exclusive(path):
     """Refuse to run if another process has the port open.
@@ -78,11 +61,14 @@ def check_port_exclusive(path):
             capture_output=True, text=True, timeout=2.0,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
+        # lsof missing or stuck - skip the check, hope for the best.
         return
 
+    # lsof prints header + one line per (process, fd) holding the device.
+    # Our OWN process will appear too (we just opened it via Serial()).
     my_pid = os.getpid()
     holders = []
-    for line in out.stdout.splitlines()[1:]:
+    for line in out.stdout.splitlines()[1:]:  # skip "COMMAND PID ..."
         parts = line.split()
         if len(parts) >= 2:
             try:
@@ -115,8 +101,11 @@ def _line_starts_with(buf, token):
     data = bytes(buf)
     if len(data) > 512:
         data = data[-512:]
+    # Token at buffer start is always a line start.
     if data.startswith(token):
         return True
+    # Token preceded by CRLF (response line) or by "> " (response after
+    # the standing prompt) both count as a line start.
     needle1 = b"\r\n" + token
     needle2 = b"> " + token
     return (needle1 in data) or (needle2 in data)
@@ -144,19 +133,10 @@ def read_until(ser, token, timeout=10.0, echo=False):
 
 def wait_prompt_after(ser, buf, timeout=10.0, echo=True):
     """Ensure the trailing "\\r\\n> " prompt arrived after a response.
-
-    The WCH-Link USB-CDC bridge holds short responses (< USB-FS packet
-    boundary) in its TX FIFO and only flushes them when the OUT
-    endpoint sees new host->device traffic. If the response is just
-    "OK MAP ...\\r\\n> " (a few dozen bytes), the trailing "> " may sit
-    in the bridge until we send *something*. Probe with a tiny PING
-    after 200 ms of no data - the PING (a) is answered with "OK\\r\\n> "
-    which the device buffers behind our still-pending prompt, but its
-    outgoing bytes wake the bridge's OUT endpoint and force the flush. """
+    Returns True if the prompt is present (possibly after reading more)."""
     if PROMPT in bytes(buf)[-32:]:
         return True
     deadline = time.monotonic() + timeout
-    primed = False
     while time.monotonic() < deadline:
         if ser.in_waiting:
             chunk = ser.read(ser.in_waiting)
@@ -167,12 +147,6 @@ def wait_prompt_after(ser, buf, timeout=10.0, echo=True):
             if PROMPT in bytes(buf)[-32:]:
                 return True
         else:
-            if not primed:
-                poll_elapsed = timeout - (deadline - time.monotonic())
-                if poll_elapsed > 0.2:
-                    ser.write(b"PING\r\n")
-                    ser.flush()
-                    primed = True
             time.sleep(0.02)
     return False
 
@@ -224,7 +198,13 @@ def wait_for_prompt(ser, timeout=15.0):
     return False
 
 def auto_port():
-    """Pick the first USB-serial / CDC-ACM device."""
+    """Pick the first USB-serial / CDC-ACM device.
+
+    On the RISKYMSX2 setup, /dev/ttyACM0 is the WCH-Link debugger's
+    UART bridge channel which forwards the cart's USART1 traffic. The
+    udev 'product' attribute for it is also 'WCH-Link', so we don't try
+    to filter it out - it's what we want.
+    """
     import glob
     candidates = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
     if candidates:
@@ -232,32 +212,21 @@ def auto_port():
     return "/dev/ttyUSB0"
 
 def main():
-    ap = argparse.ArgumentParser(description="Upload .rom/.bin to RISKYMSX2 PSRAM cart window")
+    ap = argparse.ArgumentParser(description="Upload .bin to RISKYMSX2 cart image window")
     ap.add_argument("port", nargs="?",
                     help="serial port (auto-detected if omitted)")
-    ap.add_argument("file", help=".bin/.rom file to upload")
-    ap.add_argument("--map", choices=MAPPERS, default="ROM32k",
-                    help="cart mapper to select before upload (default ROM32k). "
-                         "KONAMI accepts bank writes at 0x6000/0x8000/0xA000 only; "
-                         "KONAMINOSCC accepts bank writes anywhere in 0x4000..0xBFFF; "
-                         "KONAMISCC = KONAMINOSCC banks + the SCC sound chip "
-                         "(writes to 0x9800..0x98FF go to the SCC emulator). "
-                         "Use 'NONE' to upload without activating any mapper.")
+    ap.add_argument("file", help=".bin file to upload")
+    ap.add_argument("--src", choices=["sram", "psram"], default="sram",
+                    help="cart image window to target (default sram)")
     ap.add_argument("--addr", type=lambda x: int(x, 0), default=0,
-                    help="window offset (hex or dec), default 0. Konami banks "
-                         "start at 0x4000, ASCII8k at 0x4000, ASCII16k at "
-                         "0x4000 (page 1) / 0x8000 (page 2), NEO at 0x4000.")
-    ap.add_argument("--no-map", action="store_true",
-                    help="skip MAP command (upload only, keep current mapper)")
-    ap.add_argument("--keep", action="store_true",
-                    help="do NOT pulse MSX reset after upload")
-    ap.add_argument("--reset-ms", type=int, default=100,
-                    help="pulse MSX ~RESET for this many ms after upload "
-                         "(default 100). Ignored if --keep is set.")
+                    help="window offset (hex or dec), default 0")
     ap.add_argument("--baud", type=int, default=115200,
                     help="serial baud (default 115200)")
     ap.add_argument("--chunk", type=int, default=4096,
                     help="write chunk size (default 4096 bytes)")
+    ap.add_argument("--reset-ms", type=int, default=100,
+                    help="pulse MSX ~RESET for this many ms after upload "
+                         "(default 100). Use 0 to skip reset.")
     args = ap.parse_args()
     if args.port is None:
         args.port = auto_port()
@@ -267,35 +236,42 @@ def main():
         data = f.read()
 
     size = len(data)
-    psram_window = 8 * 1024 * 1024  # 8 MiB
-    if args.addr >= psram_window or args.addr + size > psram_window:
-        sys.stderr.write(
-            f"file range 0x{args.addr:x}..0x{args.addr + size:x} "
-            f"exceeds PSRAM window ({psram_window} bytes)\n"
-        )
-        sys.exit(1)
-    print(f"uploading {size} bytes to PSRAM @ 0x{args.addr:x} via {args.port} @ {args.baud}")
+    if size > 32 * 1024:
+        sys.stderr.write(f"file is {size} bytes; cart mirror is 32K - truncating\n")
+        data = data[:32 * 1024]
+        size = len(data)
+    print(f"uploading {size} bytes to cart {args.src} window @ 0x{args.addr:x} via {args.port} @ {args.baud}")
 
     with serial.Serial(args.port, args.baud, timeout=2.0) as ser:
         ser.reset_input_buffer()
 
-        # Refuse to run if another process has the port open.
+        # Refuse to run if another process has the port open. Screen,
+        # minicom, or a second copy of this script would otherwise
+        # garble every byte the cart sends, producing the same
+        # "timeout waiting for prompt" / "device rejected XLOAD" errors
+        # as a real protocol bug. Tell the user clearly which other
+        # process is in the way.
         check_port_exclusive(args.port)
 
-        # Optional: wait for the prompt.
+        # Optional: wait for the prompt. We don't fail if we don't see it
+        # - the cart might already be booted and sitting at the prompt.
+        # The prompt-detect just gives us confidence the cart is alive.
         wait_for_prompt(ser, timeout=2.0)
+
+        # Drain anything pending (the cart echoes typed input).
         ser.reset_input_buffer()
 
-        # 1) Select the mapper (unless --no-map). The cart's MAP command
-        #    swaps the EXTI0 handler in the PFIC VTF slot atomically and
-        #    replies "OK MAP <name> @ <hex>". Any non-NONE mapper
-        #    requires PSRAM_Init() to have passed at boot; the cart
-        #    replies ERR otherwise - send_cmd exits on ERR.
-        if not args.no_map:
-            map_reply = send_cmd(ser, f"MAP {args.map}", "OK")
-            print(f"cart mapper: {map_reply.decode('ascii', 'replace').strip()}")
+        # Select the target window. The cart swaps its active EXTI0
+        # handler + window atomically (VTF register write) and replies
+        # "OK <name> @ <hexaddr>". `SRC PSRAM` is refused with ERR if
+        # PSRAM_Init() failed at boot - send_cmd exits on ERR so the
+        # user knows to use --src sram instead.
+        src_reply = send_cmd(ser, f"SRC {args.src.upper()}", "OK")
+        print(f"cart source: {src_reply.decode('ascii', 'replace').strip()}")
 
-        # 2) Send the XLOAD header and wait for READY.
+        # Send the XLOAD header and wait for the READY handshake. The
+        # prompt-drain in send_cmd guarantees the dispatcher is idle
+        # before these bytes go out, so nothing is dropped.
         ser.write(f"XLOAD {args.addr:x} {size:x}\r\n".encode())
         ser.flush()
         buf = read_until(ser, b"READY", timeout=5.0, echo=False)
@@ -304,12 +280,14 @@ def main():
             sys.exit(1)
         print("cart READY, streaming bytes...")
 
-        # 3) Stream the binary data.
+        # Stream the binary data. Use ser.write() which respects OS buffers
+        # and 32-byte USB-FS packet alignment on most adapters.
         sent = 0
         t0 = time.monotonic()
         for off in range(0, size, args.chunk):
             n = ser.write(data[off:off + args.chunk])
             sent += n
+            # Print progress every ~16 KiB.
             if (off // args.chunk) % 4 == 0:
                 pct = 100 * sent // size
                 print(f"  {pct:3d}% ({sent}/{size})")
@@ -319,9 +297,35 @@ def main():
         rate = sent / elapsed if elapsed > 0 else 0
         print(f"sent {sent} bytes in {elapsed:.2f}s ({rate/1024:.1f} KiB/s)")
 
-        # 4) Wait for OK. Send a PING if no bytes arrive within 200 ms -
-        #    the WCH-Link USB-CDC bridge holds short responses in its TX
-        #    FIFO and only flushes on OUT traffic.
+        # Wait for OK, then drain through the prompt so the dispatcher
+        # is provably idle before the optional RST command.
+        #
+        # Accept either "> OK\r\n" (newer build, prompt-before-OK to
+        # survive the WCH-Link's USB-CDC contention) or "OK\r\n> "
+        # (older build). Both are caught by the line-anchored matcher
+        # because OK is at a line start in both forms.
+        #
+        # USB-CDC bridge primer: on the FIRST XLOAD after a fresh
+        # serial open, the WCH-Link's IN endpoint (device->host) holds
+        # the short "<OK or > OK\r\n" response in its TX FIFO without
+        # generating a completion, because the response is shorter
+        # than a USB-FS packet boundary. The bridge only flushes
+        # either (a) when its buffer fills, or (b) when the OUT
+        # endpoint sees new host->device traffic.
+        #
+        # Symptom: the first --src psram run after opening the port
+        # hangs on the post-XLOAD wait, but --src sram works because
+        # the 4 KiB chunked writes during streaming generate enough
+        # OUT traffic to flush the bridge. A subsequent --src psram
+        # also works because the bridge's TX buffer is now warm.
+        #
+        # Fix: send a tiny probe (PING) as soon as the XLOAD payload
+        # is sent. The probe's bytes (a) are interpreted by the device
+        # as a new line command and answered with "OK\r\n> " (a few
+        # bytes), and (b) wake the bridge's OUT endpoint which causes
+        # it to flush the previously-buffered post-XLOAD response to
+        # the host. The script ignores the PING echo/response in the
+        # captured buffer; only the XLOAD OK matters.
         deadline = time.monotonic() + 10.0
         buf = bytearray()
         primed = False
@@ -333,6 +337,10 @@ def main():
                     if (b"> " in tail) or (PROMPT in tail):
                         break
             else:
+                # If we still haven't seen any bytes after 200 ms,
+                # prime the bridge by sending a PING. The device will
+                # respond with its own "OK\r\n> " which forces the
+                # WCH-Link to flush our buffer. Only prime once.
                 if not primed and len(buf) == 0:
                     poll_elapsed = 10.0 - (deadline - time.monotonic())
                     if poll_elapsed > 0.2:
@@ -345,6 +353,8 @@ def main():
             sys.exit(1)
         tail = bytes(buf)[-32:]
         if b"> " not in tail and PROMPT not in tail:
+            # Even with the priming, the trailing prompt didn't
+            # arrive. Drain a final time.
             if not wait_prompt_after(ser, buf, timeout=5.0, echo=False):
                 sys.stderr.write(
                     f"no prompt after upload OK - last 32 bytes: "
@@ -353,9 +363,10 @@ def main():
                 sys.exit(1)
         print("upload OK")
 
-        # 5) Optionally pulse MSX reset so it re-reads the cart slot
-        #    and boots the newly uploaded ROM.
-        if not args.keep:
+        # Optional: pulse MSX ~RESET so it re-reads the cart slot and
+        # boots the newly uploaded ROM. Default 100 ms; pass
+        # --reset-ms 0 to skip.
+        if args.reset_ms > 0:
             send_cmd(ser, f"RST {args.reset_ms}", "OK", echo=False)
             print(f"MSX reset pulsed for {args.reset_ms} ms")
 

@@ -1,0 +1,792 @@
+                                      1 ;--------------------------------------------------------
+                                      2 ; File Created by SDCC : free open source ANSI-C Compiler
+                                      3 ; Version 4.2.0 #13081 (Linux)
+                                      4 ;--------------------------------------------------------
+                                      5 	.module psramdiag
+                                      6 	.optsdcc -mz80
+                                      7 	
+                                      8 ;--------------------------------------------------------
+                                      9 ; Public variables in this module
+                                     10 ;--------------------------------------------------------
+                                     11 	.globl _main
+                                     12 ;--------------------------------------------------------
+                                     13 ; special function registers
+                                     14 ;--------------------------------------------------------
+                                     15 ;--------------------------------------------------------
+                                     16 ; ram data
+                                     17 ;--------------------------------------------------------
+                                     18 	.area _DATA
+                                     19 ;--------------------------------------------------------
+                                     20 ; ram data
+                                     21 ;--------------------------------------------------------
+                                     22 	.area _INITIALIZED
+                                     23 ;--------------------------------------------------------
+                                     24 ; absolute external ram data
+                                     25 ;--------------------------------------------------------
+                                     26 	.area _DABS (ABS)
+                                     27 ;--------------------------------------------------------
+                                     28 ; global & static initialisations
+                                     29 ;--------------------------------------------------------
+                                     30 	.area _HOME
+                                     31 	.area _GSINIT
+                                     32 	.area _GSFINAL
+                                     33 	.area _GSINIT
+                                     34 ;--------------------------------------------------------
+                                     35 ; Home
+                                     36 ;--------------------------------------------------------
+                                     37 	.area _HOME
+                                     38 	.area _HOME
+                                     39 ;--------------------------------------------------------
+                                     40 ; code
+                                     41 ;--------------------------------------------------------
+                                     42 	.area _CODE
+                                     43 ;psramdiag.c:70: static void chgmod(uint8_t mode) __z88dk_fastcall
+                                     44 ;	---------------------------------
+                                     45 ; Function chgmod
+                                     46 ; ---------------------------------
+      000000                         47 _chgmod:
+                                     48 ;psramdiag.c:84: __endasm;
+      000000 DD E5            [15]   49 	push	ix
+      000002 FD E5            [15]   50 	push	iy
+      000004 08               [ 4]   51 	ex	af, af'
+      000005 7D               [ 4]   52 	ld	a, l
+      000006 FD 21 C0 FC      [14]   53 	ld	iy, #0xFCC0 ; EXPTBL & 0xFF00: main-ROM slot
+      00000A DD 21 5F 00      [14]   54 	ld	ix, #0x005F ; CHGMOD
+      00000E CD 1C 00         [17]   55 	call	0x001C ; CALSLT
+      000011 08               [ 4]   56 	ex	af, af'
+      000012 FD E1            [14]   57 	pop	iy
+      000014 DD E1            [14]   58 	pop	ix
+                                     59 ;psramdiag.c:85: }
+      000016 C9               [10]   60 	ret
+                                     61 ;psramdiag.c:88: static void chput(char c) __z88dk_fastcall
+                                     62 ;	---------------------------------
+                                     63 ; Function chput
+                                     64 ; ---------------------------------
+      000017                         65 _chput:
+                                     66 ;psramdiag.c:102: __endasm;
+      000017 DD E5            [15]   67 	push	ix
+      000019 FD E5            [15]   68 	push	iy
+      00001B 08               [ 4]   69 	ex	af, af'
+      00001C 7D               [ 4]   70 	ld	a, l
+      00001D FD 21 C0 FC      [14]   71 	ld	iy, #0xFCC0
+      000021 DD 21 A2 00      [14]   72 	ld	ix, #0x00A2 ; CHPUT
+      000025 CD 1C 00         [17]   73 	call	0x001C ; CALSLT
+      000028 08               [ 4]   74 	ex	af, af'
+      000029 FD E1            [14]   75 	pop	iy
+      00002B DD E1            [14]   76 	pop	ix
+                                     77 ;psramdiag.c:103: }
+      00002D C9               [10]   78 	ret
+                                     79 ;psramdiag.c:116: static uint8_t key_scan_all(void) __naked
+                                     80 ;	---------------------------------
+                                     81 ; Function key_scan_all
+                                     82 ; ---------------------------------
+      00002E                         83 _key_scan_all:
+                                     84 ;psramdiag.c:145: __endasm;
+      00002E DD E5            [15]   85 	push	ix
+      000030 FD E5            [15]   86 	push	iy
+      000032 F3               [ 4]   87 	di	; no ISR interference while we
+                                     88 ;	hold the PSG address latch
+      000033 06 0A            [ 7]   89 	ld	b, #10 ; rows 0..9
+      000035 0E 00            [ 7]   90 	ld	c, #0 ; current row
+      000037                         91 	scan_row:
+      000037 C5               [11]   92 	push	bc
+      000038 79               [ 4]   93 	ld	a, c ; row number
+      000039 FD 21 C0 FC      [14]   94 	ld	iy, #0xFCC0
+      00003D DD 21 41 01      [14]   95 	ld	ix, #0x0141 ; SNSMAT
+      000041 CD 1C 00         [17]   96 	call	0x001C ; CALSLT -> A = row matrix
+      000044 C1               [10]   97 	pop	bc
+      000045 3C               [ 4]   98 	inc	a ; 0xFF (row idle) -> 0 sets Z
+      000046 28 07            [12]   99 	jr	z, row_idle
+      000048 FD E1            [14]  100 	pop	iy
+      00004A DD E1            [14]  101 	pop	ix
+      00004C 2E 01            [ 7]  102 	ld	l, #1 ; some key is down
+      00004E C9               [10]  103 	ret
+      00004F                        104 	row_idle:
+      00004F 0C               [ 4]  105 	inc	c
+      000050 10 E5            [13]  106 	djnz	scan_row
+      000052 FD E1            [14]  107 	pop	iy
+      000054 DD E1            [14]  108 	pop	ix
+      000056 2E 00            [ 7]  109 	ld	l, #0 ; nothing down
+      000058 C9               [10]  110 	ret
+                                    111 ;psramdiag.c:146: }
+                                    112 ;psramdiag.c:154: static void delay_ms(uint16_t ms) __z88dk_fastcall __naked
+                                    113 ;	---------------------------------
+                                    114 ; Function delay_ms
+                                    115 ; ---------------------------------
+      000059                        116 _delay_ms:
+                                    117 ;psramdiag.c:169: __endasm;
+      000059                        118 	dly_outer:
+      000059 01 8A 00         [10]  119 	ld	bc, #138
+      00005C                        120 	dly_inner:
+      00005C 0B               [ 6]  121 	dec	bc
+      00005D 78               [ 4]  122 	ld	a, b
+      00005E B1               [ 4]  123 	or	c
+      00005F 20 FB            [12]  124 	jr	nz, dly_inner
+      000061 2B               [ 6]  125 	dec	hl
+      000062 7C               [ 4]  126 	ld	a, h
+      000063 B5               [ 4]  127 	or	l
+      000064 20 F3            [12]  128 	jr	nz, dly_outer
+      000066 C9               [10]  129 	ret
+                                    130 ;psramdiag.c:170: }
+                                    131 ;psramdiag.c:177: static void wait_key(void)
+                                    132 ;	---------------------------------
+                                    133 ; Function wait_key
+                                    134 ; ---------------------------------
+      000067                        135 _wait_key:
+      000067                        136 00107$:
+                                    137 ;psramdiag.c:180: if (key_scan_all()) {
+      000067 CDr2Er00         [17]  138 	call	_key_scan_all
+      00006A B7               [ 4]  139 	or	a, a
+      00006B 28 13            [12]  140 	jr	Z, 00105$
+                                    141 ;psramdiag.c:181: delay_ms(30);		/* debounce */
+      00006D 21 1E 00         [10]  142 	ld	hl, #0x001e
+      000070 CDr59r00         [17]  143 	call	_delay_ms
+                                    144 ;psramdiag.c:182: while (key_scan_all())	/* wait for release */
+      000073                        145 00101$:
+      000073 CDr2Er00         [17]  146 	call	_key_scan_all
+      000076 B7               [ 4]  147 	or	a, a
+      000077 C8               [11]  148 	ret	Z
+                                    149 ;psramdiag.c:183: delay_ms(20);
+      000078 21 14 00         [10]  150 	ld	hl, #0x0014
+      00007B CDr59r00         [17]  151 	call	_delay_ms
+                                    152 ;psramdiag.c:184: return;
+      00007E 18 F3            [12]  153 	jr	00101$
+      000080                        154 00105$:
+                                    155 ;psramdiag.c:186: delay_ms(20);
+      000080 21 14 00         [10]  156 	ld	hl, #0x0014
+      000083 CDr59r00         [17]  157 	call	_delay_ms
+                                    158 ;psramdiag.c:188: }
+      000086 18 DF            [12]  159 	jr	00107$
+                                    160 ;psramdiag.c:192: static void gtstck(uint8_t stick) __z88dk_fastcall
+                                    161 ;	---------------------------------
+                                    162 ; Function gtstck
+                                    163 ; ---------------------------------
+      000088                        164 _gtstck:
+                                    165 ;psramdiag.c:206: __endasm;
+      000088 DD E5            [15]  166 	push	ix
+      00008A FD E5            [15]  167 	push	iy
+      00008C 08               [ 4]  168 	ex	af, af'
+      00008D 7D               [ 4]  169 	ld	a, l
+      00008E FD 21 C0 FC      [14]  170 	ld	iy, #0xFCC0
+      000092 DD 21 D5 00      [14]  171 	ld	ix, #0x00D5 ; GTSTCK
+      000096 CD 1C 00         [17]  172 	call	0x001C ; CALSLT
+      000099 08               [ 4]  173 	ex	af, af'
+      00009A FD E1            [14]  174 	pop	iy
+      00009C DD E1            [14]  175 	pop	ix
+                                    176 ;psramdiag.c:207: }
+      00009E C9               [10]  177 	ret
+                                    178 ;psramdiag.c:209: static void print(const char *s)
+                                    179 ;	---------------------------------
+                                    180 ; Function print
+                                    181 ; ---------------------------------
+      00009F                        182 _print:
+      00009F EB               [ 4]  183 	ex	de, hl
+                                    184 ;psramdiag.c:211: while (*s)
+      0000A0                        185 00101$:
+      0000A0 1A               [ 7]  186 	ld	a, (de)
+      0000A1 B7               [ 4]  187 	or	a, a
+      0000A2 C8               [11]  188 	ret	Z
+                                    189 ;psramdiag.c:212: chput(*s++);
+      0000A3 6F               [ 4]  190 	ld	l, a
+                                    191 ;	spillPairReg hl
+                                    192 ;	spillPairReg hl
+      0000A4 13               [ 6]  193 	inc	de
+      0000A5 D5               [11]  194 	push	de
+      0000A6 CDr17r00         [17]  195 	call	_chput
+      0000A9 D1               [10]  196 	pop	de
+                                    197 ;psramdiag.c:213: }
+      0000AA 18 F4            [12]  198 	jr	00101$
+                                    199 ;psramdiag.c:215: static void print_hex(uint8_t b)
+                                    200 ;	---------------------------------
+                                    201 ; Function print_hex
+                                    202 ; ---------------------------------
+      0000AC                        203 _print_hex:
+      0000AC 5F               [ 4]  204 	ld	e, a
+                                    205 ;psramdiag.c:218: chput(hex[(b >> 4) & 0x0F]);
+      0000AD 01rD0r00         [10]  206 	ld	bc, #_print_hex_hex_65536_19+0
+      0000B0 7B               [ 4]  207 	ld	a, e
+      0000B1 07               [ 4]  208 	rlca
+      0000B2 07               [ 4]  209 	rlca
+      0000B3 07               [ 4]  210 	rlca
+      0000B4 07               [ 4]  211 	rlca
+                                    212 ;	spillPairReg hl
+                                    213 ;	spillPairReg hl
+                                    214 ;	spillPairReg hl
+                                    215 ;	spillPairReg hl
+      0000B5 E6 0F            [ 7]  216 	and	a, #0xf
+      0000B7 6F               [ 4]  217 	ld	l, a
+                                    218 ;	spillPairReg hl
+                                    219 ;	spillPairReg hl
+      0000B8 26 00            [ 7]  220 	ld	h, #0x00
+                                    221 ;	spillPairReg hl
+                                    222 ;	spillPairReg hl
+      0000BA 09               [11]  223 	add	hl, bc
+      0000BB 6E               [ 7]  224 	ld	l, (hl)
+                                    225 ;	spillPairReg hl
+      0000BC C5               [11]  226 	push	bc
+      0000BD D5               [11]  227 	push	de
+      0000BE CDr17r00         [17]  228 	call	_chput
+      0000C1 D1               [10]  229 	pop	de
+      0000C2 C1               [10]  230 	pop	bc
+                                    231 ;psramdiag.c:219: chput(hex[b & 0x0F]);
+      0000C3 16 00            [ 7]  232 	ld	d, #0x00
+      0000C5 7B               [ 4]  233 	ld	a, e
+      0000C6 E6 0F            [ 7]  234 	and	a, #0x0f
+      0000C8 6F               [ 4]  235 	ld	l, a
+                                    236 ;	spillPairReg hl
+                                    237 ;	spillPairReg hl
+      0000C9 26 00            [ 7]  238 	ld	h, #0x00
+                                    239 ;	spillPairReg hl
+                                    240 ;	spillPairReg hl
+      0000CB 09               [11]  241 	add	hl, bc
+      0000CC 6E               [ 7]  242 	ld	l, (hl)
+                                    243 ;	spillPairReg hl
+                                    244 ;psramdiag.c:220: }
+      0000CD C3r17r00         [10]  245 	jp	_chput
+      0000D0                        246 _print_hex_hex_65536_19:
+      0000D0 30 31 32 33 34 35 36   247 	.ascii "0123456789ABCDEF"
+             37 38 39 41 42 43 44
+             45 46
+      0000E0 00                     248 	.db 0x00
+                                    249 ;psramdiag.c:231: static void phase1_fixed_reads(void) __naked
+                                    250 ;	---------------------------------
+                                    251 ; Function phase1_fixed_reads
+                                    252 ; ---------------------------------
+      0000E1                        253 _phase1_fixed_reads:
+                                    254 ;psramdiag.c:243: __endasm;
+      0000E1 01 A0 0F         [10]  255 	ld	bc, #0x0FA0 ; 4000U = 4000
+      0000E4 21 00 50         [10]  256 	ld	hl, #0x5000 ; 0x5000U
+      0000E7                        257 	ph1_loop:
+      0000E7 7E               [ 7]  258 	ld	a, (hl) ; the cart data read
+      0000E8 0B               [ 6]  259 	dec	bc
+      0000E9 78               [ 4]  260 	ld	a, b
+      0000EA B1               [ 4]  261 	or	c
+      0000EB C2rE7r00         [10]  262 	jp	nz, ph1_loop
+      0000EE C9               [10]  263 	ret
+                                    264 ;psramdiag.c:244: }
+                                    265 ;psramdiag.c:255: static void phase2_ldir_copy(void) __naked
+                                    266 ;	---------------------------------
+                                    267 ; Function phase2_ldir_copy
+                                    268 ; ---------------------------------
+      0000EF                        269 _phase2_ldir_copy:
+                                    270 ;psramdiag.c:263: __endasm;
+      0000EF 21 00 50         [10]  271 	ld	hl, #0x5000 ; src: walking pattern in cart
+      0000F2 11 00 D0         [10]  272 	ld	de, #0xD000 ; dst: MSX RAM
+      0000F5 01 00 01         [10]  273 	ld	bc, #0x0100 ; 256U
+      0000F8 ED B0            [21]  274 	ldir
+      0000FA C9               [10]  275 	ret
+                                    276 ;psramdiag.c:264: }
+                                    277 ;psramdiag.c:279: static void phase3_isolated_reads(void) __naked
+                                    278 ;	---------------------------------
+                                    279 ; Function phase3_isolated_reads
+                                    280 ; ---------------------------------
+      0000FB                        281 _phase3_isolated_reads:
+                                    282 ;psramdiag.c:300: __endasm;
+                                    283 ;	build the stub at 0xD100 (ld a,(hl) / djnz -3 / ret)
+      0000FB 21 00 D1         [10]  284 	ld	hl, #0xD100
+      0000FE 36 7E            [10]  285 	ld	(hl), #0x7E
+      000100 23               [ 6]  286 	inc	hl
+      000101 36 10            [10]  287 	ld	(hl), #0x10
+      000103 23               [ 6]  288 	inc	hl
+      000104 36 FD            [10]  289 	ld	(hl), #0xFD
+      000106 23               [ 6]  290 	inc	hl
+      000107 36 C9            [10]  291 	ld	(hl), #0xC9
+                                    292 ;	8 passes x 256 isolated reads @ 0x5040
+      000109 0E 08            [ 7]  293 	ld	c, #0x08 ; 8U
+      00010B                        294 	ph3_outer:
+      00010B 06 00            [ 7]  295 	ld	b, #0x00 ; djnz counts 256 reads
+      00010D 21 40 50         [10]  296 	ld	hl, #0x5040 ; 0x5040U
+      000110 CD 00 D1         [17]  297 	call	0xD100 ; run the RAM stub
+      000113 0D               [ 4]  298 	dec	c
+      000114 20 F5            [12]  299 	jr	nz, ph3_outer
+      000116 C9               [10]  300 	ret
+                                    301 ;psramdiag.c:301: }
+                                    302 ;psramdiag.c:310: static void phase4_integrity(void)
+                                    303 ;	---------------------------------
+                                    304 ; Function phase4_integrity
+                                    305 ; ---------------------------------
+      000117                        306 _phase4_integrity:
+      000117 CDr00r00         [17]  307 	call	___sdcc_enter_ix
+      00011A 3B               [ 6]  308 	dec	sp
+                                    309 ;psramdiag.c:313: uint8_t  bad = 0;
+      00011B DD 36 FF 00      [19]  310 	ld	-1 (ix), #0x00
+                                    311 ;psramdiag.c:315: print("PH4 integrity 0x5000-0x50FF ... ");
+      00011F 21r88r01         [10]  312 	ld	hl, #___str_1
+      000122 CDr9Fr00         [17]  313 	call	_print
+                                    314 ;psramdiag.c:316: for (off = 0; off < PATTERN_SIZE; off++) {
+      000125 01 00 00         [10]  315 	ld	bc, #0x0000
+      000128                        316 00106$:
+                                    317 ;psramdiag.c:317: uint8_t exp = (uint8_t)(off ^ 0xA5U);
+      000128 79               [ 4]  318 	ld	a, c
+      000129 EE A5            [ 7]  319 	xor	a, #0xa5
+      00012B 5F               [ 4]  320 	ld	e, a
+                                    321 ;psramdiag.c:318: uint8_t got = *(volatile uint8_t *)(uint16_t)(PATTERN_ADDR + off);
+      00012C 69               [ 4]  322 	ld	l, c
+                                    323 ;	spillPairReg hl
+                                    324 ;	spillPairReg hl
+                                    325 ;	spillPairReg hl
+                                    326 ;	spillPairReg hl
+      00012D 78               [ 4]  327 	ld	a, b
+      00012E C6 50            [ 7]  328 	add	a, #0x50
+      000130 67               [ 4]  329 	ld	h, a
+                                    330 ;	spillPairReg hl
+                                    331 ;	spillPairReg hl
+      000131 56               [ 7]  332 	ld	d, (hl)
+                                    333 ;psramdiag.c:319: if (got != exp) {
+      000132 7B               [ 4]  334 	ld	a, e
+      000133 92               [ 4]  335 	sub	a, d
+      000134 28 3C            [12]  336 	jr	Z, 00107$
+                                    337 ;psramdiag.c:320: bad = 1;
+      000136 DD 36 FF 01      [19]  338 	ld	-1 (ix), #0x01
+                                    339 ;psramdiag.c:321: print("\r\nBAD@");
+      00013A C5               [11]  340 	push	bc
+      00013B D5               [11]  341 	push	de
+      00013C 21rA9r01         [10]  342 	ld	hl, #___str_2
+      00013F CDr9Fr00         [17]  343 	call	_print
+      000142 D1               [10]  344 	pop	de
+      000143 C1               [10]  345 	pop	bc
+                                    346 ;psramdiag.c:322: print_hex((uint8_t)(off >> 8));
+      000144 68               [ 4]  347 	ld	l, b
+                                    348 ;	spillPairReg hl
+                                    349 ;	spillPairReg hl
+      000145 C5               [11]  350 	push	bc
+      000146 D5               [11]  351 	push	de
+      000147 7D               [ 4]  352 	ld	a, l
+      000148 CDrACr00         [17]  353 	call	_print_hex
+      00014B D1               [10]  354 	pop	de
+      00014C C1               [10]  355 	pop	bc
+                                    356 ;psramdiag.c:323: print_hex((uint8_t)off);
+      00014D 69               [ 4]  357 	ld	l, c
+                                    358 ;	spillPairReg hl
+                                    359 ;	spillPairReg hl
+      00014E C5               [11]  360 	push	bc
+      00014F D5               [11]  361 	push	de
+      000150 7D               [ 4]  362 	ld	a, l
+      000151 CDrACr00         [17]  363 	call	_print_hex
+      000154 21rB0r01         [10]  364 	ld	hl, #___str_3
+      000157 CDr9Fr00         [17]  365 	call	_print
+      00015A D1               [10]  366 	pop	de
+      00015B D5               [11]  367 	push	de
+      00015C 7A               [ 4]  368 	ld	a, d
+      00015D CDrACr00         [17]  369 	call	_print_hex
+      000160 21rB6r01         [10]  370 	ld	hl, #___str_4
+      000163 CDr9Fr00         [17]  371 	call	_print
+      000166 D1               [10]  372 	pop	de
+      000167 7B               [ 4]  373 	ld	a, e
+      000168 CDrACr00         [17]  374 	call	_print_hex
+      00016B 21rBCr01         [10]  375 	ld	hl, #___str_5
+      00016E CDr9Fr00         [17]  376 	call	_print
+      000171 C1               [10]  377 	pop	bc
+      000172                        378 00107$:
+                                    379 ;psramdiag.c:316: for (off = 0; off < PATTERN_SIZE; off++) {
+      000172 03               [ 6]  380 	inc	bc
+      000173 78               [ 4]  381 	ld	a, b
+      000174 D6 01            [ 7]  382 	sub	a, #0x01
+      000176 38 B0            [12]  383 	jr	C, 00106$
+                                    384 ;psramdiag.c:331: if (!bad)
+      000178 DD 7E FF         [19]  385 	ld	a, -1 (ix)
+      00017B B7               [ 4]  386 	or	a, a
+      00017C 20 06            [12]  387 	jr	NZ, 00108$
+                                    388 ;psramdiag.c:332: print("OK\r\n");
+      00017E 21rBFr01         [10]  389 	ld	hl, #___str_6
+      000181 CDr9Fr00         [17]  390 	call	_print
+      000184                        391 00108$:
+                                    392 ;psramdiag.c:333: }
+      000184 33               [ 6]  393 	inc	sp
+      000185 DD E1            [14]  394 	pop	ix
+      000187 C9               [10]  395 	ret
+      000188                        396 ___str_1:
+      000188 50 48 34 20 69 6E 74   397 	.ascii "PH4 integrity 0x5000-0x50FF ... "
+             65 67 72 69 74 79 20
+             30 78 35 30 30 30 2D
+             30 78 35 30 46 46 20
+             2E 2E 2E 20
+      0001A8 00                     398 	.db 0x00
+      0001A9                        399 ___str_2:
+      0001A9 0D                     400 	.db 0x0d
+      0001AA 0A                     401 	.db 0x0a
+      0001AB 42 41 44 40            402 	.ascii "BAD@"
+      0001AF 00                     403 	.db 0x00
+      0001B0                        404 ___str_3:
+      0001B0 20 67 6F 74 3D         405 	.ascii " got="
+      0001B5 00                     406 	.db 0x00
+      0001B6                        407 ___str_4:
+      0001B6 20 65 78 70 3D         408 	.ascii " exp="
+      0001BB 00                     409 	.db 0x00
+      0001BC                        410 ___str_5:
+      0001BC 0D                     411 	.db 0x0d
+      0001BD 0A                     412 	.db 0x0a
+      0001BE 00                     413 	.db 0x00
+      0001BF                        414 ___str_6:
+      0001BF 4F 4B                  415 	.ascii "OK"
+      0001C1 0D                     416 	.db 0x0d
+      0001C2 0A                     417 	.db 0x0a
+      0001C3 00                     418 	.db 0x00
+                                    419 ;psramdiag.c:345: static void phase5_turnaround(void)
+                                    420 ;	---------------------------------
+                                    421 ; Function phase5_turnaround
+                                    422 ; ---------------------------------
+      0001C4                        423 _phase5_turnaround:
+                                    424 ;psramdiag.c:350: print("PH5 BIOS/rd @0x5080 x512 ... ");
+      0001C4 21rE5r01         [10]  425 	ld	hl, #___str_7
+      0001C7 CDr9Fr00         [17]  426 	call	_print
+                                    427 ;psramdiag.c:351: for (i = 0; i < PH5_ITER; i++) {
+      0001CA 01 00 00         [10]  428 	ld	bc, #0x0000
+      0001CD                        429 00102$:
+                                    430 ;psramdiag.c:352: gtstck(2);	/* main-ROM slot cycle (SLTSL high)   */
+      0001CD C5               [11]  431 	push	bc
+      0001CE 2E 02            [ 7]  432 	ld	l, #0x02
+                                    433 ;	spillPairReg hl
+                                    434 ;	spillPairReg hl
+      0001D0 CDr88r00         [17]  435 	call	_gtstck
+      0001D3 C1               [10]  436 	pop	bc
+                                    437 ;psramdiag.c:353: dummy = *(volatile uint8_t *)(uint16_t)PH5_ADDR;
+      0001D4 3A 80 50         [13]  438 	ld	a, (#0x5080)
+                                    439 ;psramdiag.c:351: for (i = 0; i < PH5_ITER; i++) {
+      0001D7 03               [ 6]  440 	inc	bc
+      0001D8 59               [ 4]  441 	ld	e, c
+      0001D9 50               [ 4]  442 	ld	d, b
+      0001DA 7A               [ 4]  443 	ld	a, d
+      0001DB D6 02            [ 7]  444 	sub	a, #0x02
+      0001DD 38 EE            [12]  445 	jr	C, 00102$
+                                    446 ;psramdiag.c:356: print("done\r\n");
+      0001DF 21r03r02         [10]  447 	ld	hl, #___str_8
+                                    448 ;psramdiag.c:357: }
+      0001E2 C3r9Fr00         [10]  449 	jp	_print
+      0001E5                        450 ___str_7:
+      0001E5 50 48 35 20 42 49 4F   451 	.ascii "PH5 BIOS/rd @0x5080 x512 ... "
+             53 2F 72 64 20 40 30
+             78 35 30 38 30 20 78
+             35 31 32 20 2E 2E 2E
+             20
+      000202 00                     452 	.db 0x00
+      000203                        453 ___str_8:
+      000203 64 6F 6E 65            454 	.ascii "done"
+      000207 0D                     455 	.db 0x0d
+      000208 0A                     456 	.db 0x0a
+      000209 00                     457 	.db 0x00
+                                    458 ;psramdiag.c:363: int main(void)
+                                    459 ;	---------------------------------
+                                    460 ; Function main
+                                    461 ; ---------------------------------
+      00020A                        462 _main::
+      00020A CDr00r00         [17]  463 	call	___sdcc_enter_ix
+      00020D 3B               [ 6]  464 	dec	sp
+                                    465 ;psramdiag.c:367: chgmod(0);	/* SCREEN 0, 40 columns */
+      00020E 2E 00            [ 7]  466 	ld	l, #0x00
+                                    467 ;	spillPairReg hl
+                                    468 ;	spillPairReg hl
+      000210 CDr00r00         [17]  469 	call	_chgmod
+                                    470 ;psramdiag.c:369: print("\r\nPSRAMDIAG v2 - RISKYMSX2\r\n\r\n");
+      000213 21rE3r02         [10]  471 	ld	hl, #___str_9
+      000216 CDr9Fr00         [17]  472 	call	_print
+                                    473 ;psramdiag.c:370: print("ANY key = run next phase.\r\n");
+      000219 21r02r03         [10]  474 	ld	hl, #___str_10
+      00021C CDr9Fr00         [17]  475 	call	_print
+                                    476 ;psramdiag.c:371: print("(interrupt-free key scan via SNSMAT,\r\n");
+      00021F 21r1Er03         [10]  477 	ld	hl, #___str_11
+      000222 CDr9Fr00         [17]  478 	call	_print
+                                    479 ;psramdiag.c:372: print(" works even if the BIOS keyboard ISR\r\n");
+      000225 21r45r03         [10]  480 	ld	hl, #___str_12
+      000228 CDr9Fr00         [17]  481 	call	_print
+                                    482 ;psramdiag.c:373: print(" never runs - deliberately robust\r\n");
+      00022B 21r6Cr03         [10]  483 	ld	hl, #___str_13
+      00022E CDr9Fr00         [17]  484 	call	_print
+                                    485 ;psramdiag.c:374: print(" on the emulated-cart bring-up)\r\n\r\n");
+      000231 21r90r03         [10]  486 	ld	hl, #___str_14
+      000234 CDr9Fr00         [17]  487 	call	_print
+                                    488 ;psramdiag.c:375: print("PH1 fixed rd 0x5000 x4000\r\n");
+      000237 21rB4r03         [10]  489 	ld	hl, #___str_15
+      00023A CDr9Fr00         [17]  490 	call	_print
+                                    491 ;psramdiag.c:376: print("PH2 LDIR 0x5000->0xD000\r\n");
+      00023D 21rD0r03         [10]  492 	ld	hl, #___str_16
+      000240 CDr9Fr00         [17]  493 	call	_print
+                                    494 ;psramdiag.c:377: print("PH3 isolated rd 0x5040 x2048\r\n");
+      000243 21rEAr03         [10]  495 	ld	hl, #___str_17
+      000246 CDr9Fr00         [17]  496 	call	_print
+                                    497 ;psramdiag.c:378: print("PH4 pattern integrity 0x5000-0x50FF\r\n");
+      000249 21r09r04         [10]  498 	ld	hl, #___str_18
+      00024C CDr9Fr00         [17]  499 	call	_print
+                                    500 ;psramdiag.c:379: print("PH5 BIOS+rd 0x5080 x512\r\n\r\n");
+      00024F 21r2Fr04         [10]  501 	ld	hl, #___str_19
+      000252 CDr9Fr00         [17]  502 	call	_print
+                                    503 ;psramdiag.c:380: print("Set SRC SRAM/PSRAM on UART, reset,\r\n");
+      000255 21r4Br04         [10]  504 	ld	hl, #___str_20
+      000258 CDr9Fr00         [17]  505 	call	_print
+                                    506 ;psramdiag.c:381: print("arm the 1660C, then press a key.\r\n\r\n");
+      00025B 21r70r04         [10]  507 	ld	hl, #___str_21
+      00025E CDr9Fr00         [17]  508 	call	_print
+                                    509 ;psramdiag.c:383: for (phase = 1; ; phase++) {
+      000261 DD 36 FF 01      [19]  510 	ld	-1 (ix), #0x01
+      000265                        511 00112$:
+                                    512 ;psramdiag.c:384: wait_key();	/* blocks until any key is pressed+released */
+      000265 CDr67r00         [17]  513 	call	_wait_key
+                                    514 ;psramdiag.c:386: switch (phase) {
+      000268 DD 7E FF         [19]  515 	ld	a, -1 (ix)
+      00026B 3D               [ 4]  516 	dec	a
+      00026C 28 1E            [12]  517 	jr	Z, 00101$
+      00026E DD 7E FF         [19]  518 	ld	a, -1 (ix)
+      000271 D6 02            [ 7]  519 	sub	a, #0x02
+      000273 28 28            [12]  520 	jr	Z, 00102$
+      000275 DD 7E FF         [19]  521 	ld	a, -1 (ix)
+      000278 D6 03            [ 7]  522 	sub	a, #0x03
+      00027A 28 32            [12]  523 	jr	Z, 00103$
+      00027C DD 7E FF         [19]  524 	ld	a, -1 (ix)
+      00027F D6 04            [ 7]  525 	sub	a, #0x04
+      000281 28 3C            [12]  526 	jr	Z, 00104$
+      000283 DD 7E FF         [19]  527 	ld	a, -1 (ix)
+      000286 D6 05            [ 7]  528 	sub	a, #0x05
+      000288 28 3A            [12]  529 	jr	Z, 00105$
+      00028A 18 3D            [12]  530 	jr	00106$
+                                    531 ;psramdiag.c:387: case 1:
+      00028C                        532 00101$:
+                                    533 ;psramdiag.c:388: print("PH1 fixed rd @0x5000 x4000\r\n");
+      00028C 21r95r04         [10]  534 	ld	hl, #___str_22
+      00028F CDr9Fr00         [17]  535 	call	_print
+                                    536 ;psramdiag.c:389: phase1_fixed_reads();
+      000292 CDrE1r00         [17]  537 	call	_phase1_fixed_reads
+                                    538 ;psramdiag.c:390: print("PH1 done\r\n");
+      000295 21rB2r04         [10]  539 	ld	hl, #___str_23
+      000298 CDr9Fr00         [17]  540 	call	_print
+                                    541 ;psramdiag.c:391: break;
+      00029B 18 3D            [12]  542 	jr	00113$
+                                    543 ;psramdiag.c:392: case 2:
+      00029D                        544 00102$:
+                                    545 ;psramdiag.c:393: print("PH2 LDIR 0x5000->0xD000\r\n");
+      00029D 21rD0r03         [10]  546 	ld	hl, #___str_16
+      0002A0 CDr9Fr00         [17]  547 	call	_print
+                                    548 ;psramdiag.c:394: phase2_ldir_copy();
+      0002A3 CDrEFr00         [17]  549 	call	_phase2_ldir_copy
+                                    550 ;psramdiag.c:395: print("PH2 done\r\n");
+      0002A6 21rBDr04         [10]  551 	ld	hl, #___str_24
+      0002A9 CDr9Fr00         [17]  552 	call	_print
+                                    553 ;psramdiag.c:396: break;
+      0002AC 18 2C            [12]  554 	jr	00113$
+                                    555 ;psramdiag.c:397: case 3:
+      0002AE                        556 00103$:
+                                    557 ;psramdiag.c:398: print("PH3 isolated rd @0x5040\r\n");
+      0002AE 21rC8r04         [10]  558 	ld	hl, #___str_25
+      0002B1 CDr9Fr00         [17]  559 	call	_print
+                                    560 ;psramdiag.c:399: phase3_isolated_reads();
+      0002B4 CDrFBr00         [17]  561 	call	_phase3_isolated_reads
+                                    562 ;psramdiag.c:400: print("PH3 done\r\n");
+      0002B7 21rE2r04         [10]  563 	ld	hl, #___str_26
+      0002BA CDr9Fr00         [17]  564 	call	_print
+                                    565 ;psramdiag.c:401: break;
+      0002BD 18 1B            [12]  566 	jr	00113$
+                                    567 ;psramdiag.c:402: case 4:
+      0002BF                        568 00104$:
+                                    569 ;psramdiag.c:403: phase4_integrity();
+      0002BF CDr17r01         [17]  570 	call	_phase4_integrity
+                                    571 ;psramdiag.c:404: break;
+      0002C2 18 16            [12]  572 	jr	00113$
+                                    573 ;psramdiag.c:405: case 5:
+      0002C4                        574 00105$:
+                                    575 ;psramdiag.c:406: phase5_turnaround();
+      0002C4 CDrC4r01         [17]  576 	call	_phase5_turnaround
+                                    577 ;psramdiag.c:407: break;
+      0002C7 18 11            [12]  578 	jr	00113$
+                                    579 ;psramdiag.c:408: default:
+      0002C9                        580 00106$:
+                                    581 ;psramdiag.c:411: print("\r\nALL DONE - PARKED in PH1 loop\r\n");
+      0002C9 21rEDr04         [10]  582 	ld	hl, #___str_27
+      0002CC CDr9Fr00         [17]  583 	call	_print
+                                    584 ;psramdiag.c:412: print("(LA: trigger on A=0x5000, M1=0)\r\n\r\n");
+      0002CF 21r0Fr05         [10]  585 	ld	hl, #___str_28
+      0002D2 CDr9Fr00         [17]  586 	call	_print
+      0002D5                        587 00110$:
+                                    588 ;psramdiag.c:414: phase1_fixed_reads();
+      0002D5 CDrE1r00         [17]  589 	call	_phase1_fixed_reads
+      0002D8 18 FB            [12]  590 	jr	00110$
+                                    591 ;psramdiag.c:418: }
+      0002DA                        592 00113$:
+                                    593 ;psramdiag.c:383: for (phase = 1; ; phase++) {
+      0002DA DD 34 FF         [23]  594 	inc	-1 (ix)
+      0002DD 18 86            [12]  595 	jr	00112$
+                                    596 ;psramdiag.c:421: return 0;
+                                    597 ;psramdiag.c:422: }
+      0002DF 33               [ 6]  598 	inc	sp
+      0002E0 DD E1            [14]  599 	pop	ix
+      0002E2 C9               [10]  600 	ret
+      0002E3                        601 ___str_9:
+      0002E3 0D                     602 	.db 0x0d
+      0002E4 0A                     603 	.db 0x0a
+      0002E5 50 53 52 41 4D 44 49   604 	.ascii "PSRAMDIAG v2 - RISKYMSX2"
+             41 47 20 76 32 20 2D
+             20 52 49 53 4B 59 4D
+             53 58 32
+      0002FD 0D                     605 	.db 0x0d
+      0002FE 0A                     606 	.db 0x0a
+      0002FF 0D                     607 	.db 0x0d
+      000300 0A                     608 	.db 0x0a
+      000301 00                     609 	.db 0x00
+      000302                        610 ___str_10:
+      000302 41 4E 59 20 6B 65 79   611 	.ascii "ANY key = run next phase."
+             20 3D 20 72 75 6E 20
+             6E 65 78 74 20 70 68
+             61 73 65 2E
+      00031B 0D                     612 	.db 0x0d
+      00031C 0A                     613 	.db 0x0a
+      00031D 00                     614 	.db 0x00
+      00031E                        615 ___str_11:
+      00031E 28 69 6E 74 65 72 72   616 	.ascii "(interrupt-free key scan via SNSMAT,"
+             75 70 74 2D 66 72 65
+             65 20 6B 65 79 20 73
+             63 61 6E 20 76 69 61
+             20 53 4E 53 4D 41 54
+             2C
+      000342 0D                     617 	.db 0x0d
+      000343 0A                     618 	.db 0x0a
+      000344 00                     619 	.db 0x00
+      000345                        620 ___str_12:
+      000345 20 77 6F 72 6B 73 20   621 	.ascii " works even if the BIOS keyboard ISR"
+             65 76 65 6E 20 69 66
+             20 74 68 65 20 42 49
+             4F 53 20 6B 65 79 62
+             6F 61 72 64 20 49 53
+             52
+      000369 0D                     622 	.db 0x0d
+      00036A 0A                     623 	.db 0x0a
+      00036B 00                     624 	.db 0x00
+      00036C                        625 ___str_13:
+      00036C 20 6E 65 76 65 72 20   626 	.ascii " never runs - deliberately robust"
+             72 75 6E 73 20 2D 20
+             64 65 6C 69 62 65 72
+             61 74 65 6C 79 20 72
+             6F 62 75 73 74
+      00038D 0D                     627 	.db 0x0d
+      00038E 0A                     628 	.db 0x0a
+      00038F 00                     629 	.db 0x00
+      000390                        630 ___str_14:
+      000390 20 6F 6E 20 74 68 65   631 	.ascii " on the emulated-cart bring-up)"
+             20 65 6D 75 6C 61 74
+             65 64 2D 63 61 72 74
+             20 62 72 69 6E 67 2D
+             75 70 29
+      0003AF 0D                     632 	.db 0x0d
+      0003B0 0A                     633 	.db 0x0a
+      0003B1 0D                     634 	.db 0x0d
+      0003B2 0A                     635 	.db 0x0a
+      0003B3 00                     636 	.db 0x00
+      0003B4                        637 ___str_15:
+      0003B4 50 48 31 20 66 69 78   638 	.ascii "PH1 fixed rd 0x5000 x4000"
+             65 64 20 72 64 20 30
+             78 35 30 30 30 20 78
+             34 30 30 30
+      0003CD 0D                     639 	.db 0x0d
+      0003CE 0A                     640 	.db 0x0a
+      0003CF 00                     641 	.db 0x00
+      0003D0                        642 ___str_16:
+      0003D0 50 48 32 20 4C 44 49   643 	.ascii "PH2 LDIR 0x5000->0xD000"
+             52 20 30 78 35 30 30
+             30 2D 3E 30 78 44 30
+             30 30
+      0003E7 0D                     644 	.db 0x0d
+      0003E8 0A                     645 	.db 0x0a
+      0003E9 00                     646 	.db 0x00
+      0003EA                        647 ___str_17:
+      0003EA 50 48 33 20 69 73 6F   648 	.ascii "PH3 isolated rd 0x5040 x2048"
+             6C 61 74 65 64 20 72
+             64 20 30 78 35 30 34
+             30 20 78 32 30 34 38
+      000406 0D                     649 	.db 0x0d
+      000407 0A                     650 	.db 0x0a
+      000408 00                     651 	.db 0x00
+      000409                        652 ___str_18:
+      000409 50 48 34 20 70 61 74   653 	.ascii "PH4 pattern integrity 0x5000-0x50FF"
+             74 65 72 6E 20 69 6E
+             74 65 67 72 69 74 79
+             20 30 78 35 30 30 30
+             2D 30 78 35 30 46 46
+      00042C 0D                     654 	.db 0x0d
+      00042D 0A                     655 	.db 0x0a
+      00042E 00                     656 	.db 0x00
+      00042F                        657 ___str_19:
+      00042F 50 48 35 20 42 49 4F   658 	.ascii "PH5 BIOS+rd 0x5080 x512"
+             53 2B 72 64 20 30 78
+             35 30 38 30 20 78 35
+             31 32
+      000446 0D                     659 	.db 0x0d
+      000447 0A                     660 	.db 0x0a
+      000448 0D                     661 	.db 0x0d
+      000449 0A                     662 	.db 0x0a
+      00044A 00                     663 	.db 0x00
+      00044B                        664 ___str_20:
+      00044B 53 65 74 20 53 52 43   665 	.ascii "Set SRC SRAM/PSRAM on UART, reset,"
+             20 53 52 41 4D 2F 50
+             53 52 41 4D 20 6F 6E
+             20 55 41 52 54 2C 20
+             72 65 73 65 74 2C
+      00046D 0D                     666 	.db 0x0d
+      00046E 0A                     667 	.db 0x0a
+      00046F 00                     668 	.db 0x00
+      000470                        669 ___str_21:
+      000470 61 72 6D 20 74 68 65   670 	.ascii "arm the 1660C, then press a key."
+             20 31 36 36 30 43 2C
+             20 74 68 65 6E 20 70
+             72 65 73 73 20 61 20
+             6B 65 79 2E
+      000490 0D                     671 	.db 0x0d
+      000491 0A                     672 	.db 0x0a
+      000492 0D                     673 	.db 0x0d
+      000493 0A                     674 	.db 0x0a
+      000494 00                     675 	.db 0x00
+      000495                        676 ___str_22:
+      000495 50 48 31 20 66 69 78   677 	.ascii "PH1 fixed rd @0x5000 x4000"
+             65 64 20 72 64 20 40
+             30 78 35 30 30 30 20
+             78 34 30 30 30
+      0004AF 0D                     678 	.db 0x0d
+      0004B0 0A                     679 	.db 0x0a
+      0004B1 00                     680 	.db 0x00
+      0004B2                        681 ___str_23:
+      0004B2 50 48 31 20 64 6F 6E   682 	.ascii "PH1 done"
+             65
+      0004BA 0D                     683 	.db 0x0d
+      0004BB 0A                     684 	.db 0x0a
+      0004BC 00                     685 	.db 0x00
+      0004BD                        686 ___str_24:
+      0004BD 50 48 32 20 64 6F 6E   687 	.ascii "PH2 done"
+             65
+      0004C5 0D                     688 	.db 0x0d
+      0004C6 0A                     689 	.db 0x0a
+      0004C7 00                     690 	.db 0x00
+      0004C8                        691 ___str_25:
+      0004C8 50 48 33 20 69 73 6F   692 	.ascii "PH3 isolated rd @0x5040"
+             6C 61 74 65 64 20 72
+             64 20 40 30 78 35 30
+             34 30
+      0004DF 0D                     693 	.db 0x0d
+      0004E0 0A                     694 	.db 0x0a
+      0004E1 00                     695 	.db 0x00
+      0004E2                        696 ___str_26:
+      0004E2 50 48 33 20 64 6F 6E   697 	.ascii "PH3 done"
+             65
+      0004EA 0D                     698 	.db 0x0d
+      0004EB 0A                     699 	.db 0x0a
+      0004EC 00                     700 	.db 0x00
+      0004ED                        701 ___str_27:
+      0004ED 0D                     702 	.db 0x0d
+      0004EE 0A                     703 	.db 0x0a
+      0004EF 41 4C 4C 20 44 4F 4E   704 	.ascii "ALL DONE - PARKED in PH1 loop"
+             45 20 2D 20 50 41 52
+             4B 45 44 20 69 6E 20
+             50 48 31 20 6C 6F 6F
+             70
+      00050C 0D                     705 	.db 0x0d
+      00050D 0A                     706 	.db 0x0a
+      00050E 00                     707 	.db 0x00
+      00050F                        708 ___str_28:
+      00050F 28 4C 41 3A 20 74 72   709 	.ascii "(LA: trigger on A=0x5000, M1=0)"
+             69 67 67 65 72 20 6F
+             6E 20 41 3D 30 78 35
+             30 30 30 2C 20 4D 31
+             3D 30 29
+      00052E 0D                     710 	.db 0x0d
+      00052F 0A                     711 	.db 0x0a
+      000530 0D                     712 	.db 0x0d
+      000531 0A                     713 	.db 0x0a
+      000532 00                     714 	.db 0x00
+                                    715 	.area _CODE
+                                    716 	.area _INITIALIZER
+                                    717 	.area _CABS (ABS)

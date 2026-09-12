@@ -11,13 +11,19 @@
  * (lower than EXTI0 at 0x00, so the cart IRQ always preempts us).
  *
  * Dispatched commands:
- *   PING / HELP / RST [ms] / LOAD <hexaddr> <hexbytes> / DUMP <hexaddr> <len>
+ *   PING / HELP / RST [ms] / SRC [SRAM|PSRAM]
+ *   LOAD <hexaddr> <hexbytes> / XLOAD <hexaddr> <len> / DUMP <hexaddr> <len>
+ *
+ * LOAD / XLOAD / DUMP target the PSRAM cart image window (8 MiB at
+ * 0x80000000). The active mapper (see Cart_SetMapper) interprets reads
+ * from this same window.
  */
 
 #include "cli.h"
 #include "ch32v4x7.h"
 #include "cart.h"
 #include "psram.h"
+#include "scc.h"
 #include "debug.h"
 #include <string.h>
 
@@ -26,31 +32,44 @@
 static char     s_line[CLI_LINE_SZ];
 static uint16_t s_line_len = 0U;
 
-/* XLOAD state: after the XLOAD header line is parsed, the next <len>
- * raw bytes are appended to the destination chosen by the command
- * (SRAM cart mirror or external PSRAM).
- *
- * s_xload_swallow_first: set when XLOAD is armed, used by the IRQ to
- * discard exactly one byte (the '\n' from the header's CRLF terminator).
- * Without this, the '\n' would be counted as the first XLOAD data byte
- * and shift all subsequent bytes by +1. */
-typedef enum {
-    XLOAD_DEST_NONE = 0,
-    XLOAD_DEST_SRAM,
-    XLOAD_DEST_PSRAM,
-} XLoadDest;
-static uint8_t  s_xload_active        = 0U;
-static uint8_t  s_xload_swallow_first = 0U;
-static uint32_t s_xload_addr          = 0U;
-static uint32_t s_xload_remaining     = 0U;
-static XLoadDest s_xload_dest         = XLOAD_DEST_NONE;
+/* Dispatch snapshot. When a line completes, the IRQ copies it here and
+ * arms s_line_ready. s_line itself is immediately reusable for the
+ * next command, so characters typed while the main loop is still
+ * dispatching the previous command can NEVER overwrite a pending line
+ * (the pre-snapshot design had exactly that race). At most one
+ * undispatched command can be pending - the CRLF suppression keeps a
+ * terminator pair from arming twice, and the prompt-synced host tools
+ * never send a new command before the prompt anyway. */
+static char     s_dispatch_buf[CLI_LINE_SZ];
 
-/* PSRAM write accumulator. PSRAM's FSMC interface needs 32-bit word
- * stores to complete each bus cycle cleanly; byte stores in rapid
- * succession from IRQ context can drop bytes. We accumulate up to 4
- * bytes and flush as a single 32-bit store. SRAM doesn't need this. */
-static uint8_t  s_xload_byte_buf[4];
-static uint8_t  s_xload_byte_buf_len  = 0U;
+/* XLOAD state: after the XLOAD header line is dispatched (main loop),
+ * the next <len> raw bytes are appended to the ACTIVE image window at
+ * <addr>.
+ *
+ * Note on the old swallow-first logic: when dispatch ran inside the
+ * USART IRQ, the header's trailing '\n' could arrive after the pump
+ * armed and had to be swallowed. With dispatch deferred to the main
+ * loop, the line assembler consumes BOTH terminator bytes ('\r' arms
+ * the line, the CRLF-suppression skips the '\n') before the pump ever
+ * arms - so every byte the pump sees is real data. No swallow needed. */
+static uint8_t  s_xload_active    = 0U;
+static uint32_t s_xload_addr      = 0U;
+static uint32_t s_xload_remaining = 0U;
+
+/* ------------------------------------------------------------------ */
+/* Active cart image window.                                          */
+/* ------------------------------------------------------------------ */
+
+/* The window is always PSRAM (8 MiB). LOAD/XLOAD/DUMP operate on the
+ * PSRAM image; the cart handlers serve from the same PSRAM window.
+ * Cart_SetMapper() picks which mapper interprets the reads. */
+static uint8_t *CLI_GetWindow (void) {
+    return (uint8_t *)PSRAM_CART_BASE;
+}
+
+static uint32_t CLI_GetWindowSize (void) {
+    return Cart_GetImageSize();   /* PSRAM_CART_SIZE = 8 MiB */
+}
 
 /* ------------------------------------------------------------------ */
 /* USART1 GPIO + peripheral setup.                                    */
@@ -162,15 +181,53 @@ static void CLI_HandleLine(char *line)
         printf ("  PING                       - liveness check\r\n");
         printf ("  RST [ms]                   - pulse MSX reset (decimal, default 100)\r\n");
         printf ("  PE4                        - read current PE4 state (0=low, 1=high)\r\n");
-        printf ("  LOAD <hexaddr> <bytes...>  - write hex bytes into SRAM cart mirror\r\n");
-        printf ("  XLOAD <hexaddr> <len>      - raw binary upload into SRAM (alias for XLOAD_SRAM)\r\n");
-        printf ("  XLOAD_SRAM <hexaddr> <len> - raw binary upload into SRAM cart mirror\r\n");
-        printf ("  XLOAD_PSRAM <hexaddr> <len>- raw binary upload into external PSRAM bus\r\n");
-        printf ("  DUMP <hexaddr> <len>       - read <len> bytes from SRAM cart mirror\r\n");
-        printf ("  DUMP_PSRAM <hexaddr> <len> - read <len> bytes from PSRAM (offset)\r\n");
-        printf ("  RUN <hexaddr>              - jump to machine code at SRAM addr (IRQs off)\r\n");
-        printf ("  RUN_SRAM <hexaddr>         - jump to machine code at SRAM addr (alias)\r\n");
-        printf ("  RUN_PSRAM <hexaddr>        - jump to machine code at PSRAM addr (IRQs off)\r\n");
+        printf ("  MAP [name|none]            - show or switch the active cart mapper\r\n");
+        printf ("  SCC                        - SCC emulator diagnostics (queue level, mapper)\r\n");
+        printf ("  LOAD <hexaddr> <bytes...>  - write hex bytes into PSRAM image window\r\n");
+        printf ("  XLOAD <hexaddr> <len>      - raw binary upload (script-driven)\r\n");
+        printf ("  DUMP <hexaddr> <len>       - read <len> bytes from PSRAM image window\r\n");
+    }
+    else if (CLI_Token(line, "MAP")) {
+        /* Show or switch the active cart mapper. Mapper selection
+         * installs the matching EXTI0 handler in the PFIC VTF slot;
+         * the cart image lives entirely in PSRAM (see Cart_GetImageBase).
+         * PSRAM must be initialised before any non-NONE mapper is
+         * accepted - Cart_SetMapper() returns -1 otherwise. */
+        const char *p = line + 3;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '\0' || *p == '\r' || *p == '\n' || CLI_Token(p, "?")) {
+            printf ("MAP %s  (image @ 0x%08x, %u bytes)\r\n",
+                    Cart_MapperNames[(unsigned)Cart_GetMapper()],
+                    (unsigned)Cart_GetImageBase(),
+                    (unsigned)Cart_GetImageSize());
+            printf ("  NONE   ROM16k ROM32k ROM48k KONAMI KONAMINOSCC "
+                    "ASCII8k ASCII16k NEO8 NEO16 KONAMISCC\r\n");
+        } else {
+            int rc = -1;
+            for (unsigned i = 0; i < (unsigned)CART_MAP_MAX; i++) {
+                if (CLI_Token(p, (char *)Cart_MapperNames[i])) {
+                    rc = Cart_SetMapper ((Cart_Mapper)i);
+                    break;
+                }
+            }
+            if (rc == 0) {
+                printf ("OK MAP %s @ 0x%08x\r\n",
+                        Cart_MapperNames[(unsigned)Cart_GetMapper()],
+                        (unsigned)Cart_GetImageBase());
+            } else {
+                printf ("ERR MAP: unknown name or PSRAM not initialised\r\n");
+            }
+        }
+    }
+    else if (CLI_Token(line, "SCC")) {
+        /* SCC emulator diagnostics: queue level + which mapper feeds
+         * it. Queue drains at the sample rate, so a non-zero level on
+         * a running MSX is normal; a level stuck at 63/64 means the
+         * TIM4 pump is not running (or the KONAMISCC mapper is queued
+         * writes while SCC_Init never ran). */
+        printf ("SCC q=%u/64 mapper=%s\r\n",
+                (unsigned)SCC_GetLevel(),
+                Cart_MapperNames[(unsigned)Cart_GetMapper()]);
     }
     else if (CLI_Token(line, "RST")) {
         /* RST takes a DECIMAL millisecond count (most users expect this),
@@ -198,121 +255,50 @@ static void CLI_HandleLine(char *line)
             printf ("ERR LOAD: bad address\r\n");
             return;
         }
-        uint8_t *base = (uint8_t *)SRAM_ROM_BASE;
+        uint8_t *base = CLI_GetWindow();
+        uint32_t cap = CLI_GetWindowSize();
         while (*p != '\0' && *p != '\r' && *p != '\n') {
             uint32_t byte = 0U;
             if (CLI_ParseHex(&p, &byte, 2) != 0) {
                 printf ("ERR LOAD: bad byte at index %u\r\n", (unsigned)i);
                 return;
             }
+            if ((addr + i) >= cap) break;
             base[addr + i] = (uint8_t)byte;
             i++;
-            if (i >= CART_ROM_SIZE) break;
         }
         printf ("OK %u\r\n", (unsigned)i);
     }
-    else if (CLI_Token(line, "XLOAD_SRAM") ||
-             CLI_Token(line, "XLOAD_PSRAM") ||
-             CLI_Token(line, "XLOAD")) {
-        /* Binary upload to one of two destinations:
-         *   XLOAD_SRAM  <addr> <len>  -> SRAM cart mirror (default)
-         *   XLOAD_PSRAM <addr> <len>  -> external PSRAM bus
-         *   XLOAD       <addr> <len>  -> alias for XLOAD_SRAM (compat)
+    else if (CLI_Token(line, "XLOAD")) {
+        /* Binary upload: header "XLOAD <addr> <len>" then <len> raw bytes.
+         * Each byte goes straight into the ACTIVE window and is NOT
+         * echoed.
          *
-         * Header is terminated by CRLF. The line assembler fires on
-         * '\r' to enter XLOAD mode, but the trailing '\n' is still in
-         * the RX FIFO. s_xload_swallow_first discards exactly one byte
-         * after arming - that's the '\n' from the header's CRLF.
-         */
-        XLoadDest dest = XLOAD_DEST_SRAM;
-        const char *p;
-        if (CLI_Token(line, "XLOAD_PSRAM")) {
-            dest = XLOAD_DEST_PSRAM;
-            p = line + 11;       /* skip "XLOAD_PSRAM" */
-        } else if (CLI_Token(line, "XLOAD_SRAM")) {
-            dest = XLOAD_DEST_SRAM;
-            p = line + 10;       /* skip "XLOAD_SRAM" */
-        } else {
-            dest = XLOAD_DEST_SRAM;
-            p = line + 5;        /* skip "XLOAD" */
-        }
-
+         * IMPORTANT: the host sends the header terminated with CRLF. The
+         * line assembler fires on the '\r' to enter XLOAD mode, but the
+         * trailing '\n' is still in the USART RX FIFO. Without explicit
+         * handling, that '\n' would be consumed as the FIRST data byte
+         * (writing 0x0a to s_xload_addr), shifting all subsequent bytes
+         * by +1. We solve this by setting a flag that tells the IRQ to
+         * swallow exactly one byte after entering XLOAD mode - the byte
+         * that is the '\n' from the header's CRLF terminator. */
+        const char *p = line + 5;
         uint32_t addr = 0U, len = 0U;
         if (CLI_ParseHex(&p, &addr, 8) != 0 ||
             CLI_ParseHex(&p, &len, 8) != 0) {
-            printf ("ERR XLOAD: usage XLOAD_<SRAM|PSRAM> <addr> <len>\r\n");
+            printf ("ERR XLOAD: usage XLOAD <addr> <len>\r\n");
             return;
         }
-
-        uint32_t cap = (dest == XLOAD_DEST_PSRAM)
-                     ? PSRAM_TEST_SIZE * 1024U  /* 1 MiB - roomier */
-                     : CART_ROM_SIZE;
-        if (len > cap || (addr + len) > cap) {
-            printf ("ERR XLOAD: range exceeds dest (%u bytes)\r\n",
+        uint32_t cap = CLI_GetWindowSize();
+        if (len > cap || addr >= cap || (addr + len) > cap) {
+            printf ("ERR XLOAD: range exceeds window (%u bytes)\r\n",
                     (unsigned)cap);
             return;
         }
-        s_xload_active        = 1U;
-        s_xload_dest          = dest;
-        s_xload_addr          = addr;
-        s_xload_remaining     = len;
-        s_xload_swallow_first = 1U;
+        s_xload_active    = 1U;
+        s_xload_addr      = addr;
+        s_xload_remaining = len;
         printf ("READY\r\n");
-        return;
-    }
-    else if (CLI_Token(line, "RUN_SRAM") ||
-             CLI_Token(line, "RUN_PSRAM") ||
-             CLI_Token(line, "RUN")) {
-        /* Jump to user code at <addr>. Disables IRQs first so the
-         * caller doesn't accidentally re-enter the CLI mid-run, and
-         * restores mepc/mstatus so a `mret` inside the user code can
-         * return cleanly to the CLI (if it bothers to).
-         *
-         * The user code at <addr> must be RV32I machine code. It runs
-         * with global IRQs disabled; if it wants UART output it should
-         * re-enable USART1 and the cart EXTI itself.
-         *
-         * The argument is an OFFSET relative to the chosen region:
-         *   RUN_SRAM  <off>  -> jumps to SRAM_ROM_BASE + off
-         *   RUN_PSRAM <off>  -> jumps to PSRAM_BUS_BASE + off
-         *   RUN       <off>  -> alias for RUN_SRAM
-         */
-        const char *p;
-        uint32_t addr;
-        uint32_t base;
-        const char *which;
-        if (CLI_Token(line, "RUN_PSRAM")) {
-            p      = line + 9;
-            base   = PSRAM_BUS_BASE;
-            which  = "PSRAM";
-        } else if (CLI_Token(line, "RUN_SRAM")) {
-            p      = line + 8;
-            base   = SRAM_ROM_BASE;
-            which  = "SRAM";
-        } else {
-            p      = line + 3;
-            base   = SRAM_ROM_BASE;
-            which  = "SRAM";
-        }
-        if (CLI_ParseHex(&p, &addr, 8) != 0) {
-            printf ("ERR RUN_%s: usage RUN_%s <hexoffset>\r\n",
-                    which, which);
-            return;
-        }
-        uint32_t target = base + addr;
-        printf ("JUMP %s offset=0x%x target=0x%08x (IRQs off)\r\n",
-                which, (unsigned)addr, (unsigned)target);
-
-        /* Disable IRQs before the jump so the cart EXTI doesn't fire
-         * and corrupt the user's code path. Caller re-enables if it
-         * returns via mret. */
-        __disable_irq();
-        /* The compiler doesn't know about this indirect call; asm
-         * volatile guarantees the jump is emitted. */
-        __asm__ volatile ("jalr zero, %0, 0" : : "r" (target) : "ra", "memory");
-        /* If the user code returns, re-enable IRQs and resume CLI. */
-        __enable_irq();
-        printf ("OK returned from 0x%08x\r\n", (unsigned)target);
         return;
     }
     else if (CLI_Token(line, "DUMP")) {
@@ -323,27 +309,12 @@ static void CLI_HandleLine(char *line)
             printf ("ERR DUMP: usage DUMP <addr> <len>\r\n");
             return;
         }
+        uint32_t cap = CLI_GetWindowSize();
+        if (addr >= cap) addr = cap - 1U;
         if (len > 256U) len = 256U;
-        const uint8_t *base = (const uint8_t *)SRAM_ROM_BASE;
+        if ((addr + len) > cap) len = cap - addr;
+        const uint8_t *base = CLI_GetWindow();
         printf ("DUMP %x %x:", (unsigned)addr, (unsigned)len);
-        for (uint32_t i = 0U; i < len; i++) {
-            printf (" %02x", (unsigned)base[addr + i]);
-        }
-        printf ("\r\n");
-    }
-    else if (CLI_Token(line, "DUMP_PSRAM")) {
-        /* Like DUMP but reads from the external PSRAM bus. The address
-         * is an offset relative to PSRAM_BUS_BASE (0x80000000). */
-        const char *p = line + 10;
-        uint32_t addr = 0U, len = 0U;
-        if (CLI_ParseHex(&p, &addr, 8) != 0 ||
-            CLI_ParseHex(&p, &len, 8) != 0) {
-            printf ("ERR DUMP_PSRAM: usage DUMP_PSRAM <addr> <len>\r\n");
-            return;
-        }
-        if (len > 256U) len = 256U;
-        const uint8_t *base = (const uint8_t *)PSRAM_BUS_BASE;
-        printf ("DUMP_PSRAM %x %x:", (unsigned)addr, (unsigned)len);
         for (uint32_t i = 0U; i < len; i++) {
             printf (" %02x", (unsigned)base[addr + i]);
         }
@@ -355,86 +326,68 @@ static void CLI_HandleLine(char *line)
 }
 
 /* ------------------------------------------------------------------ */
-/* USART1 IRQ entry. Byte-level RX + line assembly + dispatch.        */
+/* USART1 IRQ entry. Byte-level RX + line assembly.                   */
 /* ------------------------------------------------------------------ */
+/* Command dispatch happens in the MAIN LOOP (CLI_Service), not in the
+ * IRQ: printf() busy-waits on TXE for every character of a response,
+ * which can block the IRQ for ~1.5 ms at 115200. Meanwhile the USART
+ * RX register is only 1 deep - any byte the host sends during that
+ * window is lost (ORE). The XLOAD host pumps bytes back-to-back, so a
+ * command issued while a previous response was still printing would
+ * lose its leading characters and dispatch as garbage ("ERR unknown
+ * command"). Deferring dispatch to main() means the IRQ never spends
+ * longer than one echo byte in the handler, and the dispatcher can
+ * only start when the previous response fully drained (prompt printed,
+ * flag cleared). */
+
+/* Set by the IRQ when a full command line is ready for dispatch. */
+static volatile uint8_t s_line_ready = 0U;
 
 void CLI_USART1_Handler(void)
 {
     if (USART_GetITStatus(USART1, USART_IT_RXNE) != RESET) {
         uint8_t b = (uint8_t)USART_ReceiveData(USART1);
 
-        /* XLOAD: each byte goes straight into the chosen destination
-         * (SRAM cart mirror or external PSRAM via the integrated
-         * controller), no echo.
-         * The first byte after entering XLOAD is the trailing '\n' from
-         * the header's CRLF - discard it without writing.
-         *
-         * For SRAM, byte stores are zero-wait-state so we just write
-         * straight through. For the integrated PSRAM controller, the
-         * SPI/QSPI write FIFO can drop bytes if we hammer it byte-by-
-         * byte from the IRQ, so we instead accumulate into a small byte
-         * buffer and flush with 32-bit word stores every time we have
-         * 4 bytes queued. The flush runs from IRQ context too, so
-         * throughput is unchanged for the host but PSRAM cycles
-         * complete cleanly. */
+        /* XLOAD: each byte goes straight into the ACTIVE window, no
+         * echo. The line assembler + CRLF suppression have already
+         * consumed the header's '\r' and '\n' before the pump armed
+         * (dispatch happens in the main loop), so every byte arriving
+         * here is real data - no terminator swallowing. The window
+         * base is captured once here so the per-byte path is a plain
+         * indexed store. XLOAD stays in the IRQ because it is pure
+         * RX->store, no printf, no dispatch, and must keep up with a
+         * back-to-back host at full line rate. */
         if (s_xload_active) {
-            if (s_xload_swallow_first) {
-                s_xload_swallow_first = 0U;
-                /* discard this byte, don't write it */
+            uint8_t *base = CLI_GetWindow();
+            base[s_xload_addr++] = b;
+            s_xload_remaining--;
+            if (s_xload_remaining == 0U) {
+                s_xload_active = 0U;
+                /* Print the trailing prompt FIRST, then the OK line.
+                 *
+                 * The reverse order (OK then prompt) was dropping the
+                 * prompt over the WCH-Link's USB-CDC bridge: after
+                 * "OK\r\n" finished its 4-byte transmission, the
+                 * subsequent printf("> ") was being absorbed by the
+                 * next USART RX byte - which on a 32 KiB blob is the
+                 * next XLOAD byte the host is still streaming. Putting
+                 * the prompt before the line marker makes the
+                 * response start with the prompt byte, which the
+                 * bridge cannot lose to RX contention. The
+                 * line-anchored matcher in load.py accepts either
+                 * "OK\r\n> " or "> OK\r\n" as a valid response. */
+                printf ("> OK\r\n");
             }
-            else {
-                uint8_t *base = (s_xload_dest == XLOAD_DEST_PSRAM)
-                              ? (uint8_t *)PSRAM_BUS_BASE
-                              : (uint8_t *)SRAM_ROM_BASE;
-                /* Always byte-store into the byte buffer. The flush
-                 * code below converts PSRAM writes to 32-bit word
-                 * stores. SRAM goes straight through with byte stores. */
-                s_xload_byte_buf[s_xload_byte_buf_len++] = b;
-                if (s_xload_dest == XLOAD_DEST_SRAM) {
-                    /* SRAM: write through immediately. */
-                    base[s_xload_addr++] = b;
-                    s_xload_remaining--;
-                } else {
-                    /* PSRAM: accumulate. Flush when we have 4 bytes or
-                     * at end-of-transfer. */
-                    if (s_xload_byte_buf_len == 4U ||
-                        s_xload_remaining == 1U) {
-                        uint32_t target = s_xload_addr & ~3U;
-                        /* Read-modify-write so partial words merge
-                         * with previous content. */
-                        uint32_t cur = *(volatile uint32_t *)(base + target);
-                        uint8_t *cur_bytes = (uint8_t *)&cur;
-                        uint32_t off = s_xload_addr & 3U;
-                        for (uint32_t i = 0U; i < s_xload_byte_buf_len; i++) {
-                            cur_bytes[off + i] = s_xload_byte_buf[i];
-                        }
-                        *(volatile uint32_t *)(base + target) = cur;
-                        s_xload_addr += s_xload_byte_buf_len;
-                        s_xload_remaining -= s_xload_byte_buf_len;
-                        s_xload_byte_buf_len = 0U;
-                    }
-                }
-
-                if (s_xload_remaining == 0U) {
-                    s_xload_active = 0U;
-                    s_xload_dest   = XLOAD_DEST_NONE;
-                    printf ("OK\r\n");
-                    /* Auto-reset the MSX so it re-reads the cart slot
-                     * with the freshly-uploaded ROM. Mirrors the
-                     * psram_upload.py behaviour where the script sent
-                     * RST 100 after every upload. */
-                    printf ("> RST 100\r\n");
-                    Cart_AssertMSXReset(100U);
-                    printf ("OK 100ms\r\n");
-                    printf ("> ");
-                }
-            }
-            /* NOTE: we deliberately do not echo, do not line-assemble,
-             * and do not check TXE. The host is pumping bytes at us as
-             * fast as possible - any echo would bottleneck. */
         }
         else {
-            /* Normal line mode: echo + assemble. */
+            /* Normal line mode: echo + assemble.
+             *
+             * NOTE: the echo busy-waits on TXE for ONE byte (~87 us),
+             * which the 1-deep RX shift register tolerates because the
+             * host cannot send the next byte's start bit before then
+             * unless it is already streaming. Interactive typists are
+             * far slower than that, and scripted commands are sent one
+             * line at a time (prompt-synchronised by the host tools). */
             if (b == '\r') {
                 USART_SendData(USART1, '\r');
                 while (USART_GetFlagStatus(USART1, USART_FLAG_TXE) == RESET) {}
@@ -446,10 +399,28 @@ void CLI_USART1_Handler(void)
             }
 
             if (b == '\r' || b == '\n') {
-                s_line[s_line_len] = '\0';
-                CLI_HandleLine(s_line);
-                s_line_len = 0U;
-                printf ("> ");
+                /* Terminate the line and hand it to the main loop.
+                 * Always null-terminate (even for empty lines, at
+                 * index 0) so CLI_Service never re-dispatches a stale
+                 * previous command. Empty lines dispatch as no-ops and
+                 * just re-print the prompt.
+                 *
+                 * CRLF suppression: if this '\n' arrives while a line
+                 * is ALREADY pending dispatch (set by its '\r'), it is
+                 * the second half of a CRLF - ignore it instead of
+                 * arming a second (empty) dispatch, which would print
+                 * a duplicate "> " prompt. A bare '\n' from an LF-only
+                 * host still arms normally because no '\r' preceded it. */
+                if (b == '\n' && s_line_ready) {
+                    /* second half of CRLF - already armed, skip */
+                } else {
+                    s_line[s_line_len] = '\0';
+                    for (uint16_t i = 0U; i <= s_line_len; i++) {
+                        s_dispatch_buf[i] = s_line[i];
+                    }
+                    s_line_len = 0U;
+                    s_line_ready = 1U;
+                }
             } else if (b == 0x7F || b == 0x08) {
                 if (s_line_len > 0U) s_line_len--;
             } else if (s_line_len < (CLI_LINE_SZ - 1U)) {
@@ -458,9 +429,24 @@ void CLI_USART1_Handler(void)
         }
     }
 
-    /* ORE: clear if latched. */
+    /* ORE: clear if latched. A lost byte only matters for line-mode
+     * commands (XLOAD re-syncs on READY/OK handshakes), and the host
+     * tools always wait for the prompt before the next command. */
     if (USART_GetITStatus(USART1, USART_IT_ORE) != RESET) {
         (void)USART_ReceiveData(USART1);
         USART_ClearITPendingBit(USART1, USART_IT_ORE);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Main-loop service.                                                 */
+/* ------------------------------------------------------------------ */
+
+void CLI_Service(void)
+{
+    if (s_line_ready) {
+        s_line_ready = 0U;
+        CLI_HandleLine(s_dispatch_buf);
+        printf ("> ");
     }
 }

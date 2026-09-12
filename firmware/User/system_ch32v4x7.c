@@ -25,12 +25,22 @@
 // #define SYSCLK_HCLK_HSI    HSI_VALUE
 // #define SYSCLK_120MHz_HCLK_60MHz_HSI 120000000
 // #define SYSCLK_240MHz_HCLK_120MHz_HSI 240000000
-// #define SYSCLK_350MHz_HCLK_175MHz_HSI 350000000
- #define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
+#define SYSCLK_350MHz_HCLK_175MHz_HSI 350000000
+ //#define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
 
 /*Only suitable for commercial applications, with a temperature not exceeding 70 °C and good heat dissipation*/
+/* RISKYMSX2 NOTE: do NOT enable the 480MHz/240MHz-HCLK profiles. The PSRAM
+ * controller is an HB-bus peripheral clocked by HCLK, and it drives the
+ * on-die PSRAM device at 2xHCLK (dual-edge; WCH's PSRAM_300MHz_HSE example
+ * = HCLK 150MHz with 300M mode-register codes). At HCLK=240MHz the device
+ * sees 480MHz - above its highest mode-register operating range (400M) -
+ * and reads return garbage (0xA0 pattern) no matter what TRC/TCPH/LATENCY
+ * values are programmed. The core also runs at HCLK on this chip, so there
+ * is no divider that can run the core at 240MHz while slowing the PSRAM.
+ * HCLK=200MHz (SYSCLK_400MHz_* above) is the maximum with reliable PSRAM,
+ * and 200MHz is also the QingKe V3V core's rated maximum. */
 // #define SYSCLK_480MHz_HCLK_240MHz_HSE    480000000
-//#define SYSCLK_480MHz_HCLK_240MHz_HSI 480000000
+// #define SYSCLK_480MHz_HCLK_240MHz_HSI 480000000
 // #define SYSCLK_480MHz_HCLK_240MHz_HSI    480000000
 /* Clock Definitions */
 uint32_t HCLKClock;

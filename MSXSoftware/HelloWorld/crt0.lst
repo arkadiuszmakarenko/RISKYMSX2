@@ -24,9 +24,14 @@
                                      24 
                                      25 	;; --- Entry point ---
       004010                         26 init:
-      004010 CDr00r00         [17]   27 	call	_main
-                                     28 	;; _main does not return if the program ends in an endless loop,
-                                     29 	;; but if it does, clean up: disable screen interrupts and RET to BIOS
-      004013 F3               [ 4]   30 	di
-      004014 76               [ 4]   31 	halt
-      004015 C9               [10]   32 	ret
+                                     27 	;; Interrupts stay DISABLED (INIT is entered via CALSLT with
+                                     28 	;; interrupts off). The menu reads keys via SNSMAT (PSG matrix
+                                     29 	;; scan), which works without the BIOS keyboard ISR - and keeping
+                                     30 	;; DI avoids any interaction between the BIOS interrupt handler
+                                     31 	;; and the emulated cart during measurement.
+      004010 CDr00r00         [17]   32 	call	_main
+                                     33 	;; _main does not return if the program ends in an endless loop,
+                                     34 	;; but if it does, clean up: disable screen interrupts and RET to BIOS
+      004013 F3               [ 4]   35 	di
+      004014 76               [ 4]   36 	halt
+      004015 C9               [10]   37 	ret

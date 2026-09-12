@@ -1,0 +1,12 @@
+-mjwx
+-i psramdiag.ihx
+-b _CODE = 0x4020
+-b _DATA = 0xc000
+-k /usr/bin/../share/sdcc/lib/z80
+-k /usr/share/sdcc/lib/z80
+-l z80
+crt0.rel
+psramdiag.rel
+diagstub.rel
+
+-e

@@ -24,6 +24,11 @@
 
 	;; --- Entry point ---
 init:
+	;; Interrupts stay DISABLED (INIT is entered via CALSLT with
+	;; interrupts off). The menu reads keys via SNSMAT (PSG matrix
+	;; scan), which works without the BIOS keyboard ISR - and keeping
+	;; DI avoids any interaction between the BIOS interrupt handler
+	;; and the emulated cart during measurement.
 	call	_main
 	;; _main does not return if the program ends in an endless loop,
 	;; but if it does, clean up: disable screen interrupts and RET to BIOS
