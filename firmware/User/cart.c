@@ -28,9 +28,10 @@
  *   2. Bank-switching mappers (Konami, ASCII, NEO)
  *      -> C handlers (RunKonami, RunKonamiSCC, Run8kASCII, Run16kASCII,
  *         RunNEO8, RunNEO16) that read bank state from `s_state` in
- *         zero-wait-state SRAM, plus two hand-scheduled asm handlers
- *         (Cart_EXTI0_KonamiNOSCC_Handler for KONAMINOSCC and
- *         Cart_EXTI0_ASCII8k_Handler for ASCII8k) that serve their
+ *         zero-wait-state SRAM, plus three hand-scheduled asm handlers
+ *         (Cart_EXTI0_KonamiNOSCC_Handler for KONAMINOSCC,
+ *         Cart_EXTI0_ASCII8k_Handler for ASCII8k and
+ *         Cart_EXTI0_ASCII16k_Handler for ASCII16k) that serve their
  *         mapper as a direct VTF entry without the dispatcher hop.
  *         Reads hit PSRAM
  *         (~30 cycle latency); the Z80's data sample point still has
@@ -98,6 +99,8 @@ void Cart_EXTI0_KonamiNOSCC_Handler (void) __attribute__((section(".ramfunc"), n
                                                             interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_ASCII8k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                       interrupt("WCH-Interrupt-fast")));
+void Cart_EXTI0_ASCII16k_Handler (void) __attribute__((section(".ramfunc"), noinline,
+                                                       interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_ROM16k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                        interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_ROM32k_Handler (void) __attribute__((section(".ramfunc"), noinline,
@@ -157,10 +160,10 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_KONAMI:
     case CART_MAP_KONAMISCC:
     case CART_MAP_KONAMINOSCC:
-    case CART_MAP_ASCII16k:
     case CART_MAP_NEO8:
     case CART_MAP_NEO16:       h = (uint32_t)Cart_Banked_Dispatch; break;
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
+    case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
     default:                   return -1;
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
@@ -1004,6 +1007,140 @@ void Cart_EXTI0_ASCII8k_Handler (void) {
         ".option pop                     \n"
         : : : "t0", "t1", "t2", "a0", "a1", "a2", "a3",
               "a4", "a5", "a6", "a7", "memory");
+}
+
+/* ASCII 16k, hand-scheduled asm. Port of Run16kASCII. Direct VTF entry
+ * - no Cart_Banked_Dispatch hop on any cycle.
+ *
+ *   t0 = 0x40011000  GPIOB (INDR -0x3F8, CFGHR -0x3FC, OUTDR -0x3F4)
+ *                    + GPIOD (INDR +0x408)
+ *   t1 = 0x40012000  GPIOE (INDR -0x7F8)
+ *   t2 = 0x40010000  EXTI  (INTFR +0x414)
+ *   t3 = 0x6000 (write decode: low bank register)
+ *   t4 = 0x7000 (write decode: high bank register)
+ *   t5 = 0x33333333 (BusOn)   t6 = 0x44444444 (BusOff)
+ *   a5 = 1 (INTFR write-1-to-clear value)
+ *   a2 = %hi(s_state) [+ byteOffset] base for bankOffsets[] access
+ *
+ * Semantics (identical to the C body):
+ *   if (SLTSL already high) { bus off; INTFR clear; return; }  // late
+ *   if (RD low) {                       // read cycle (NO range check -
+ *       byteOffset = (addr<0x8000) ? 0 : 32     C serves every read)
+ *       drive PSRAM[addr + bankOffsets[byteOffset>>2]]
+ *       INTFR clear; wait SLTSL high; bus off
+ *   } else {                            // write cycle
+ *       INTFR clear;
+ *       while (SLTSL low) {
+ *           if (WR low) {
+ *               if (addr == 0x6000)
+ *                   bankOffsets[0] = (w - 1) << 14  // = (w<<14)-0x4000
+ *               else if (addr == 0x7000 || addr == 0x77FF)
+ *                   bankOffsets[8] = (w - 2) << 14  // = (w<<14)-0x8000
+ *               return;  // C returns after ONE WR-low check
+ *           }
+ *       }
+ *   }
+ *
+ * Read slot is a single bit test: addr bit 15 -> byte offset 0 or 32
+ * (slli by 16 lands bit15 on bit31, then bltz). Write decode is exact
+ * address (0x6000/0x7000/0x77FF), no range guard in C, so none here.
+ * Write bias collapses because 0x4000 = 1 << 14 and 0x8000 = 2 << 14
+ * (sub before the shift). The .option norelax wrap protects the
+ * %hi/%lo + index arithmetic from gp-relaxation. */
+void Cart_EXTI0_ASCII16k_Handler (void) {
+    __asm__ volatile (
+        ".option push                    \n"
+        ".option norelax                 \n"
+        "lui   t0, 0x40011                 \n" /* GPIOB/GPIOD window       */
+        "lui   t1, 0x40012                 \n" /* GPIOE window             */
+        "lui   t2, 0x40010                 \n" /* EXTI base                */
+        "lui   t3, 0x6                     \n" /* 0x6000 (write decode)    */
+        "lui   t4, 0x7                     \n" /* 0x7000 (write decode)    */
+        "lui   t5, 0x33333                 \n" /* BusOn const              */
+        "addi  t5, t5, 0x333               \n"
+        "lui   t6, 0x44444                 \n" /* BusOff const             */
+        "addi  t6, t6, 0x444               \n"
+        "li    a5, 1                        \n" /* INTFR clear value        */
+        "lw    a0, 1032(t0)                \n" /* a0 = GPIOD->INDR (early) */
+        "lw    a6, -2040(t1)               \n" /* a6 = GPIOE->INDR         */
+        "andi  a6, a6, 3                   \n" /* SLTSL(bit0) | RD(bit1)   */
+        "beqz  a6, 1f                      \n" /* both low -> read, fast   */
+        "andi  a7, a6, 1                   \n"
+        "bnez  a7, 2f                      \n" /* SLTSL high -> late entry */
+        /* SLTSL low but RD high: a write, or ~RD has not fallen yet.
+         * Poll until RD low (read) or WR low (write) - never trust the
+         * entry sample (SLTSL->RD gate delay misclassifies early
+         * reads as writes; same bug as ASCII8k). */
+        "3:                                \n"
+        "lw    a6, -2040(t1)               \n"
+        "andi  a7, a6, 1                   \n"
+        "bnez  a7, 2f                      \n" /* SLTSL rose -> cycle over */
+        "andi  a7, a6, 2                   \n"
+        "beqz  a7, 1f                      \n" /* RD low -> read           */
+        "andi  a7, a6, 4                   \n" /* WR(bit2)                 */
+        "bnez  a7, 3b                      \n" /* neither -> keep polling  */
+        /* WRITE cycle: WR is low NOW, write data valid on GPIOB. */
+        "sw    a5, 1044(t2)                \n" /* clear INTFR              */
+        "bne   a0, t3, 4f                  \n" /* addr != 0x6000           */
+        "lw    a3, -1016(t0)               \n" /* GPIOB->INDR              */
+        "srli  a3, a3, 8                   \n" /* w                        */
+        "addi  a3, a3, -1                  \n" /* w - 1                    */
+        "slli  a3, a3, 14                  \n" /* bias = (w<<14) - 0x4000  */
+        "lui   a2, %%hi(s_state)           \n"
+        "sw    a3, %%lo(s_state)(a2)       \n" /* bankOffsets[0] = bias    */
+        "j     2f                          \n"
+        "4:                                \n"
+        "bne   a0, t4, 5f                  \n" /* addr != 0x7000           */
+        "lw    a3, -1016(t0)               \n" /* GPIOB->INDR              */
+        "srli  a3, a3, 8                   \n" /* w                        */
+        "addi  a3, a3, -2                  \n" /* w - 2                    */
+        "slli  a3, a3, 14                  \n" /* bias = (w<<14) - 0x8000  */
+        "lui   a2, %%hi(s_state+32)        \n"
+        "sw    a3, %%lo(s_state+32)(a2)    \n" /* bankOffsets[8] = bias    */
+        "j     2f                          \n"
+        "5:                                \n"
+        "addi  a1, t4, 0x7FF               \n" /* a1 = 0x77FF              */
+        "bne   a0, a1, 2f                  \n" /* addr != 0x77FF           */
+        "lw    a3, -1016(t0)               \n" /* GPIOB->INDR              */
+        "srli  a3, a3, 8                   \n" /* w                        */
+        "addi  a3, a3, -2                  \n" /* w - 2                    */
+        "slli  a3, a3, 14                  \n" /* bias = (w<<14) - 0x8000  */
+        "lui   a2, %%hi(s_state+32)        \n"
+        "sw    a3, %%lo(s_state+32)(a2)    \n" /* bankOffsets[8] = bias    */
+        "j     2f                          \n"
+        /* ---- READ CYCLE (no range check - C serves every read) ---- */
+        "1:                                \n"
+        "slli  a1, a0, 16                  \n" /* bit15 -> bit31           */
+        "bltz  a1, 7f                      \n" /* addr >= 0x8000           */
+        "li    a2, 0                       \n" /* bankOffsets[0]           */
+        "j     8f                          \n"
+        "7:                                \n"
+        "li    a2, 32                      \n" /* bankOffsets[8]           */
+        "8:                                \n"
+        "lui   a4, %%hi(s_state)           \n"
+        "add   a2, a4, a2                  \n" /* %hi + byte offset        */
+        "lw    a3, %%lo(s_state)(a2)       \n" /* bankOffsets[slot]        */
+        "lui   a2, 0x80000                 \n" /* PSRAM base               */
+        "add   a2, a2, a3                  \n" /* base + bias              */
+        "add   a2, a2, a0                  \n" /* + addr                   */
+        "lbu   a3, 0(a2)                   \n" /* byte, bus tri-stated     */
+        "slli  a3, a3, 8                   \n"
+        "sw    a3, -1012(t0)               \n" /* GPIOB->OUTDR             */
+        "sw    t5, -1020(t0)               \n" /* CFGHR = BusOn            */
+        "sw    a5, 1044(t2)                \n" /* clear INTFR (once)       */
+        "9:                                \n" /* shared read tail: spin   */
+        "lw    a6, -2040(t1)               \n"
+        "andi  a6, a6, 1                   \n"
+        "beqz  a6, 9b                      \n" /* wait SLTSL high (tight)  */
+        "sw    t6, -1020(t0)               \n" /* CFGHR = BusOff           */
+        /* fall through into late-entry tail (harmless re-stores) */
+        /* ---- LATE ENTRY: SLTSL already high ---- */
+        "2:                                \n"
+        "sw    t6, -1020(t0)               \n" /* CFGHR = BusOff           */
+        "sw    a5, 1044(t2)                \n" /* clear INTFR              */
+        ".option pop                     \n"
+        : : : "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+              "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "memory");
 }
 
 /* ROM16k: 16 KiB image mirrored at 0x4000 and 0x8000. Bias = img_base -
