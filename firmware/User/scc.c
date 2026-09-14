@@ -61,6 +61,10 @@ static volatile uint32_t s_scc_queue[SCC_QUEUE_SIZE];
 static volatile uint32_t s_q_head;    /* producer (EXTI0 cart IRQ) */
 static volatile uint32_t s_q_tail;    /* consumer (TIM4 IRQ)       */
 
+/* IRQ context (EXTI0 cart write) hot path: must run from zero-wait-
+ * state SRAM - a flash call here adds ~50-100 cycles of latency inside
+ * the SLTSL-low window, past the Z80's data sample point. */
+int SCC_QueueWrite (uint32_t word) __attribute__((section(".ramfunc"), noinline));
 int SCC_QueueWrite (uint32_t word) {
     uint32_t next = (s_q_head + 1U) & SCC_QUEUE_MASK;
     if (next == s_q_tail) {

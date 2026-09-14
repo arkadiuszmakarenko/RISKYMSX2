@@ -56,6 +56,32 @@ extern const uint32_t hello_rom_len;
  * mode while 400 MHz DDR arrives, and reads corrupt intermittently. */
 #define HFREQ_EN                 ((uint32_t)0x01)
 
+/* Band-lookup ceiling. The CH32V4x7 PSRAM peripheral has NO clock
+ * divider (PSRAMCLK is hardwired to 2x HCLK, dual-edge DDR). So if
+ * HCLK = 200 MHz the PSRAM device is *electrically* clocked at
+ * 400 MHz DDR regardless of what we ask for - there is no way to
+ * actually slow it down from firmware.
+ *
+ * What this macro does is override the MR operating-range band the
+ * driver programs into the device. If the device silicon and PCB are
+ * healthy at 400 MHz DDR, programming the 400M band is correct and
+ * verify passes. If the bus is marginal, programming a lower band
+ * (e.g. 300M) tells the device to use looser internal IO/timing
+ * compensation - which sometimes lets a marginal bus pass.
+ *
+ * Defaults to 400 (the band that matches the actual device clock).
+ * Override by defining before including this file, or uncomment
+ * the #define below. Common diagnostic values: 300, 250.
+ *
+ * NOTE: this changes MR programming only. The device clock itself
+ * still runs at 2x HCLK. If the 400M-band failure is a real signal-
+ * integrity issue, no band trick will fix it - this knob is for
+ * debugging the band-encoding path, not for fixing PCB problems. */
+/* #define PSRAM_BAND_CEILING_MHZ 300U */
+#ifndef PSRAM_BAND_CEILING_MHZ
+#define PSRAM_BAND_CEILING_MHZ 400U
+#endif
+
 /* Operating-range band table. The PSRAM device is clocked at 2x HCLK
  * (dual-edge / DDR: the WCH "PSRAM_300MHz_HSE" reference runs HCLK 150 MHz
  * with the 300M codes), so the band must be selected by the DEVICE clock,
@@ -162,53 +188,17 @@ static void psram_set_rd_latency(uint32_t mr0_freq, uint32_t latency,
     }
 }
 
-/* Mirror hello_rom[] (32 KiB) into PSRAM using 32-bit word copies then a
- * byte-for-byte verify (covers endian/swap bugs the word loop can't see).
- * After the ROM mirror, fill the rest of the cart image window with
- * 0xFF (the MSX "open bus" pattern) so uninitialised bank regions read
- * deterministically. The total cart window is PSRAM_CART_SIZE (8 MiB)
- * defined in cart.h; this function knows about it but the low-level
- * PSRAM self-test does not. */
+/* Fill the entire cart image window with 0xFF (the MSX "open bus"
+ * pattern for an unpopulated slot). NO embedded ROM is mirrored at
+ * boot any more: with the mapper left at NONE the MSX drops to BASIC;
+ * a cart image is expected via XLOAD. (The hello_rom[] mirror + verify
+ * this replaces was the boot-time "initial tests" the diagnostic ROM
+ * ran on every reset.) */
 static uint8_t psram_copy_rom(void)
 {
-    /* If hello_rom is the placeholder, fill PSRAM with 0xFF (the MSX
-     * "open bus" pattern for an unpopulated slot) so the cart handler
-     * returns a deterministic, non-garbage value before any XLOAD upload.
-     * The placeholder signals "no embedded ROM" so the CLI is the only
-     * way to populate the cart. Decide via hello_rom_len, NOT sizeof -
-     * see the extern declaration at the top of this file. */
-    if (hello_rom_len < PSRAM_ROM_SIZE) {
-        printf ("PSRAM: hello_rom is placeholder (%u bytes); "
-                "filling PSRAM with 0xFF.\r\n",
-                (unsigned)hello_rom_len);
-        volatile uint32_t *dst32 = (volatile uint32_t *)PSRAM_BUS_BASE;
-        uint32_t words = PSRAM_CART_SIZE / 4U;
-        for (uint32_t i = 0; i < words; i++) dst32[i] = 0xFFFFFFFFU;
-        return PSRAM_OK;
-    }
-
-    const uint32_t *src32 = (const uint32_t *)hello_rom;
     volatile uint32_t *dst32 = (volatile uint32_t *)PSRAM_BUS_BASE;
-    uint32_t words = PSRAM_ROM_SIZE / 4U;
-
-    for (uint32_t i = 0; i < words; i++) {
-        dst32[i] = src32[i];
-    }
-    const uint8_t *src8 = hello_rom;
-    volatile uint8_t *dst8 = (volatile uint8_t *)PSRAM_BUS_BASE;
-    if (memcmp((const void *)src8, (const void *)dst8, PSRAM_ROM_SIZE) != 0) {
-        return PSRAM_ERR_ROM_MIRROR;
-    }
-
-    /* Fill the rest of the cart window (above the embedded ROM) with
-     * 0xFF. Bank-switching mappers can map up to 1 MiB; the remainder
-     * is unused but must read 0xFF, not random PSRAM cell state, so
-     * that any accidental read returns the open-bus pattern. */
-    if (PSRAM_CART_SIZE > PSRAM_ROM_SIZE) {
-        volatile uint32_t *fill = (volatile uint32_t *)(PSRAM_BUS_BASE + PSRAM_ROM_SIZE);
-        uint32_t fill_words = (PSRAM_CART_SIZE - PSRAM_ROM_SIZE) / 4U;
-        for (uint32_t i = 0; i < fill_words; i++) fill[i] = 0xFFFFFFFFU;
-    }
+    uint32_t words = PSRAM_CART_SIZE / 4U;
+    for (uint32_t i = 0; i < words; i++) dst32[i] = 0xFFFFFFFFU;
     return PSRAM_OK;
 }
 
@@ -256,7 +246,11 @@ uint8_t PSRAM_Init(void)
      *    clock is 2x HCLK (dual-edge) and the MR operating-range table tops
      *    out at the 400M band, so above 200 MHz HCLK there is no valid band
      *    to program (at 240 MHz reads return the 0xA0 corruption pattern).
-     *    Bail out cleanly so the cart handler falls back to the flash image. */
+     *    Bail out cleanly so the cart handler falls back to the flash image.
+     *
+     *    The PSRAM_BAND_CEILING_MHZ override (see top of file) only
+     *    influences MR programming; it does NOT change the device clock.
+     *    So this HCLK ceiling still applies regardless. */
     if (SystemCoreClock > 200000000U) {
         return PSRAM_ERR_HCLK_TOO_HIGH;
     }
@@ -331,11 +325,21 @@ uint8_t PSRAM_Init(void)
      *    band exactly like the WCH reference (Latency_400M = 0x10 with the
      *    400M band). Variable-latency read mode matches the reference. */
     uint32_t dev_mhz = (SystemCoreClock * 2U) / 1000000U;
+    /* Cap the band lookup at PSRAM_BAND_CEILING_MHZ. The PSRAM device is
+     * still electrically clocked at 2x HCLK - this only changes the MR
+     * operating-range we program, not the actual device clock. Useful for
+     * diagnosing whether a verify failure at 400/200 is a band-encoding
+     * problem or a real signal-integrity problem. See the long comment
+     * on PSRAM_BAND_CEILING_MHZ at the top of this file. */
+    uint32_t band_ceiling_mhz = PSRAM_BAND_CEILING_MHZ;
+    if (band_ceiling_mhz > 400U) band_ceiling_mhz = 400U;
+    if (band_ceiling_mhz <  66U) band_ceiling_mhz =  66U;
+
     const Psram_Band *band = NULL;
     for (uint32_t i = 0;
          i < (uint32_t)(sizeof(psram_bands) / sizeof(psram_bands[0]));
          i++) {
-        if (dev_mhz <= psram_bands[i].dev_mhz_max) {
+        if (band_ceiling_mhz <= psram_bands[i].dev_mhz_max) {
             band = &psram_bands[i];
             break;
         }
@@ -351,9 +355,10 @@ uint8_t PSRAM_Init(void)
     psram_set_rd_latency (band->mr0_read, band->periph_latency,
                           READ_LATENCY_VARIABLE, band->hfreq);
 
-    printf ("PSRAM diag: HCLK=%u devclk=%uMHz band<=%uM hfreq=%u mr0=0x%x mr4=0x%x lat=0x%02x trc=0x%02x tcph=0x%02x TIMING=0x%08x LATENCY=0x%08x STATUS=0x%08x\r\n",
+    printf ("PSRAM diag: HCLK=%u devclk=%uMHz ceiling<=%uM band<=%uM hfreq=%u mr0=0x%x mr4=0x%x lat=0x%02x trc=0x%02x tcph=0x%02x TIMING=0x%08x LATENCY=0x%08x STATUS=0x%08x\r\n",
             (unsigned)SystemCoreClock,
             (unsigned)dev_mhz,
+            (unsigned)band_ceiling_mhz,
             (unsigned)band->dev_mhz_max,
             (unsigned)band->hfreq,
             (unsigned)band->mr0_read,

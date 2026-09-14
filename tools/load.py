@@ -47,6 +47,7 @@ the newly-uploaded cart image under the requested mapper.
 
 import argparse
 import os
+import re
 import serial
 import sys
 import time
@@ -193,6 +194,47 @@ def send_cmd(ser, cmd, expect, timeout=10.0, echo=True):
         sys.exit(1)
     return buf
 
+def verify_upload(ser, data, addr, timeout=10.0):
+    """Read back the uploaded image through DUMP and compare it byte-for-byte."""
+    dump_re = re.compile(
+        rb"(?:^|\r\n|> )DUMP ([0-9a-fA-F]+) ([0-9a-fA-F]+):((?: [0-9a-fA-F]{2})*)"
+    )
+    chunk_size = 256  # DUMP caps responses at 256 bytes in the firmware.
+    for offset in range(0, len(data), chunk_size):
+        expected = data[offset:offset + chunk_size]
+        command_addr = addr + offset
+        buf = send_cmd(
+            ser, f"DUMP {command_addr:x} {len(expected):x}", "DUMP",
+            timeout=timeout, echo=False,
+        )
+        match = dump_re.search(bytes(buf))
+        if match is None:
+            sys.stderr.write(
+                f"malformed DUMP response at 0x{command_addr:x}: {buf!r}\n"
+            )
+            sys.exit(1)
+        response_addr = int(match.group(1), 16)
+        response_len = int(match.group(2), 16)
+        actual = bytes.fromhex(match.group(3).decode("ascii"))
+        if response_addr != command_addr or response_len != len(expected):
+            sys.stderr.write(
+                f"DUMP header mismatch: requested 0x{command_addr:x} "
+                f"{len(expected)} bytes, got 0x{response_addr:x} "
+                f"{response_len} bytes\n"
+            )
+            sys.exit(1)
+        if actual != expected:
+            mismatch = next(i for i, (got, want) in enumerate(zip(actual, expected))
+                             if got != want)
+            sys.stderr.write(
+                f"verification failed at 0x{command_addr + mismatch:x}: "
+                f"got 0x{actual[mismatch]:02x}, expected 0x{expected[mismatch]:02x}\n"
+            )
+            sys.exit(1)
+        print(f"verified {offset + len(expected)}/{len(data)} bytes")
+
+    print("upload verification OK")
+
 def wait_for_prompt(ser, timeout=15.0):
     """Block until we see the prompt bytes or timeout.
 
@@ -251,6 +293,8 @@ def main():
                     help="skip MAP command (upload only, keep current mapper)")
     ap.add_argument("--keep", action="store_true",
                     help="do NOT pulse MSX reset after upload")
+    ap.add_argument("--verify", action="store_true",
+                    help="read back and verify the uploaded game before reset")
     ap.add_argument("--reset-ms", type=int, default=100,
                     help="pulse MSX ~RESET for this many ms after upload "
                          "(default 100). Ignored if --keep is set.")
@@ -353,7 +397,11 @@ def main():
                 sys.exit(1)
         print("upload OK")
 
-        # 5) Optionally pulse MSX reset so it re-reads the cart slot
+        # 5) Optionally read back the image before allowing the MSX to boot.
+        if args.verify:
+            verify_upload(ser, data, args.addr)
+
+        # 6) Optionally pulse MSX reset so it re-reads the cart slot
         #    and boots the newly uploaded ROM.
         if not args.keep:
             send_cmd(ser, f"RST {args.reset_ms}", "OK", echo=False)

@@ -4,12 +4,39 @@
  * Version            : V1.0.0
  * Date               : 2025/12/01
  * Description        : CH32V4x7 Device Peripheral Access Layer System Source File.
- *                      For HSE = 25Mhz
+ *                      For HSE = 25Mhz (external active oscillator, bypass mode)
  *********************************************************************************
  * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
  * Attention: This software (modified or not) and binary are used for
  * microcontroller manufactured by Nanjing Qinheng Microelectronics.
  *******************************************************************************/
+
+/* Override the WCH default HSE crystal frequency BEFORE including
+ * ch32v4x7.h. The library header defaults HSE_VALUE to 8 MHz, but the
+ * RISKYMSX2 board uses an external 25 MHz active oscillator in HSE
+ * BYPASS mode (see SetSYSCLK_*_HSE() below). The wrong default only
+ * broke *some* clock paths: the PLL configuration (PLLMULL + USBHSPLL
+ * pre-divider) is encoded as a register constant that does NOT depend
+ * on HSE_VALUE, so the actual chip frequency is correct in every
+ * mode. But RCC_GetClocksFreq() and SystemCoreClockUpdate() both
+ * derive their return value from HSE_VALUE * pllmull (case
+ * RCC_SYSPLLSRC_PLL). With HSE_VALUE=8 MHz those return
+ *
+ *   8 MHz * 16 / 1 = 128 MHz  (chip actually runs at 400 MHz)
+ *   8 MHz * 14 / 1 = 112 MHz  (chip actually runs at 350 MHz)
+ *
+ * Anything that asks for the bus clock gets a number ~3.125x too low
+ * and configures itself wrong. The visible symptom: USART1 baud
+ * register is computed for an "PCLK2 = 128 MHz" universe while the
+ * real PCLK2 is 200 MHz, so the host sees ~1.56x overspeed
+ * (gibberish). The two configs that *appear* to work are the ones
+ * that bypass this code path entirely:
+ *   SYSCLK_120MHz_HCLK_60MHz_HSE -> USBHSPLL/4  (case returns 480M const)
+ *   SYSCLK_480MHz_HCLK_240MHz_HSI -> HSI * 24  (HSI_VALUE is already 20M)
+ * Define HSE_VALUE to the real board value so every derived clock
+ * matches reality, on all SYSCLK profiles. */
+#define HSE_VALUE 25000000UL
+
 #include "ch32v4x7.h"
 
 /*
@@ -19,30 +46,23 @@
  */
 // #define SYSCLK_HCLK_HSE    HSE_VALUE
 // #define SYSCLK_120MHz_HCLK_60MHz_HSE   120000000
-// #define SYSCLK_240MHz_HCLK_120MHz_HSE  240000000
-// #define SYSCLK_350MHz_HCLK_175MHz_HSE  350000000
-// #define SYSCLK_400MHz_HCLK_200MHz_HSE  400000000
-// #define SYSCLK_HCLK_HSI    HSI_VALUE
-// #define SYSCLK_120MHz_HCLK_60MHz_HSI 120000000
-// #define SYSCLK_240MHz_HCLK_120MHz_HSI 240000000
-#define SYSCLK_350MHz_HCLK_175MHz_HSI 350000000
- //#define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
+ //#define SYSCLK_240MHz_HCLK_120MHz_HSE 240000000
+ //#define SYSCLK_350MHz_HCLK_175MHz_HSE 350000000
+#define SYSCLK_400MHz_HCLK_200MHz_HSE 400000000
+//  #define SYSCLK_HCLK_HSI    HSI_VALUE
+//  #define SYSCLK_120MHz_HCLK_60MHz_HSI   120000000
+//  #define SYSCLK_240MHz_HCLK_120MHz_HSI  240000000
+// #define SYSCLK_350MHz_HCLK_175MHz_HSI  350000000
+// #define SYSCLK_400MHz_HCLK_200MHz_HSI  400000000
 
 /*Only suitable for commercial applications, with a temperature not exceeding 70 °C and good heat dissipation*/
-/* RISKYMSX2 NOTE: do NOT enable the 480MHz/240MHz-HCLK profiles. The PSRAM
- * controller is an HB-bus peripheral clocked by HCLK, and it drives the
- * on-die PSRAM device at 2xHCLK (dual-edge; WCH's PSRAM_300MHz_HSE example
- * = HCLK 150MHz with 300M mode-register codes). At HCLK=240MHz the device
- * sees 480MHz - above its highest mode-register operating range (400M) -
- * and reads return garbage (0xA0 pattern) no matter what TRC/TCPH/LATENCY
- * values are programmed. The core also runs at HCLK on this chip, so there
- * is no divider that can run the core at 240MHz while slowing the PSRAM.
- * HCLK=200MHz (SYSCLK_400MHz_* above) is the maximum with reliable PSRAM,
- * and 200MHz is also the QingKe V3V core's rated maximum. */
-// #define SYSCLK_480MHz_HCLK_240MHz_HSE    480000000
-// #define SYSCLK_480MHz_HCLK_240MHz_HSI 480000000
+/*
+
 // #define SYSCLK_480MHz_HCLK_240MHz_HSI    480000000
+*/
+
 /* Clock Definitions */
+// #define SYSCLK_480MHz_HCLK_240MHz_HSE 480000000
 uint32_t HCLKClock;
 #ifdef SYSCLK_HCLK_HSE
 uint32_t SystemClock = SYSCLK_HCLK_HSE; /* System Clock Frequency */
@@ -270,7 +290,9 @@ static void SetSysClock (void) {
 static void SetSYSCLK_HCLK_HSE (void) {
     __IO uint32_t StartUpCounter = 0, HSEStatus = 0, FLASH_Temp = 0;
 
-    RCC->CTLR |= ((uint32_t)RCC_HSEON);
+    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN.
+     * HSEBYP must be written before HSEON (or at the same time). */
+    RCC->CTLR |= (uint32_t)(RCC_HSEBYP | RCC_HSEON);
 
     /* Wait till HSE is ready and if Time out is reached exit */
     do {
@@ -330,7 +352,8 @@ static void SetSYSCLK_HCLK_HSE (void) {
 static void SetSYSCLK_120MHz_HCLK_60MHz_HSE (void) {
     __IO uint32_t StartUpCounter = 0, HSEStatus = 0, FLASH_Temp = 0;
 
-    RCC->CTLR |= ((uint32_t)RCC_HSEON);
+    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN. */
+    RCC->CTLR |= (uint32_t)(RCC_HSEBYP | RCC_HSEON);
 
     /* Wait till HSE is ready and if Time out is reached exit */
     do {
@@ -403,7 +426,8 @@ static void SetSYSCLK_120MHz_HCLK_60MHz_HSE (void) {
 static void SetSYSCLK_240MHz_HCLK_120MHz_HSE (void) {
     __IO uint32_t StartUpCounter = 0, HSEStatus = 0, FLASH_Temp = 0;
 
-    RCC->CTLR |= ((uint32_t)RCC_HSEON);
+    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN. */
+    RCC->CTLR |= (uint32_t)(RCC_HSEBYP | RCC_HSEON);
 
     /* Wait till HSE is ready and if Time out is reached exit */
     do {
@@ -476,7 +500,8 @@ static void SetSYSCLK_240MHz_HCLK_120MHz_HSE (void) {
 static void SetSYSCLK_350MHz_HCLK_175MHz_HSE (void) {
     __IO uint32_t StartUpCounter = 0, HSEStatus = 0, FLASH_Temp = 0;
 
-    RCC->CTLR |= ((uint32_t)RCC_HSEON);
+    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN. */
+    RCC->CTLR |= (uint32_t)(RCC_HSEBYP | RCC_HSEON);
 
     /* Wait till HSE is ready and if Time out is reached exit */
     do {
@@ -550,7 +575,8 @@ static void SetSYSCLK_350MHz_HCLK_175MHz_HSE (void) {
 static void SetSYSCLK_400MHz_HCLK_200MHz_HSE (void) {
     __IO uint32_t StartUpCounter = 0, HSEStatus = 0, FLASH_Temp = 0;
 
-    RCC->CTLR |= ((uint32_t)RCC_HSEON);
+    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN. */
+    RCC->CTLR |= (uint32_t)(RCC_HSEBYP | RCC_HSEON);
 
     /* Wait till HSE is ready and if Time out is reached exit */
     do {
@@ -631,7 +657,8 @@ static void SetSYSCLK_480MHz_HCLK_240MHz_HSE (void) {
     tmpreg |= PWR_VDDK_Level4;
     PWR->CTLR = tmpreg;
 
-    RCC->CTLR |= ((uint32_t)RCC_HSEON);
+    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN. */
+    RCC->CTLR |= (uint32_t)(RCC_HSEBYP | RCC_HSEON);
 
     /* Wait till HSE is ready and if Time out is reached exit */
     do {

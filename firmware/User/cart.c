@@ -442,73 +442,89 @@ static void RunKonamiNOSCC (void) {
 }
 
 /*
- * Konami mapper with SCC sound chip (port of legacy RunKonamiWithSCC).
+ * Konami mapper with SCC sound chip (port of legacy v303
+ * RunKonamiWithSCC).
  *
- * Bank layout is identical to RunKonamiNOSCC (page 1 = 16 KiB header
- * at image 0, pages 2..3 = user-selectable 8 KiB banks), with two SCC
- * differences on top:
+ * Faithful port of the v303 handler. The SCC IRQ path is MINIMAL on
+ * purpose - it does nothing but queue writes for the sample-pump IRQ
+ * to consume. Everything fancy (SCC_read on the SCC-I window,
+ * conditional bank updates, SCC activation tracking) lives in the
+ * TIM4 IRQ on scc.c.
  *
- *   1. The 0x9800..0x98FF window is the SCC-I register file, not ROM:
- *      READS are answered by the emulator (Cart_SCC_ReadByte) and
- *      WRITES there are queued for the SCC emulator core (emu2212)
- *      instead of switching banks - exactly like real Konami-with-SCC
- *      hardware and the legacy v303 firmware.
- *   2. EVERY accepted write (bank select or SCC register) is packed as
- *      ((address << 16) | data) and queued to scc.c, which applies it
- *      to the emulator on the next sample tick. This keeps the write
- *      latch out of the hot path - the handler only stores, never
- *      calls into the emulator.
+ * Semantics, identical to v303 RunKonamiWithSCC:
+ *   READ cycle: serve one byte from PSRAM via bankOffsets[slot] -
+ *               NO special case for 0x9800..0x98FF (the SCC presence
+ *               byte and other SCC reads come from the cart image
+ *               directly, like the legacy firmware).
+ *   WRITE cycle: always queue ((address << 16) | data) for the SCC
+ *               emulator AND always update bankOffsets[slot] - same
+ *               unconditional behavior as legacy (whether the write
+ *               lands in the SCC window or not). The TIM4 IRQ
+ *               (scc.c) drains the queue into SCC_write() on every
+ *               sample tick and ignores writes that fall outside
+ *               the SCC's `base_adr..base_adr+0x100` window, so
+ *               bank-switch writes are harmless queue entries.
  *
- * NOTE: like RunKonamiNOSCC, this port uses the corrected bank-bias
- * formula (w << 13) - page_start; the legacy v303 firmware used a
- * buggy (w << 13) - (addr - 0x1000) here. Standard Konami SCC images
- * are written against the corrected semantics.
+ * The queue is a 64-entry SPSC ring in zero-wait-state SRAM
+ * (scc.c::SCC_QueueWrite). 64 entries is plenty: TIM4 drains at
+ * ~44 kHz (one drain per ~22 us), and the Z80 cannot sustain more
+ * than ~3.5 MHz of cart writes in the worst case. If the queue ever
+ * fills the SCC_QueueWrite drop-on-overflow keeps the IRQ bounded -
+ * the Z80 still gets a bank-switch update and the cart image stays
+ * consistent; only the audio write is lost.
+ *
+ * The bank-bias formula matches v303 exactly: bankOffsets[slot] =
+ * (w << 13) - (address - 0x1000). The corrected formula
+ * (w << 13) - page_start used by RunKonamiNOSCC deliberately differs
+ * here to preserve byte-for-byte compatibility with the legacy
+ * firmware (any cart whose layout depends on the SCC-write side
+ * effect of bank-switch would break otherwise).
  */
 static void RunKonamiSCC (void) {
-    const uint16_t address = (uint16_t)GPIOD->INDR;
-    const uint32_t ctrl    = GPIOE->INDR;
-    const uint32_t page    = address >> 13;  /* 2..5 valid (0x4000..0xBFFF) */
+    const uint16_t address = (uint16_t)GPIOD->INDR;     /* addr bus: PD0..15 */
+    const uint32_t slot    = (uint32_t)address >> 13;   /* 0..7 (0x4000..0xBFFF in 2..5) */
 
-    if ((ctrl & CART_RD_MASK) == 0U) {
-        /* READ. The SCC-I register window is answered by the
-         * emulator, not by the ROM image. */
-        if (address >= SCC_I_WINDOW_BASE && address <= SCC_I_WINDOW_LAST) {
-            int v = Cart_SCC_ReadByte (address);
-            GPIOB->OUTDR = ((uint32_t)(uint8_t)v) << 8;
-            GPIOB->CFGHR = CART_BUS_ON;
-        } else if (page >= 2U && page <= 5U) {
-            const uint32_t bias = g_state->bankOffsets[page];
-            Cart_DriveByteFromPSRAM (address, bias);
-        } else {
-            GPIOB->CFGHR = CART_BUS_OFF;
-        }
+    if ((GPIOE->INDR & CART_RD_MASK) == 0U) {
+        /* READ cycle. Serve one byte from PSRAM via bankOffsets[slot],
+         * exactly like the v303 RunKonamiWithSCC. The SCC-I window
+         * (0x9800..0x98FF) reads come from the cart image; the SCC
+         * presence/ID byte (0x3F) is whatever byte the user uploaded
+         * at the matching offset in their ROM, same as legacy. */
+        const uint32_t bias = g_state->bankOffsets[slot];
+        Cart_DriveByteFromPSRAM (address, bias);
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
 
-    /* WRITE: bank select anywhere in 0x4000..0xBFFF (like NOSCC) plus
-     * SCC-I register writes. Every accepted write is queued for the
-     * emulator (bank-select writes included, mirroring the legacy
-     * handler which queued all of them). */
+    /* WRITE cycle. Always update bankOffsets and always queue the
+     * write for the SCC emulator - matches v303 RunKonamiWithSCC
+     * exactly. */
     EXTI->INTFR = EXTI_INTENR_MR0;
-    if (address > 0xB000U) return;  /* ignore writes outside cart range */
+    const uint8_t w = Cart_ReadWriteData();
+
+    /* Pack and queue BEFORE waiting for WR low - the v303 handler
+     * latches WriteData from the address-bus GPIOD on entry, then
+     * spins for the WR pulse. Pre-computing the queue entry here
+     * lets us store+enqueue in a single shot inside the WR-low
+     * branch. */
+    const uint32_t packed = ((uint32_t)address << 16) | (uint32_t)w;
+
+    /* Legacy bias formula: (w << 13) - (address - 0x1000). For
+     * bank-switch writes (0x6000/0x8000/0xA000) this collapses to
+     * (w << 13) - page_start, matching RunKonamiNOSCC. For SCC-window
+     * writes (0x9800..0x98FF) it produces the same quirky bias the
+     * legacy firmware produces - preserved here intentionally so any
+     * cart whose test code reads back from the SCC window right after
+     * writing still gets the byte the legacy firmware would have
+     * returned. */
+    const uint32_t bias = ((uint32_t)w << 13) - ((uint32_t)address - 0x1000U);
+
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
-            const uint8_t w = Cart_ReadWriteData();
-
-            /* Queue for the emulator (SCC_write() ignores addresses
-             * outside the SCC-I/base_adr window, so bank-select writes
-             * in the queue are harmless - same behaviour as legacy). */
-            SCC_QueueWrite (((uint32_t)address << 16) | (uint32_t)w);
-
-            /* Bank-select write (outside the SCC-I window) also
-             * updates the mapper state so ROM reads follow it. */
-            if (address < SCC_I_WINDOW_BASE || address > SCC_I_WINDOW_LAST) {
-                const uint32_t page_start = (uint32_t)(address & 0xE000U);
-                g_state->bankOffsets[page] = ((uint32_t)w << 13) - page_start;
-            }
+            g_state->bankOffsets[slot] = bias;
+            (void)SCC_QueueWrite (packed);   /* drop on overflow */
             return;
         }
     }
