@@ -4,7 +4,7 @@
  * Version            : V1.0.0
  * Date               : 2025/12/01
  * Description        : CH32V4x7 Device Peripheral Access Layer System Source File.
- *                      For HSE = 25Mhz (external active oscillator, bypass mode)
+ *                      For HSE = 25Mhz (passive crystal on OSC_IN/OSC_OUT, no BYPASS)
  *********************************************************************************
  * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
  * Attention: This software (modified or not) and binary are used for
@@ -13,8 +13,10 @@
 
 /* Override the WCH default HSE crystal frequency BEFORE including
  * ch32v4x7.h. The library header defaults HSE_VALUE to 8 MHz, but the
- * RISKYMSX2 board uses an external 25 MHz active oscillator in HSE
- * BYPASS mode (see SetSYSCLK_*_HSE() below). The wrong default only
+ * RISKYMSX2 board uses a 25 MHz passive crystal on OSC_IN/OSC_OUT
+ * (Y1 + C22/C24, per pinout.txt) with the on-chip oscillator driving
+ * it (HSEBYP clear, see SetSYSCLK_350MHz_HCLK_175MHz_HSE() below). The
+ * wrong default only
  * broke *some* clock paths: the PLL configuration (PLLMULL + USBHSPLL
  * pre-divider) is encoded as a register constant that does NOT depend
  * on HSE_VALUE, so the actual chip frequency is correct in every
@@ -45,15 +47,15 @@
  * If none of the define below is enabled, the HSI is used as System clock source.
  */
 // #define SYSCLK_HCLK_HSE    HSE_VALUE
-// #define SYSCLK_120MHz_HCLK_60MHz_HSE   120000000
- //#define SYSCLK_240MHz_HCLK_120MHz_HSE 240000000
- //#define SYSCLK_350MHz_HCLK_175MHz_HSE 350000000
-#define SYSCLK_400MHz_HCLK_200MHz_HSE 400000000
-//  #define SYSCLK_HCLK_HSI    HSI_VALUE
-//  #define SYSCLK_120MHz_HCLK_60MHz_HSI   120000000
-//  #define SYSCLK_240MHz_HCLK_120MHz_HSI  240000000
-// #define SYSCLK_350MHz_HCLK_175MHz_HSI  350000000
-// #define SYSCLK_400MHz_HCLK_200MHz_HSI  400000000
+ #define SYSCLK_120MHz_HCLK_60MHz_HSE   120000000
+// #define SYSCLK_240MHz_HCLK_120MHz_HSE 240000000
+//#define SYSCLK_350MHz_HCLK_175MHz_HSE 350000000
+ //#define SYSCLK_400MHz_HCLK_200MHz_HSE 400000000
+//   #define SYSCLK_HCLK_HSI    HSI_VALUE
+//   #define SYSCLK_120MHz_HCLK_60MHz_HSI   120000000
+//   #define SYSCLK_240MHz_HCLK_120MHz_HSI  240000000
+//  #define SYSCLK_350MHz_HCLK_175MHz_HSI  350000000
+//  #define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
 
 /*Only suitable for commercial applications, with a temperature not exceeding 70 °C and good heat dissipation*/
 /*
@@ -500,8 +502,12 @@ static void SetSYSCLK_240MHz_HCLK_120MHz_HSE (void) {
 static void SetSYSCLK_350MHz_HCLK_175MHz_HSE (void) {
     __IO uint32_t StartUpCounter = 0, HSEStatus = 0, FLASH_Temp = 0;
 
-    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN. */
-    RCC->CTLR |= (uint32_t)(RCC_HSEBYP | RCC_HSEON);
+    /* HSE in crystal mode (NOT BYPASS): the on-chip oscillator drives
+     * OSC_IN/OSC_OUT to oscillate the Y1 25 MHz passive crystal on the
+     * RISKYMSX2 board (see pinout.txt pins 12/13, C22/C24 load caps).
+     * HSEBYP is left clear so the chip waits for actual oscillation
+     * startup before HSERDY asserts. */
+    RCC->CTLR |= (uint32_t)RCC_HSEON;
 
     /* Wait till HSE is ready and if Time out is reached exit */
     do {

@@ -1,0 +1,19 @@
+
+  Ideas / Requests
+=====================
+
+* JoyMega
+* Trackball, Arkanoid Vaus paddle, Touchpad, Light-pen, Light-gun
+* Auto detection of controller type software is trying to read
+* Auto tuned Turbo to maintain constant framerate
+* Nextor update
+* LHZ support
+* Include WebMSX drivers on SymbOS pack
+
+  BUGS
+=========
+
+* Change donation message
+* CODE key does not change label on the settings screen
+* Baltak demo freezes. At different position when coming from savestates of different machine type???
+* Text on touch buttons is a little down on integrated Android browser?

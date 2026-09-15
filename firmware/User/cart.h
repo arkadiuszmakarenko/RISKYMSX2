@@ -19,9 +19,10 @@
  */
 
 /* Control-bus bit masks within GPIOE->INDR */
-#define CART_SLTSL_MASK   0x0001U  /* PE0 */
-#define CART_RD_MASK      0x0002U  /* PE1 */
-#define CART_WR_MASK      0x0004U  /* PE2 */
+#define CART_SLTSL_MASK   0x0001U  /* PE0  ~SLTSL  (slot select, EXTIO trigger) */
+#define CART_RD_MASK      0x0002U  /* PE1  ~RD */
+#define CART_WR_MASK      0x0004U  /* PE2  ~WR */
+#define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
 
 /* Data bus drive config for GPIOB CFGHR (pins 8..15).
  * 0x3 nibble = 50MHz push-pull output, 0x4 nibble = floating input. */

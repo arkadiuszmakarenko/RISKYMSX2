@@ -1,5 +1,5 @@
 /*
- * Command-line interface over USART1 (PA9=TX, PA10=RX @ 115200 8N1).
+ * Command-line interface over USART1 (PA9=TX, PA10=RX @ 921600 8N1).
  *
  * Line-oriented ASCII protocol. Commands are terminated by '\r' or '\n'
  * (echoed as received). Each command produces an OK/ERR response followed
@@ -25,6 +25,27 @@
  *                                2-digit hex pairs with a trailing CRLF.
  *                                Replies
  *                                  DUMP <hexaddr> <len>: <byte> <byte> ...
+ *                                or ERR.
+ *   USB                        - poll the USBHS root hub and start
+ *                                enumeration if a device is attached.
+ *                                Prints OK <speed> <in> <out> on success
+ *                                or ERR <code> on failure. Idempotent;
+ *                                retries enum/mount up to 5x internally
+ *                                to ride out stick-settle delays.
+ *   USBD                       - verbose enumeration diagnostic. Walks
+ *                                the full USBHS host pipeline (port
+ *                                enable, device descriptor, config,
+ *                                MSC endpoint scan, SCSI READ CAPACITY
+ *                                with REQUEST SENSE dump on failure).
+ *                                Does NOT mount the volume, so it's
+ *                                safe to run when the stick refuses to
+ *                                enumerate.
+ *   LS [path]                  - list the first 16 entries of the root
+ *                                directory (or `path` if given) of the
+ *                                mounted FAT volume. Path defaults to "/".
+ *   CAT <path> <addr> <len>    - copy <len> bytes of <path> from the USB
+ *                                stick into PSRAM at <addr>. Uses DMA to
+ *                                land the data. Replies "OK <copied>"
  *                                or ERR.
  *
  * The RX side runs from USART1_IRQHandler in cli.c; CLI_Init() configures

@@ -32,7 +32,7 @@ Usage:
     # Port auto-detected if omitted:
     python3 load.py nemesis.rom --map KONAMI
 
-Protocol (USART1, 115200 8N1):
+Protocol (USART1, 921600 8N1):
     host ->  "MAP <name>\r\n"
     cart -> "OK MAP <name> @ <hex>\r\n> "      (or ERR if PSRAM not ready)
     host ->  "XLOAD <addr> <len>\r\n"
@@ -298,8 +298,8 @@ def main():
     ap.add_argument("--reset-ms", type=int, default=100,
                     help="pulse MSX ~RESET for this many ms after upload "
                          "(default 100). Ignored if --keep is set.")
-    ap.add_argument("--baud", type=int, default=115200,
-                    help="serial baud (default 115200)")
+    ap.add_argument("--baud", type=int, default=921600,
+                    help="serial baud (default 921600)")
     ap.add_argument("--chunk", type=int, default=4096,
                     help="write chunk size (default 4096 bytes)")
     args = ap.parse_args()

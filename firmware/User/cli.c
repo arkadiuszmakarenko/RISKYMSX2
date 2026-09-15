@@ -23,6 +23,8 @@
 #include "ch32v4x7.h"
 #include "cart.h"
 #include "psram.h"
+#include "usb_disk.h"
+#include "ff.h"
 #include "scc.h"
 #include "debug.h"
 #include <string.h>
@@ -110,7 +112,7 @@ static void CLI_USART1_Periph_Init(uint32_t baud)
 void CLI_Init(void)
 {
     CLI_USART1_GPIO_Init();
-    CLI_USART1_Periph_Init(115200U);
+    CLI_USART1_Periph_Init(921600U);
 
     printf ("\r\nCLI ready. Type HELP for commands.\r\n> ");
 }
@@ -183,6 +185,10 @@ static void CLI_HandleLine(char *line)
         printf ("  PE4                        - read current PE4 state (0=low, 1=high)\r\n");
         printf ("  MAP [name|none]            - show or switch the active cart mapper\r\n");
         printf ("  SCC                        - SCC emulator diagnostics (queue level, mapper)\r\n");
+        printf ("  USB                        - enumerate/mount attached USB stick\r\n");
+        printf ("  USBD                       - verbose USB enumeration diagnostic\r\n");
+        printf ("  LS [path]                  - list directory (default root)\r\n");
+        printf ("  CAT <path> <addr> <len>    - copy file from USB stick into PSRAM\r\n");
         printf ("  LOAD <hexaddr> <bytes...>  - write hex bytes into PSRAM image window\r\n");
         printf ("  XLOAD <hexaddr> <len>      - raw binary upload (script-driven)\r\n");
         printf ("  DUMP <hexaddr> <len>       - read <len> bytes from PSRAM image window\r\n");
@@ -217,6 +223,81 @@ static void CLI_HandleLine(char *line)
             } else {
                 printf ("ERR MAP: unknown name or PSRAM not initialised\r\n");
             }
+        }
+    }
+    else if (CLI_Token(line, "USB")) {
+        /* Force enumeration + mount (and print the stick speed on
+         * success).  The lazy-mount helper does the same thing
+         * implicitly before every LS / CAT, so this command is just a
+         * way to get a status print without touching the volume. */
+        uint8_t r = USB_TryEnsureMounted ();
+        if (r == DEF_SUCCESS) {
+            uint8_t sp = RootHubDev[DEF_USB_PORT].bSpeed;
+            const char *spname =
+                (sp == USB_HIGH_SPEED) ? "HS" :
+                (sp == USB_FULL_SPEED) ? "FS" :
+                (sp == USB_LOW_SPEED)  ? "LS" : "?";
+            printf ("OK USB %s in=0x%02x out=0x%02x\r\n",
+                    spname, (unsigned)usb_in_ep, (unsigned)usb_out_ep);
+        } else if (r == DEF_ERR_DETECT) {
+            printf ("ERR USB: no device\r\n");
+        } else if (r == DEF_ERR_ENUM) {
+            /* Lazy-mount returns DEF_ERR_ENUM for both real enum
+             * failure and "f_mount failed after enum".  The helper
+             * already prints a "FAT: f_mount failed (...)" line in
+             * the second case, so we can tell the user what to retry. */
+            printf ("ERR USB: see message above (try `USB` again, "
+                    "stick may still be settling)\r\n");
+        } else {
+            printf ("ERR USB: %02x\r\n", (unsigned)r);
+        }
+    }
+    else if (CLI_Token(line, "USBD")) {
+        /* Verbose enumeration diagnostic.  Prints every step of the
+         * USBHS host controller path + each SCSI retry, including
+         * REQUEST SENSE data after a failed READ CAPACITY.  Use this
+         * when `USB` fails silently with FR_NOT_READY (3). */
+        USB_DiagEnumerate ();
+    }
+    else if (CLI_Token(line, "LS")) {
+        const char *p = line + 2;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '\0' || *p == '\r' || *p == '\n') p = "/";
+        USB_ListDir (p, 16);
+    }
+    else if (CLI_Token(line, "CAT")) {
+        /* CAT <path> <psram_hexaddr> <hex_len_bytes>  -- copy file into PSRAM.
+         * Uses FATFS reads into a small SRAM scratch buffer (512 B) and
+         * PSRAM DMA to push each chunk into the cart image window. */
+        const char *p = line + 3;
+        while (*p == ' ' || *p == '\t') p++;
+        /* Path is everything up to the next space. */
+        char path[64];
+        uint8_t pi = 0;
+        while (*p && *p != ' ' && *p != '\t'
+               && *p != '\r' && *p != '\n' && pi < 63) {
+            path[pi++] = *p++;
+        }
+        path[pi] = '\0';
+        while (*p == ' ' || *p == '\t') p++;
+        uint32_t addr = 0U, len = 0U;
+        if (CLI_ParseHex (&p, &addr, 8) != 0
+            || CLI_ParseHex (&p, &len,  8) != 0) {
+            printf ("ERR CAT: bad args (need CAT <path> <addr> <len>)\r\n");
+            return;
+        }
+        if (len == 0U) { printf ("OK 0\r\n"); return; }
+        if (addr >= PSRAM_CART_SIZE
+            || addr + len > PSRAM_CART_SIZE) {
+            printf ("ERR CAT: addr+len > PSRAM cart window\r\n");
+            return;
+        }
+        uint32_t got = USB_FileToPSRAM (path,
+                                        PSRAM_CART_BASE + addr, len);
+        if (got == 0U) {
+            printf ("ERR CAT: copy failed\r\n");
+        } else {
+            printf ("OK %u\r\n", (unsigned)got);
         }
     }
     else if (CLI_Token(line, "SCC")) {
@@ -330,15 +411,15 @@ static void CLI_HandleLine(char *line)
 /* ------------------------------------------------------------------ */
 /* Command dispatch happens in the MAIN LOOP (CLI_Service), not in the
  * IRQ: printf() busy-waits on TXE for every character of a response,
- * which can block the IRQ for ~1.5 ms at 115200. Meanwhile the USART
- * RX register is only 1 deep - any byte the host sends during that
- * window is lost (ORE). The XLOAD host pumps bytes back-to-back, so a
- * command issued while a previous response was still printing would
- * lose its leading characters and dispatch as garbage ("ERR unknown
- * command"). Deferring dispatch to main() means the IRQ never spends
- * longer than one echo byte in the handler, and the dispatcher can
- * only start when the previous response fully drained (prompt printed,
- * flag cleared). */
+ * which at 921600 baud blocks the IRQ for ~190 us for an 18-byte echo.
+ * Meanwhile the USART RX register is only 1 deep - any byte the host
+ * sends during that window is lost (ORE). The XLOAD host pumps bytes
+ * back-to-back, so a command issued while a previous response was
+ * still printing would lose its leading characters and dispatch as
+ * garbage ("ERR unknown command"). Deferring dispatch to main() means
+ * the IRQ never spends longer than one echo byte in the handler, and
+ * the dispatcher can only start when the previous response fully
+ * drained (prompt printed, flag cleared). */
 
 /* Set by the IRQ when a full command line is ready for dispatch. */
 static volatile uint8_t s_line_ready = 0U;

@@ -81,8 +81,8 @@ static void Cart_Banked_Dispatch (void) __attribute__((section(".ramfunc"), noin
  * via a normal jal. They are PLAIN C functions (no interrupt
  * attribute) - the interrupt prologue/epilogue (mret) lives in
  * Cart_Banked_Dispatch, which is the actual VTF entry point.
- * (An asm translation of RunKonamiNOSCC is documented below as a
- * future optimization; the live C body is restored for now.) */
+ * KONAMINOSCC also has a hand-scheduled asm twin installed directly
+ * via SetVTFIRQ - see Cart_EXTI0_KonamiNOSCC_Handler below. */
 static void RunKonamiNOSCC (void) __attribute__((section(".ramfunc"), noinline));
 static void RunKonami  (void) __attribute__((section(".ramfunc"), noinline));
 static void RunKonamiSCC (void) __attribute__((section(".ramfunc"), noinline));
@@ -159,9 +159,9 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ROM48k:      h = (uint32_t)Cart_EXTI0_ROM48k_Handler; break;
     case CART_MAP_KONAMI:
     case CART_MAP_KONAMISCC:
-    case CART_MAP_KONAMINOSCC:
     case CART_MAP_NEO8:
     case CART_MAP_NEO16:       h = (uint32_t)Cart_Banked_Dispatch; break;
+    case CART_MAP_KONAMINOSCC: h = (uint32_t)Cart_EXTI0_KonamiNOSCC_Handler; break;
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
     default:                   return -1;
@@ -407,9 +407,9 @@ static void RunKonami (void) {
  * Bank bias: bankOffsets[page] = (data << 13) - page_start, where
  * page_start = page * 0x2000.
  *
- * NOTE: this C body is the reference implementation - the asm
- * Cart_EXTI0_KonamiNOSCC_Handler replaces it at runtime when
- * KONAMINOSCC is selected. Kept here as a sanity-check reference.
+ * NOTE: this C body is kept as a reference / fallback. The asm
+ * Cart_EXTI0_KonamiNOSCC_Handler is installed directly in the VTF
+ * slot for KONAMINOSCC, so this C function is never called at runtime.
  */
 static void RunKonamiNOSCC (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
@@ -551,6 +551,19 @@ static void RunKonamiSCC (void) {
 static void Run8kASCII (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
     const uint32_t ctrl    = GPIOE->INDR;
+
+    /* Cycle qualifier: the cart is a memory-mapped device and must NOT
+     * respond on ~IORQ (port I/O), INTA, RFSH, or any other cycle type
+     * that happens to assert SLTSL. ~MREQ is the canonical "this is a
+     * memory access" signal - low during memory read/write and during
+     * opcode fetch (M1). If MREQ is high, release the bus and clear
+     * INTFR; the slot's other devices (or the bus itself) handle it. */
+    if ((ctrl & CART_MREQ_MASK) != 0U) {
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+        return;
+    }
 
     if ((ctrl & CART_RD_MASK) == 0U) {
         /* READ. Read slot = v303 formula ((addr >> 12) - 4) >> 1, i.e.
@@ -777,6 +790,7 @@ _Static_assert (PSRAM_CART_BASE   == 0x80000000UL, "asm bias drift");
 _Static_assert (CART_SLTSL_MASK   == 0x0001U, "asm SLTSL drift");
 _Static_assert (CART_RD_MASK     == 0x0002U, "asm RD drift");
 _Static_assert (CART_WR_MASK     == 0x0004U, "asm WR drift");
+_Static_assert (CART_MREQ_MASK    == 0x0020U, "asm MREQ drift");
 
 /* Konami-no-SCC, hand-scheduled asm. Port of RunKonamiNOSCC. Direct
  * VTF entry - no Cart_Banked_Dispatch hop on any cycle.
@@ -912,7 +926,11 @@ void Cart_EXTI0_KonamiNOSCC_Handler (void) {
  *
  * Semantics (identical to the C body):
  *   if (SLTSL already high) { bus off; INTFR clear; return; }  // late
+ *   if (~MREQ high)        { bus off; INTFR clear; spin SLTSL; return; }
+ *                                              // not a memory cycle:
+ *                                              // port I/O, INTA, etc.
  *   if (RD low) {                       // read cycle
+ *       if (~MREQ high on re-sample)   bail to late tail
  *       if (addr < 0x4000 || addr >= 0xC000) bus off + tail
  *       slot  = (addr >> 13) - 2          // 0..3, page-2 offset
  *       drive PSRAM[addr + bankOffsets[slot]]
@@ -921,6 +939,7 @@ void Cart_EXTI0_KonamiNOSCC_Handler (void) {
  *       INTFR clear;
  *       if (addr > 0xB000) return;
  *       while (SLTSL low) {
+ *           if (~MREQ high) keep polling // non-memory cycle, ignore
  *           if (WR low) {
  *               slot = (addr >> 11) & 3
  *               bankOffsets[slot] = (w - 2 - slot) << 13
@@ -950,16 +969,32 @@ void Cart_EXTI0_ASCII8k_Handler (void) {
         "beqz  a6, 1f                      \n" /* both low -> read, fast   */
         "andi  a7, a6, 1                   \n"
         "bnez  a7, 2f                      \n" /* SLTSL high -> late entry */
+        /* Cycle qualifier (memory-cycle gate). The cart is a
+         * memory-mapped device and must NOT respond on ~IORQ (port
+         * I/O), INTA, or other non-memory cycles that may slip
+         * through. ~MREQ is the canonical "this is a memory access"
+         * signal - low for memory read, memory write, and opcode
+         * fetch (M1). If MREQ is high at entry, the cycle is not for
+         * us: keep the bus off, clear INTFR, and wait for SLTSL to
+         * rise before returning. This avoids the bug where a port
+         * write to 0x6000/0x6800/0x7000/0x7800 silently re-banks
+         * the cart. */
+        "andi  a7, a6, 0x20                \n" /* ~MREQ = PE5 = bit5      */
+        "bnez  a7, 2f                      \n" /* MREQ high -> skip cycle */
         /* SLTSL low but RD high: a write, or ~RD has not fallen yet.
          * The C path samples ~RD after the dispatcher hop (always
          * settled); a single sample here races the SLTSL->RD gate
          * delay and misclassifies early READ cycles as writes (Z80
          * sees 0xFF all cycle - the observed failure). Poll until RD
-         * low (read) or WR low (write). */
+         * low (read) or WR low (write). Re-check MREQ on every poll
+         * iteration so the spin cannot miss a cycle that transitions
+         * from MREQ-high to MREQ-low (rare, but cheap to gate). */
         "3:                                \n"
         "lw    a6, -2040(t1)               \n"
         "andi  a7, a6, 1                   \n"
         "bnez  a7, 2f                      \n" /* SLTSL rose -> cycle over */
+        "andi  a7, a6, 0x20                \n" /* ~MREQ                    */
+        "bnez  a7, 3b                      \n" /* MREQ high -> spin on    */
         "andi  a7, a6, 2                   \n"
         "beqz  a7, 1f                      \n" /* RD low -> read           */
         "andi  a7, a6, 4                   \n" /* WR(bit2)                 */
@@ -981,8 +1016,12 @@ void Cart_EXTI0_ASCII8k_Handler (void) {
         "add   a2, a2, a1                  \n" /* %hi(s_state) + slot*4    */
         "sw    a7, %%lo(s_state)(a2)       \n" /* bankOffsets[slot] = bias */
         "j     2f                          \n"
-        /* ---- READ CYCLE ---- */
+        /* ---- READ CYCLE (re-check ~MREQ: bail if this is actually
+         * a port/INTA cycle that happened to assert RD) ---- */
         "1:                                \n"
+        "lw    a6, -2040(t1)               \n"
+        "andi  a7, a6, 0x20                \n" /* ~MREQ                    */
+        "bnez  a7, 2f                      \n" /* not a memory cycle ->    */
         "srli  a1, a0, 13                  \n" /* a1 = page (0..7)         */
         "addi  a2, a1, -2                  \n" /* a2 = slot = page - 2     */
         "sltiu a7, a2, 4                   \n" /* slot 0..3 ? (page 2..5)  */
