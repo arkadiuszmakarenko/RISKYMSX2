@@ -1,0 +1,328 @@
+<h1 id="chapter-28-addressable-rgb-argb">Chapter 28: Addressable RGB (ARGB)</h1>
+
+<p>The chip integrates a set of ARGB (Addressable RGB) modules, supporting configurable high/low level timing and period for 0-code and 1-code output, and supporting DMA.</p>
+
+<p>The ARGB module can implement single-data-line RGB light strip timing control, supporting single-wire RGB daisy-chaining. Compared with traditional RGB, it can support driving more different models of ARGB lamp control ICs, producing more lighting effects.</p>
+
+<h2 id="28.1-main-features">28.1 Main Features</h2>
+<ul>
+<li>Supports configurable high/low level timing and period for 0-code and 1-code output</li>
+<li>Supports DMA</li>
+</ul>
+
+<h2 id="28.2-register-description">28.2 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 28-1: ARGB Related Register List</caption>
+<thead>
+<tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+</thead>
+<tbody>
+<tr><td>R32_ARGB_CTLR</td><td>0x40025000</td><td>ARGB control register</td><td>0x00000000</td></tr>
+<tr><td>R32_ARGB_DAT_ARR</td><td>0x40025004</td><td>ARGB 0/1 code period configuration register</td><td>0x000003FF</td></tr>
+<tr><td>R32_ARGB_RST_ARR</td><td>0x40025008</td><td>ARGB RESET code width configuration</td><td>0x0001FFFF</td></tr>
+<tr><td>R32_ARGB_CCRL</td><td>0x4002500C</td><td>ARGB 0-code high level T0H width configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_ARGB_CCRH</td><td>0x40025010</td><td>ARGB 1-code high level T1H width configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_ARGB_DAT_CYC</td><td>0x40025014</td><td>ARGB data refresh cycle length configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_ARGB_DATAR</td><td>0x40025018</td><td>ARGB data register</td><td>0x00000000</td></tr>
+<tr><td>R32_ARGB_STATR</td><td>0x4002501C</td><td>ARGB status register</td><td>0x00000020</td></tr>
+<tr><td>R32_ARGB_CNTR</td><td>0x40025020</td><td>ARGB counter register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.1-argb-control-register-r32_argb_ctlr">28.2.1 ARGB Control Register (R32_ARGB_CTLR)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="2">Reserved</td><td>TXEIE</td><td>HALFIE</td><td>BYTEIE</td><td>TCIE</td><td>RSTIE</td><td>FRHIE</td><td colspan="4">Reserved</td><td>LSB</td><td>MODE</td><td>DMAEN</td><td>TE</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:14]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>13</td><td>TXEIE</td><td>RW</td><td>Transmit buffer empty interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>12</td><td>HALFIE</td><td>RW</td><td>Data refresh cycle half-transmitted interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>11</td><td>BYTEIE</td><td>RW</td><td>Byte transmit complete interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>10</td><td>TCIE</td><td>RW</td><td>Transmit complete interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>9</td><td>RSTIE</td><td>RW</td><td>RESET code transmit complete interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>8</td><td>FRHIE</td><td>RW</td><td>Data refresh cycle end interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>[7:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>LSB</td><td>RW</td><td>Data transmit mode enable bit:<br>1: Low-bit data transmitted first;<br>0: High-bit data transmitted first.</td><td>0</td></tr>
+<tr><td>2</td><td>MODE</td><td>RW</td><td>Transmit mode configuration bit:<br>1: Send data code first, then send RESET code;<br>0: Send RESET code first, then send data code.</td><td>0</td></tr>
+<tr><td>1</td><td>DMAEN</td><td>RW</td><td>DMA enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>0</td><td>TE</td><td>RW</td><td>Transmit enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.2-argb-0-1-code-period-configuration-register-r32_argb_dat_arr">28.2.2 ARGB 0/1 Code Period Configuration Register (R32_ARGB_DAT_ARR)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="6">Reserved</td><td colspan="10">DAT_ARR[9:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:0]</td><td>DAT_ARR[9:0]</td><td>RW</td><td>0/1 code period, unit: system clock cycles.</td><td>0x3FF</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.3-argb-reset-code-width-configuration-register-r32_argb_rst_arr">28.2.3 ARGB RESET Code Width Configuration Register (R32_ARGB_RST_ARR)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved, RST_ARR[16]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">RST_ARR[15:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[16:0]</td><td>RST_ARR[16:0]</td><td>RW</td><td>Reset code period, unit: system clock cycles.</td><td>0x1FFFF</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.4-argb-0-code-high-level-t0h-width-configuration-register-r32_argb_ccrl">28.2.4 ARGB 0-Code High Level T0H Width Configuration Register (R32_ARGB_CCRL)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="6">Reserved</td><td colspan="10">CCRL[9:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:0]</td><td>CCRL[9:0]</td><td>RW</td><td>0-code high level T0H width, unit: system clock cycles.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.5-argb-1-code-high-level-t1h-width-configuration-register-r32_argb_ccrh">28.2.5 ARGB 1-Code High Level T1H Width Configuration Register (R32_ARGB_CCRH)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="6">Reserved</td><td colspan="10">CCRH[9:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:0]</td><td>CCRH[9:0]</td><td>RW</td><td>1-code high level T1H width, unit: system clock cycles.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.6-argb-data-refresh-cycle-length-configuration-register-r32_argb_dat_cyc">28.2.6 ARGB Data Refresh Cycle Length Configuration Register (R32_ARGB_DAT_CYC)</h3>
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">DAT_CYC[15:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[15:0]</td><td>DAT_CYC[15:0]</td><td>RW</td><td>ARGB data refresh cycle length, actual value is this field's value + 1, unit: bytes.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.7-argb-data-register-r32_argb_datar">28.2.7 ARGB Data Register (R32_ARGB_DATAR)</h3>
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="8">Reserved</td><td colspan="8">DATA[7:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>DATA[7:0]</td><td>RW</td><td>ARGB transmit data.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.8-argb-status-register-r32_argb_statr">28.2.8 ARGB Status Register (R32_ARGB_STATR)</h3>
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">BYTE_CNT[15:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="5">Reserved</td><td colspan="3">BIT_CNT[2:0]</td><td>STATE[1:0]</td><td>TXEIF</td><td>HALFIF</td><td>BYTEIF</td><td>TCIF</td><td>RSTIF</td><td>FRHIF</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:16]</td><td>BYTE_CNT[15:0]</td><td>RO</td><td>Transmit byte counter.</td><td>0</td></tr>
+<tr><td>[15:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:8]</td><td>BIT_CNT[2:0]</td><td>RO</td><td>Transmit bit counter.</td><td>0</td></tr>
+<tr><td>[7:6]</td><td>STATE[1:0]</td><td>RO</td><td>State machine indication signal:<br>00: Idle;<br>01: Data transmit phase;<br>10: RESET code transmit phase;<br>11: Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>TXEIF</td><td>RO</td><td>Transmit buffer empty interrupt flag, writing DATAR clears this flag.</td><td>1</td></tr>
+<tr><td>4</td><td>HALFIF</td><td>RW1Z</td><td>Data refresh cycle half-transmitted interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>3</td><td>BYTEIF</td><td>RW1Z</td><td>Byte transmit complete interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>2</td><td>TCIF</td><td>RW1Z</td><td>Transmit complete interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>1</td><td>RSTIF</td><td>RW1Z</td><td>RESET code transmit complete interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>0</td><td>FRHIF</td><td>RW1Z</td><td>Data refresh cycle transmit complete interrupt flag, write 1 to clear.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="28.2.9-argb-counter-register-r32_argb_cntr">28.2.9 ARGB Counter Register (R32_ARGB_CNTR)</h3>
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">Reserved, CNT[16]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">CNT[15:0]</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[16:0]</td><td>CNT[16:0]</td><td>RO</td><td>ARGB base counter.</td><td>0</td></tr>
+</tbody>
+</table>

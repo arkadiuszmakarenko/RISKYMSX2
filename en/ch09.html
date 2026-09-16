@@ -1,0 +1,2249 @@
+<h1 id="chapter-9-central-processing-unit-cpu">Chapter 9: Central Processing Unit (CPU)</h1>
+
+<p>The CH32V407 uses the Qingke V3V core. RISC-V3V supports the IMACV-X instruction set, with an internal 2-3 stage pipeline and in-order execution architecture. The core supports the RISC-V V1.0 vector instruction set and the zvbb subset, with a maximum EEW width of 64 bits.</p>
+
+<p>Internally, it is managed in a modular fashion, including a Fast Programmable Interrupt Controller (PFIC), memory protection, branch prediction mode, extended instruction support, and other units. Multiple sets of internal buses connect to external module units, enabling interaction between external functional modules and the core.</p>
+
+<h2 id="9.1-main-features">9.1 Main Features</h2>
+<ul>
+<li>In-order single-issue architecture</li>
+<li>2-3 stage pipeline</li>
+<li>Provides one non-maskable interrupt (NMI)</li>
+<li>2-level interrupt nesting</li>
+<li>Fast Programmable Interrupt Controller (PFIC)</li>
+<li>Custom extended instructions</li>
+<li>Hardware stacking</li>
+<li>Vector operations / parallel processing</li>
+</ul>
+
+<h2 id="9.2-functional-description">9.2 Functional Description</h2>
+
+<h3 id="9.2.1-instruction-set">9.2.1 Instruction Set</h3>
+
+<p>The Qingke V3V processor supports vector integer and fixed-point arithmetic instructions from the RISC-V V1.0 instruction set, but does not support vector floating-point instructions. Vector operations use 32 groups of 64-bit-wide vector registers, with a maximum vector instruction EEW of 64 bits. The configuration conforms to the vector embedded extension Zve64x extension set, supporting vector instruction encoding checks and instruction execution exception checks.</p>
+
+<h4 id="9.2.1.1-risc-v-v1.0">9.2.1.1 RISC-V V1.0</h4>
+
+<p>Vector operations use 32 groups of 64-bit-wide vector registers as operand registers, fully supporting the vector embedded extension Zve64x extension set.</p>
+
+<div class="note">Note:<br>1. The zve64x extension instruction set consists of instructions defined in the RVV1.0 manual. For specific instruction functions, refer to "RISC-V "V" Vector Extension 1.0".<br>2. All memory access instructions support eew=64 and iew=64 operations, but the scalar address width XLEN=32 bits, which does not support 64-bit addressing, conforming to the Zve64x specification.</div>
+
+<h4 id="9.2.1.2-risc-v-zvbb">9.2.1.2 RISC-V zvbb</h4>
+
+<p>zvbb is a basic operation subset of the vector instruction set extension. It fully supports the Zve64x extension set.</p>
+
+<h4 id="9.2.1.3-custom-delay-instruction">9.2.1.3 Custom Delay Instruction</h4>
+
+<p>The custom delay instruction is a precise delay instruction at the cost of a single instruction overhead. It can delay a specified matching instruction precisely to clock cycle precision, avoiding the uncertainty of instruction jump execution in timer and delay operations. The instruction can automatically match instruction encoding, configure delay cycles and clock division coefficients, and is flexible to use, offering significant advantages in precise control, flow management, and low-overhead delay applications.</p>
+
+<table class="data-table">
+<caption>Custom Delay Instruction Encoding</caption>
+<thead><tr><th>Bits</th><th>Name</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>[31:20]</td><td>imm</td><td>Delay immediate value. Depending on configuration, it represents the number of clock cycles or divided cycles to delay.</td></tr>
+<tr><td>[19:15]</td><td>rs1</td><td>Matching rs1 register encoding.</td></tr>
+<tr><td>[14:12]</td><td>func3</td><td>Fixed value 001b.</td></tr>
+<tr><td>[11:9]</td><td>match</td><td>Matching instruction type. Instructions matching this type cannot execute while the delay is not complete.<br>000: Reserved;<br>001: Match load instruction;<br>010: Match store instruction;<br>011: Match load/store instruction;<br>100: Match delay instruction;<br>101: Reserved;<br>110: Match all instructions (pipeline stall);<br>111: Match instruction with specified func3 and opcode (match value configured by CSR register).</td></tr>
+<tr><td>8</td><td>div</td><td>Clock selection for counting:<br>1: Use divided clock cycle count (division factor configured by CSR register);<br>0: Use main clock cycle count.</td></tr>
+<tr><td>7</td><td>sel</td><td>Delay count selection:<br>1: rs1 + rs2;<br>0: rs1 + imm.</td></tr>
+<tr><td>[6:0]</td><td>func7</td><td>Fixed value 0001011b.</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: Read/write instructions using the sp register as base address are not subject to the match load/store instruction restriction (match=001/010/011).</div>
+
+<h4 id="9.2.1.4-custom-mcpy-instruction">9.2.1.4 Custom mcpy Instruction</h4>
+
+<p>The mcpy instruction is used to replace the memcpy function, implementing continuous memory copy functionality. The instruction registers hold the start address, target address, and end address information. All addresses have no alignment requirements.</p>
+
+<table class="data-table">
+<caption>Custom mcpy Instruction Encoding</caption>
+<thead><tr><th>Bits</th><th>Name</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>[31:27]</td><td>rs3</td><td>End address register encoding.</td></tr>
+<tr><td>[26:25]</td><td>Reserved</td><td>Fixed value 00b.</td></tr>
+<tr><td>[24:20]</td><td>rs2</td><td>Start address register encoding.</td></tr>
+<tr><td>[19:15]</td><td>rs1</td><td>Target address register encoding.</td></tr>
+<tr><td>[14:12]</td><td>func3</td><td>Fixed value 111b.</td></tr>
+<tr><td>[11:7]</td><td>func5</td><td>Fixed value 00000b.</td></tr>
+<tr><td>[6:0]</td><td>func7</td><td>Fixed value 0001111b.</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.2.2-vector-privilege-registers-csr">9.2.2 Vector Privilege Registers (CSR)</h3>
+
+<table class="reg-list">
+<caption>Table 9-1: CSR Related Register List</caption>
+<thead><tr><th>Name</th><th>Access Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>VXSAT</td><td>0x009</td><td>Fixed-point saturation status register</td><td>0x00000000</td></tr>
+<tr><td>VXRM</td><td>0x00A</td><td>Fixed-point rounding register</td><td>0x00000000</td></tr>
+<tr><td>VCSR</td><td>0x00F</td><td>Vector control and status register</td><td>0x00000000</td></tr>
+<tr><td>VL</td><td>0xC20</td><td>Element body length register</td><td>0x00000000</td></tr>
+<tr><td>VTYPE</td><td>0xC21</td><td>Vector data type register</td><td>0x00000000</td></tr>
+<tr><td>VLENB</td><td>0xC22</td><td>Vector register byte length register</td><td>0x00000000</td></tr>
+<tr><td>VCONTROL</td><td>0x805</td><td>Custom vector control register</td><td>0x00000X0C</td></tr>
+<tr><td>VPPADDR</td><td>0x806</td><td>Custom vector register stacking base address register</td><td>0x00000000</td></tr>
+<tr><td>VCAUSE</td><td>0x808</td><td>Custom vector exception source register</td><td>0x00000000</td></tr>
+<tr><td>VTVAL</td><td>0x809</td><td>Custom vector exception trap information register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.1-fixed-point-saturation-status-register-vxsat">9.2.2.1 Fixed-Point Saturation Status Register (VXSAT)</h4>
+
+<p>CSR address: 0x009</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:1]</td><td>Reserved</td><td>URW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>VXSAT</td><td>URW</td><td>Fixed-point saturation status register. Set to 1 when the fixed-point operation result must output a saturated value.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.2-fixed-point-rounding-register-vxrm">9.2.2.2 Fixed-Point Rounding Register (VXRM)</h4>
+
+<p>CSR address: 0x00A</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:2]</td><td>Reserved</td><td>URW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>VXRM</td><td>URW</td><td>Fixed-point operation rounding register, used to control the rounding mode of fixed-point operations:<br>00: Round to nearest (round half up);<br>01: Round to nearest (round half to even);<br>10: Round down;<br>11: Round to odd.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.3-vector-control-and-status-register-vcsr">9.2.2.3 Vector Control and Status Register (VCSR)</h4>
+
+<p>CSR address: 0x00F</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:3]</td><td>Reserved</td><td>URW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[2:1]</td><td>VXRM</td><td>URW</td><td>Fixed-point operation rounding register, used to control the rounding mode of fixed-point operations:<br>00: Round to nearest (round half up);<br>01: Round to nearest (round half to even);<br>10: Round down;<br>11: Round to odd.</td><td>0</td></tr>
+<tr><td>0</td><td>VXSAT</td><td>URW</td><td>Fixed-point saturation status register. Set to 1 when the fixed-point operation result must output a saturated value.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.4-element-body-length-register-vl">9.2.2.4 Element Body Length Register (VL)</h4>
+
+<p>CSR address: 0xC20</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:7]</td><td>Reserved</td><td>URW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[6:0]</td><td>VL</td><td>URO</td><td>Vector body length register, used to store the element length used in operations. The register value can only be modified by vset instructions. For the assignment rules, see "RISC-V "V" Vector Extension 1.0" manual.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.5-vector-data-type-register-vtype">9.2.2.5 Vector Data Type Register (VTYPE)</h4>
+
+<p>CSR address: 0xC21</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:6]</td><td>Reserved</td><td>URW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[5:3]</td><td>VSEW</td><td>URO</td><td>Vector width register, used to select the width of vectors and elements. Only VSET instruction can configure:<br>000: 8bit;<br>001: 16bit;<br>010: 32bit;<br>011: 64bit;<br>1xx: Reserved.<br>Note: Configuring eew to 64bit requires enabling the VCONTROL related configuration.</td><td>0</td></tr>
+<tr><td>[2:0]</td><td>VLMUL</td><td>URO</td><td>Vector group allocation register, used to select grouping information in vector operations. Only VSET instruction can configure:<br>000: 1;<br>001: 2;<br>010: 4;<br>011: 8;<br>100: Reserved;<br>101: 1/8;<br>110: 1/4;<br>111: 1/2.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.6-vector-register-byte-length-register-vlenb">9.2.2.6 Vector Register Byte Length Register (VLENB)</h4>
+
+<p>CSR address: 0xC22</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>VLENB</td><td>URO</td><td>Vector register group byte length register. This core has a vector register length of 64bit, byte length of 8, fixed value.</td><td>0x8</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.7-custom-vector-control-register-vcontrol">9.2.2.7 Custom Vector Control Register (VCONTROL)</h4>
+
+<p>CSR address: 0x805</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>VEC_ILL</td><td>URW1C</td><td>Vector instruction exception flag. Set when a vector instruction generates an exception. When the NMI_EN register is enabled, vector exceptions will enter NMI exception.</td><td>0</td></tr>
+<tr><td>[30:24]</td><td>Reserved</td><td>URO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[23:22]</td><td>NEST_INT_PTR</td><td>URO</td><td>Interrupt nesting depth:<br>00: No interrupt;<br>01: Level 1 interrupt nesting;<br>10: Level 2 interrupt nesting;<br>11: Level 3 interrupt nesting.</td><td>0</td></tr>
+<tr><td>[21:20]</td><td>VEC_INT_PTR</td><td>URW</td><td>Vector pipeline interrupt nesting depth:<br>00: No interrupt;<br>01: Level 1 interrupt nesting;<br>10: Level 2 interrupt nesting;<br>11: Level 3 interrupt nesting.<br>When vector instructions are not used in the interrupt service function, the vector pipeline interrupt nesting depth retains its previous value.</td><td>0</td></tr>
+<tr><td>[19:16]</td><td>VEC_REG_STATE</td><td>URW</td><td>Vector register state register. 4 bits correspond to a maximum of four levels of vector register state depth. A value of 1 indicates that the corresponding interrupt depth vector register state is dirty, meaning vector instructions have been executed causing vector register value changes.</td><td>0</td></tr>
+<tr><td>[15:10]</td><td>Reserved</td><td>URO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>9</td><td>VEC_ILL_INFO</td><td>URW</td><td>Vector exception information save enable. When set to 1, VCAUSE and VTVAL registers will save vector exception information.</td><td>1</td></tr>
+<tr><td>8</td><td>Reserved</td><td>URO</td><td>Reserved, cannot write 0.</td><td>x</td></tr>
+<tr><td>[7:4]</td><td>Reserved</td><td>URO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>LSU_WAX_ON</td><td>URW</td><td>Force write ordering enable. Forces write operations to execute in instruction order.</td><td>1</td></tr>
+<tr><td>2</td><td>LSU_RAW_ON</td><td>URW</td><td>Force read ordering enable. Forces read operations to execute in instruction order.</td><td>1</td></tr>
+<tr><td>1</td><td>VEC_HW_PP_ABI</td><td>URW</td><td>Vector register hardware stack protection ABI configuration register:<br>1: Variant ABI call, hardware stack protects V0, V8-V23 registers;<br>0: Standard ABI call, hardware stack protects V0-V31 registers.<br>Note: For ABI calls, refer to "RISC-V ABIS SPECIFICATION V1.1".</td><td>0</td></tr>
+<tr><td>0</td><td>VEC_HW_PP_EN</td><td>URW</td><td>Vector register hardware stack protection enable:<br>1: Enable vector stack protection function;<br>0: Disable vector stack protection function.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.8-custom-vector-register-stacking-base-address-register-vppaddr">9.2.2.8 Custom Vector Register Stacking Base Address Register (VPPADDR)</h4>
+
+<p>CSR address: 0x806</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>VPPADDR</td><td>URW</td><td>Vector register stack protection memory address register, used to configure the vector register stack protection address. The lower 10 bits are fixed to 0, 1KB aligned in memory.</td><td>0x20000000</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.9-custom-vector-exception-source-register-vcause">9.2.2.9 Custom Vector Exception Source Register (VCAUSE)</h4>
+
+<p>CSR address: 0x808</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>VCAUSE</td><td>URO</td><td>Vector instruction exception cause register. When VEC_ILL_INFO is enabled, it saves the exception cause of the vector exception.<br>Note: Debug mode will cause exception cause information to be lost and cannot be used in debug mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.2.10-custom-vector-exception-trap-information-register-vtval">9.2.2.10 Custom Vector Exception Trap Information Register (VTVAL)</h4>
+
+<p>CSR address: 0x809</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>VTVAL</td><td>URO</td><td>Vector instruction trap information register. When VEC_ILL_INFO is enabled, it saves the PC value of the vector exception.<br>Note: Debug mode will cause exception cause information to be lost and cannot be used in debug mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.2.3-general-privilege-registers">9.2.3 General Privilege Registers</h3>
+
+<p>In the RISC-V architecture, some Control and Status Registers (CSR) are defined for configuring, identifying, or recording running states. CSR registers belong to registers internal to the core and use a dedicated 12-bit address space.</p>
+
+<div class="note">Note: Registers marked with "MRW, MRO, MRW1" attributes require system access in machine mode.</div>
+
+<table class="reg-list">
+<caption>Table 9-2: General Privilege Register List</caption>
+<thead><tr><th>Name</th><th>CSR Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>MVENDORID</td><td>0xF11</td><td>Chip manufacturer ID register</td><td>0x00000000</td></tr>
+<tr><td>MARCHID</td><td>0xF12</td><td>Chip architecture ID register</td><td>0xDC68D876</td></tr>
+<tr><td>MIMPID</td><td>0xF13</td><td>Core ID register</td><td>0xDC688003</td></tr>
+<tr><td>MSTATUS</td><td>0x300</td><td>Machine status register</td><td>0x00000000</td></tr>
+<tr><td>MISA</td><td>0x301</td><td>Machine instruction set register</td><td>0x40B01107</td></tr>
+<tr><td>MTVEC</td><td>0x305</td><td>Machine mode exception base address register</td><td>0x00000000</td></tr>
+<tr><td>MSCRATCH</td><td>0x340</td><td>Machine mode temporary register</td><td>X</td></tr>
+<tr><td>MEPC</td><td>0x341</td><td>Machine exception program counter register</td><td>X</td></tr>
+<tr><td>MCAUSE</td><td>0x342</td><td>Machine exception register</td><td>0xX00000XX</td></tr>
+<tr><td>MTVAL</td><td>0x343</td><td>Machine trap value register</td><td>X</td></tr>
+<tr><td>TINFO</td><td>0x7A4</td><td>Trigger information register</td><td>0x00000004</td></tr>
+<tr><td>DPC</td><td>0x7B1</td><td>Debug PC address register</td><td>X</td></tr>
+<tr><td>DSCRATCH0</td><td>0x7B2</td><td>Debug mode temporary register 0</td><td>X</td></tr>
+<tr><td>DSCRATCH1</td><td>0x7B3</td><td>Debug mode temporary register 1</td><td>X</td></tr>
+<tr><td>DBGMCU_0</td><td>0x7C0</td><td>Debug register 0</td><td>0x00000000</td></tr>
+<tr><td>UACCES_MSTATUS</td><td>0x800</td><td>User access machine status register</td><td>0x00000000</td></tr>
+<tr><td>HW_POPDM_CTLR</td><td>0x804</td><td>Hardware stacking control register</td><td>0x00000004</td></tr>
+<tr><td>TSELECT</td><td>0x7A0</td><td>Trigger channel selection register</td><td>0x0000000X</td></tr>
+<tr><td>TDATA1</td><td>0x7A1</td><td>Trace trigger data register</td><td>0x23E00048</td></tr>
+<tr><td>TDATA2</td><td>0x7A2</td><td>Save trigger data register</td><td>X</td></tr>
+<tr><td>MCOUNT_INHIBIT</td><td>0x320</td><td>Counter inhibit register</td><td>0x00000000</td></tr>
+<tr><td>MCYCLE</td><td>0xB00</td><td>Machine cycle counter register</td><td>0x00000000</td></tr>
+<tr><td>MINSTRET</td><td>0xB02</td><td>Machine instruction counter register</td><td>0x00000000</td></tr>
+<tr><td>UCYCLE</td><td>0xC00</td><td>User mode cycle counter register</td><td>0x00000000</td></tr>
+<tr><td>UINSTRET</td><td>0xC02</td><td>User mode instruction counter register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.1-chip-manufacturer-id-register-mvendorid">9.2.3.1 Chip Manufacturer ID Register (MVENDORID)</h4>
+
+<p>CSR address: 0xF11</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>mvendorid[31:0]</td><td>MRO</td><td>Chip manufacturer ID, fixed value of 0.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.2-chip-architecture-id-register-marchid">9.2.3.2 Chip Architecture ID Register (MARCHID)</h4>
+
+<p>CSR address: 0xF12</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>marchid[31:0]</td><td>MRO</td><td>Chip architecture ID, fixed value, cannot be modified.</td><td>0xDC68D876</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.3-machine-implementation-id-register-mimpid">9.2.3.3 Machine Implementation ID Register (MIMPID)</h4>
+
+<p>CSR address: 0xF13</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>mimpid[31:0]</td><td>MRO</td><td>Machine implementation ID, fixed value, cannot be modified.</td><td>0xDC688003</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.4-machine-status-register-mstatus">9.2.3.4 Machine Status Register (MSTATUS)</h4>
+
+<p>CSR address: 0x300</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:13]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[12:11]</td><td>MPP[1:0]</td><td>MRW</td><td>Saves/restores the machine state before entering an exception. Updated to the pre-exception machine state when entering an exception:<br>00: Machine state set to U mode on exception exit;<br>01: Reserved;<br>10: Reserved;<br>11: Machine state set to M mode on exception exit.</td><td>0</td></tr>
+<tr><td>[10:9]</td><td>VS[1:0]</td><td>MRW</td><td>Vector instruction set state. When the value is not 0, vector instructions (V) are allowed to execute:<br>00: OFF;<br>01: Initial;<br>10: Clean;<br>11: Dirty.</td><td>0</td></tr>
+<tr><td>8</td><td>Reserved</td><td>MRW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>MPIE</td><td>MRW</td><td>Saves the interrupt enable state when entering an interrupt:<br>1: Enable global interrupt after exiting interrupt;<br>0: Disable global interrupt after exiting interrupt.</td><td>0</td></tr>
+<tr><td>[6:4]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>MIE</td><td>MRW</td><td>Global interrupt enable. Updated to MPIE value on interrupt exit:<br>1: Global interrupt enabled, allows the processor to respond to interrupt requests;<br>0: Global interrupt disabled, processor does not respond to interrupt requests.</td><td>0</td></tr>
+<tr><td>[2:0]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.5-machine-instruction-set-register-misa">9.2.3.5 Machine Instruction Set Register (MISA)</h4>
+
+<p>CSR address: 0x301</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:30]</td><td>XLEN[1:0]</td><td>MRO</td><td>Machine basic integer width and basic instruction width information. 32-bit wide core, fixed value of 1.</td><td>01b</td></tr>
+<tr><td>[29:24]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>23</td><td>X</td><td>MRO</td><td>This core supports execution of custom instruction sets.</td><td>1</td></tr>
+<tr><td>[22:21]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>01b</td></tr>
+<tr><td>20</td><td>U</td><td>MRO</td><td>Supports user mode operation.</td><td>1</td></tr>
+<tr><td>[19:13]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>M</td><td>MRO</td><td>This core supports execution of the multiply instruction set.</td><td>0</td></tr>
+<tr><td>[11:9]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>8</td><td>I</td><td>MRO</td><td>This core supports execution of the basic integer instruction set.</td><td>1</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>F</td><td>MRO</td><td>This core supports execution of the single-precision floating-point instruction set.</td><td>0</td></tr>
+<tr><td>[4:3]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>C</td><td>MRO</td><td>This core supports execution of the compressed instruction set.</td><td>1</td></tr>
+<tr><td>1</td><td>B</td><td>MRO</td><td>This core supports execution of the bit manipulation instruction set.</td><td>1</td></tr>
+<tr><td>0</td><td>A</td><td>MRO</td><td>This core supports execution of the atomic instruction set.</td><td>1</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.6-machine-mode-exception-base-address-register-mtvec">9.2.3.6 Machine Mode Exception Base Address Register (MTVEC)</h4>
+
+<p>CSR address: 0x305</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:10]</td><td>mtvec_base[21:0]</td><td>MRW</td><td>Base address high bits for processor exception jump. 1KB aligned. The actual 32-bit base address BASE = {mtvec_base, 10'h0}.</td><td>0</td></tr>
+<tr><td>[9:2]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>1</td><td>mode1</td><td>RW</td><td>Vector table mode 1:<br>1: Interrupt vector table stores jump addresses;<br>0: Interrupt vector table stores jump instructions.</td><td>0</td></tr>
+<tr><td>0</td><td>mode0</td><td>RW</td><td>Vector table mode 0:<br>1: All interrupts/exceptions have independent entries, jump address is BASE+4*IRQ/EXC ID;<br>0: All interrupts/exceptions share a unified entry, all jump to the exception jump base address.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.7-machine-mode-temporary-register-mscratch">9.2.3.7 Machine Mode Temporary Register (MSCRATCH)</h4>
+
+<p>CSR address: 0x340</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>mscratch[31:0]</td><td>MRW</td><td>Machine mode temporary register.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.8-machine-exception-program-counter-register-mepc">9.2.3.8 Machine Exception Program Counter Register (MEPC)</h4>
+
+<p>CSR address: 0x341</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>mepc[31:0]</td><td>MRW</td><td>Saves the PC address to be restored when exiting interrupt/exception. mepc[0] is fixed to 0.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.9-machine-exception-register-mcause">9.2.3.9 Machine Exception Register (MCAUSE)</h4>
+
+<p>CSR address: 0x342</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>Interrupt</td><td>RW</td><td>Interrupt/exception flag bit:<br>1: Exception/interrupt generated externally;<br>0: Exception/interrupt generated by the core.</td><td>x</td></tr>
+<tr><td>[30:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>Exception Code[7:0]</td><td>RW</td><td>Saves the source information of the exception or interrupt.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Interrupt/Exception Source Encoding</caption>
+<thead><tr><th>Interrupt/Exception</th><th>Exception Code</th><th>Interrupt/Exception Source</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>2</td><td>Reserved NMI</td></tr>
+<tr><td>1</td><td>3</td><td>Machine mode software interrupt</td></tr>
+<tr><td>1</td><td>4</td><td>User mode timer interrupt</td></tr>
+<tr><td>1</td><td>5</td><td>Monitor mode timer interrupt</td></tr>
+<tr><td>1</td><td>6</td><td>Reserved</td></tr>
+<tr><td>1</td><td>7</td><td>Machine mode timer interrupt</td></tr>
+<tr><td>1</td><td>8</td><td>User mode external interrupt</td></tr>
+<tr><td>1</td><td>11</td><td>Machine mode external interrupt</td></tr>
+<tr><td>1</td><td>12</td><td>System timer interrupt</td></tr>
+<tr><td>1</td><td>&ge;16</td><td>Reserved platform interrupt ID</td></tr>
+<tr><td>0</td><td>0</td><td>Instruction address misaligned</td></tr>
+<tr><td>0</td><td>1</td><td>Instruction access fault</td></tr>
+<tr><td>0</td><td>2</td><td>Illegal instruction</td></tr>
+<tr><td>0</td><td>3</td><td>Breakpoint</td></tr>
+<tr><td>0</td><td>4</td><td>Load address misaligned</td></tr>
+<tr><td>0</td><td>5</td><td>Load access fault</td></tr>
+<tr><td>0</td><td>6</td><td>Store/AMO address misaligned</td></tr>
+<tr><td>0</td><td>7</td><td>Store/AMO access fault</td></tr>
+<tr><td>0</td><td>8</td><td>User mode ecall</td></tr>
+<tr><td>0</td><td>11</td><td>Machine mode ecall</td></tr>
+<tr><td>0</td><td>&ge;16</td><td>Reserved</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.10-machine-trap-value-register-mtval">9.2.3.10 Machine Trap Value Register (MTVAL)</h4>
+
+<p>CSR address: 0x343</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>mtval[31:0]</td><td>RW</td><td>Saves additional information for traps.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>mtval Register Information Saved in Trap</caption>
+<thead><tr><th>Exception Type</th><th>Mcause</th><th>Saved Information</th></tr></thead>
+<tbody>
+<tr><td>Instruction address misaligned</td><td>0</td><td>Instruction PC</td></tr>
+<tr><td>Instruction access fault</td><td>1</td><td>Instruction PC</td></tr>
+<tr><td>Illegal instruction</td><td>2</td><td>Instruction machine code</td></tr>
+<tr><td>Load address misaligned</td><td>4</td><td>Load data address</td></tr>
+<tr><td>Load access fault</td><td>5</td><td>Load data address</td></tr>
+<tr><td>Store/AMO access fault</td><td>6</td><td>Store data address</td></tr>
+<tr><td>Store/AMO address misaligned</td><td>7</td><td>Store data address</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.11-trigger-information-register-tinfo">9.2.3.11 Trigger Information Register (TINFO)</h4>
+
+<p>CSR address: 0x7A4</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>tinfo[31:0]</td><td>MRO</td><td>Trigger information register. Corresponds to the TDATA1 register type value. The type value is 2, so bit 2 of tinfo is set to 1.</td><td>0x4</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.12-debug-pc-address-register-dpc">9.2.3.12 Debug PC Address Register (DPC)</h4>
+
+<p>CSR address: 0x7B1</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>dpc[31:0]</td><td>RW</td><td>Saves the PC address to be restored when exiting debug mode.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<p>The addresses saved in dpc for different debug request sources that cause a jump to debug mode are as follows:</p>
+
+<table class="data-table">
+<caption>DPC Saved Address by Debug Cause</caption>
+<thead><tr><th>Cause</th><th>Saved Address</th></tr></thead>
+<tbody>
+<tr><td>ebreak</td><td>Address of the ebreak instruction.</td></tr>
+<tr><td>Single step</td><td>Address of the next instruction that should be executed in non-debug mode.</td></tr>
+<tr><td>Trigger module</td><td>tdata1.timing=0: Address of the instruction that triggered the breakpoint.</td></tr>
+<tr><td>Halt request</td><td>Address of the next instruction that should be executed when entering debug mode.</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.13-debug-mode-temporary-register-0-dscratch0">9.2.3.13 Debug Mode Temporary Register 0 (DSCRATCH0)</h4>
+
+<p>CSR address: 0x7B2</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>Dscratch0[31:0]</td><td>RW</td><td>Debug mode temporary register 0.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.14-debug-mode-temporary-register-1-dscratch1">9.2.3.14 Debug Mode Temporary Register 1 (DSCRATCH1)</h4>
+
+<p>CSR address: 0x7B3</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>Dscratch1[31:0]</td><td>RW</td><td>Debug mode temporary register 1.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.15-debug-register-0-dbgmcu_0">9.2.3.15 Debug Register 0 (DBGMCU_0)</h4>
+
+<p>CSR address: 0x7C0</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>dbg_mode_stop</td><td>MRW</td><td>Registered module stops working when entering debug mode:<br>1: Registered peripherals stop working when the core enters debug mode;<br>0: Registered peripherals continue working normally when the core enters debug mode.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.16-user-access-machine-status-register-uacces_mstatus">9.2.3.16 User Access Machine Status Register (UACCES_MSTATUS)</h4>
+
+<p>CSR address: 0x800</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>SD</td><td>RO</td><td>Used to mark whether floating-point instructions are in dirty state.</td><td>0</td></tr>
+<tr><td>[30:15]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[14:13]</td><td>FS[1:0]</td><td>RO</td><td>Floating-point instruction set state. When the value is not 0, single-precision floating-point instructions (F) are allowed to execute:<br>00: OFF;<br>01: Initial;<br>10: Clean;<br>11: Dirty.</td><td>0</td></tr>
+<tr><td>[12:11]</td><td>MPP[1:0]</td><td>RO</td><td>Saves/restores the machine state before entering an exception. Updated to the pre-exception machine state when entering an exception:<br>00: Machine state set to U mode on exception exit;<br>01: Reserved;<br>10: Reserved;<br>11: Machine state set to M mode on exception exit.</td><td>0</td></tr>
+<tr><td>[10:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>MPIE</td><td>RW</td><td>Saves the interrupt enable state when entering an interrupt:<br>1: Enable global interrupt after exiting interrupt;<br>0: Disable global interrupt after exiting interrupt.</td><td>0</td></tr>
+<tr><td>[6:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>MIE</td><td>RW</td><td>Global interrupt enable. Updated to MPIE value on interrupt exit:<br>1: Global interrupt enabled, allows the processor to respond to interrupt requests;<br>0: Global interrupt disabled, processor does not respond to interrupt requests.</td><td>0</td></tr>
+<tr><td>[2:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: This register is used to configure the MSTATUS register when the core is running in user mode. When the CPU_RUN_CTLR register's non_usta bit is enabled, this address becomes available. The register settings are the same as the MSTATUS (0x300) register.</div>
+
+<h4 id="9.2.3.17-hardware-stacking-control-register-hw_popdm_ctlr">9.2.3.17 Hardware Stacking Control Register (HW_POPDM_CTLR)</h4>
+
+<p>CSR address: 0x804</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>lock</td><td>RW</td><td>User mode lock flag. When locked, user mode cannot modify this group of register configurations:<br>1: Locked, only machine mode can configure;<br>0: Unlocked, both machine/user mode can configure.</td><td>0</td></tr>
+<tr><td>[30:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>hw_pop_off</td><td>RW</td><td>One-time hardware pop disable. Automatically reset after exiting interrupt:<br>1: Mask hardware pop on next interrupt exit;<br>0: Do not mask hardware pop.</td><td>0</td></tr>
+<tr><td>4</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>preempt[1:0]</td><td>RW</td><td>Preemption priority width configuration register, used to configure the preemption priority width in interrupt priority:<br>00: Preemption width is 0, interrupts of any priority cannot nest;<br>01: Preemption width is 1, i.e. bit [7] of the interrupt priority register is the preemption priority;<br>10: Preemption width is 2, i.e. bits [7:6] of the interrupt priority register are the preemption priority;<br>11: Preemption width is 3, i.e. bits [7:5] of the interrupt priority register are the preemption priority.</td><td>0x1</td></tr>
+<tr><td>1</td><td>nest_en</td><td>RW</td><td>Interrupt nesting enable register:<br>1: Allow interrupt nesting;<br>0: Do not allow interrupt nesting.</td><td>0</td></tr>
+<tr><td>0</td><td>hw_stk_en</td><td>RW</td><td>Hardware stack protection enable:<br>1: Use hardware stack protection when entering/exiting interrupts;<br>0: Do not use hardware stack protection when entering/exiting interrupts.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.18-trigger-channel-selection-register-tselect">9.2.3.18 Trigger Channel Selection Register (TSELECT)</h4>
+
+<p>CSR address: 0x7A0</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:2]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>mscratch[1:0]</td><td>MRW</td><td>Trigger channel selection register.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: (1) The core implements four trigger channels. The trigger channel is selected for configuration through the TSELECT register. The lower 2 bits of the TSELECT trigger are valid, and the remaining bits are always 0.</div>
+
+<h4 id="9.2.3.19-trace-trigger-data-register-tdata1">9.2.3.19 Trace Trigger Data Register (TDATA1)</h4>
+
+<p>CSR address: 0x7A1</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:28]</td><td>type[3:0]</td><td>MRO</td><td>Trigger type definition.</td><td>0x2</td></tr>
+<tr><td>27</td><td>dmode</td><td>MRO</td><td>Both machine mode and debug mode can modify trigger-related registers.</td><td>0</td></tr>
+<tr><td>[26:21]</td><td>maskmax</td><td>MRO</td><td>Maximum range of matching exponent powers allowed when match=1.</td><td>0x1F</td></tr>
+<tr><td>[20:19]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>18</td><td>timing</td><td>MRO</td><td>Trigger before instruction/operation execution.</td><td>0</td></tr>
+<tr><td>[17:13]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>action</td><td>MRW</td><td>Set the processing mode when triggered:<br>1: Enter debug mode on trigger, dpc saves the instruction address to be restored on debug exit;<br>0: Generate an exception that directs the thread to M mode on trigger.</td><td>0</td></tr>
+<tr><td>[11:8]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>match</td><td>MRO</td><td>Match strategy configuration. Allows triggering when the comparison value equals the tdata2 value.</td><td>0</td></tr>
+<tr><td>6</td><td>m</td><td>MRO</td><td>Trigger enable in M mode:<br>1: Enable;<br>0: Disable.</td><td>1</td></tr>
+<tr><td>[5:4]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>u</td><td>MRO</td><td>Trigger enable in U mode:<br>1: Enable;<br>0: Disable.</td><td>1</td></tr>
+<tr><td>2</td><td>execute</td><td>MRW</td><td>Trigger based on virtual address of executed instruction:<br>1: Trigger compares instruction address;<br>0: Trigger does not compare instruction address.</td><td>0</td></tr>
+<tr><td>1</td><td>store</td><td>MRW</td><td>Trigger based on virtual address of store data:<br>1: Trigger compares store data address;<br>0: Trigger does not compare store data address.</td><td>0</td></tr>
+<tr><td>0</td><td>load</td><td>MRW</td><td>Trigger based on virtual address of load data:<br>1: Trigger compares load data address;<br>0: Trigger does not compare load data address.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: (1) The processor trigger configuration conforms to the RISC-V debug standard. The trigger configuration type is 2, matching based on the lowest bit of the accessed virtual address, and executing the trigger operation before the matched instruction or read/write data.</div>
+
+<h4 id="9.2.3.20-save-trigger-data-register-tdata2">9.2.3.20 Save Trigger Data Register (TDATA2)</h4>
+
+<p>CSR address: 0x7A2</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>tdata2[31:0]</td><td>MRW</td><td>Used to save trigger data (instruction PC or data address).</td><td>x</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.21-counter-inhibit-register-mcount_inhibit">9.2.3.21 Counter Inhibit Register (MCOUNT_INHIBIT)</h4>
+
+<p>CSR address: 0x320</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:3]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>IR</td><td>MRW</td><td>Instruction counter inhibit register:<br>1: Inhibit instruction counter, MINSTRET and UNSTRET stop counting;<br>0: Do not inhibit instruction counter, MINSTRET and UNSTRET count normally.</td><td>0</td></tr>
+<tr><td>1</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>CY</td><td>MRW</td><td>Cycle counter inhibit register:<br>1: Inhibit cycle counter, MCYCLE and UCYCLE stop counting;<br>0: Do not inhibit cycle counter, MCYCLE and UCYCLE count normally.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.22-machine-cycle-counter-register-mcycle">9.2.3.22 Machine Cycle Counter Register (MCYCLE)</h4>
+
+<p>CSR address: 0xB00</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>MCYCLE</td><td>MRW</td><td>Machine cycle counter, used to count the clock cycles of machine operation. Counts when the MCOUNT_INHIBIT register CY bit is 0. Does not count when the counter is stopped in debug mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.23-machine-instruction-counter-register-minstret">9.2.3.23 Machine Instruction Counter Register (MINSTRET)</h4>
+
+<p>CSR address: 0xB02</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>MINSTRET</td><td>MRW</td><td>Instruction counter, used to count the number of instructions correctly executed by the machine. Counts when the MCOUNT_INHIBIT register IR bit is 0. Does not count when the counter is stopped in debug mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.3.24-user-mode-cycle-counter-register-ucycle">9.2.3.24 User Mode Cycle Counter Register (UCYCLE)</h4>
+
+<p>CSR address: 0xC00</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>UCYCLE</td><td>RO</td><td>User mode cycle counter, used to count the clock cycles of machine operation. Counts when the MCOUNT_INHIBIT register CY bit is 0. Does not count when the counter is stopped in debug mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: User mode cycle counter, function is the same as the MCYCLE register, used to read machine run cycle count in user mode.</div>
+
+<h4 id="9.2.3.25-user-mode-instruction-counter-register-uinstret">9.2.3.25 User Mode Instruction Counter Register (UINSTRET)</h4>
+
+<p>CSR address: 0xC02</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>UINSTRET</td><td>RO</td><td>Instruction counter, used to count the number of instructions correctly executed by the machine. Counts when the MCOUNT_INHIBIT register IR bit is 0. Does not count when the counter is stopped in debug mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: User mode instruction counter, function is the same as the MINSTRET register, used to read the number of correctly executed machine instructions in user mode.</div>
+
+<h3 id="9.2.4-risc-v3v-core-custom-registers">9.2.4 RISC-V3V Core Custom Registers</h3>
+
+<table class="reg-list">
+<caption>Table 9-3: RISC-V3V Core Custom Register List</caption>
+<thead><tr><th>Name</th><th>CSR Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>CPU_RUN_CTLR</td><td>0xBC0</td><td>Processor run control register</td><td>0x00000000</td></tr>
+<tr><td>INEST_CTLR</td><td>0xBC1</td><td>Interrupt nesting control register</td><td>0x00000000</td></tr>
+<tr><td>MIE</td><td>0xBC8</td><td>Machine interrupt register</td><td>0x00000000</td></tr>
+<tr><td>DCSR</td><td>0x7B0</td><td>Debug control and status register</td><td>0x40000000</td></tr>
+<tr><td>U_NONS_DLY_0</td><td>0x8C0</td><td>Delay instruction control register</td><td>0xXXXX0XXX</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.4.1-processor-run-control-register-cpu_run_ctlr">9.2.4.1 Processor Run Control Register (CPU_RUN_CTLR)</h4>
+
+<p>CSR address: 0xBC0</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>nmi_ie</td><td>MRW</td><td>Non-maskable interrupt enable:<br>1: Enter NMI interrupt when an exception causes nesting overflow;<br>0: Do not enter NMI interrupt when an exception causes nesting overflow.</td><td>0</td></tr>
+<tr><td>6</td><td>int_fence</td><td>MRW</td><td>Fence interrupt mask enable:<br>1: Clear interrupt request when executing fence instruction;<br>0: Do not clear interrupt request when executing fence instruction.</td><td>0</td></tr>
+<tr><td>5</td><td>non_usta</td><td>MRW</td><td>UACCES_MSTATUS register enable:<br>1: Bit 3 and bit 7 of CSR address 0x800 are mapped to MSTATUS register bit MIE and MSTATUS register bit MPIE, respectively;<br>0: CSR address 0x800 is a read-only register, returning the value of MSTATUS.</td><td>0</td></tr>
+<tr><td>[4:2]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>pipe_acc[1:0]</td><td>MRW</td><td>Fetch mode:<br>00: Prefetch disabled. Instruction prefetch function is off, avoiding invalid fetch operations. At most 1 valid instruction exists in the CPU pipeline. This mode has the lowest power consumption, with performance degradation of approximately 2-3x.<br>01: Prefetch enabled. Instruction prefetch function is on. The CPU will continuously access instruction memory until the number of instructions waiting for execution in the internal instruction buffer exceeds a certain amount, or the instruction buffer is full, then instruction fetching is paused. This mode has high power consumption and strong performance. (CPU prediction failure will introduce redundant fetch operations. In some cases, the execution unit will introduce an additional 0-2 cycles of bubble. Performance degradation is not significant for most programs.)<br>Others: Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.4.2-interrupt-nesting-control-register-inest_ctlr">9.2.4.2 Interrupt Nesting Control Register (INEST_CTLR)</h4>
+
+<p>CSR address: 0xBC1</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>30</td><td>nest_ovr</td><td>MRW</td><td>Interrupt/exception nesting overflow flag bit. Set to 1 when the nesting depth exceeds the maximum depth. Write 1 to clear.<br>Note: Interrupt overflow only occurs when an instruction exception and NMI interrupt are generated during execution of a level 2 interrupt service function. In this case, the exception and NMI interrupt enter normally, but the CPU stack overflows and cannot exit from this exception and NMI interrupt.</td><td>0</td></tr>
+<tr><td>[29:12]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[11:8]</td><td>nest_sta[3:0]</td><td>MRO</td><td>Nesting status flag bits:<br>0000: No interrupt;<br>0001: Level 1 interrupt;<br>0011: Level 2 interrupt nesting;<br>0111: Level 3 interrupt nesting, overflow;<br>Others: Reserved.</td><td>0</td></tr>
+<tr><td>[7:2]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>nest_max[1:0]</td><td>MRW</td><td>Maximum nesting level:<br>00: Nesting disabled (nesting function off);<br>01: Level 2 nesting (nesting function on);<br>10: Cannot be written;<br>11: Cannot be written.<br>Note: (1) Writing 10b or 11b to this field sets the register to 01b.<br>(2) When writing 11b, reading this register returns the chip's maximum nesting level.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.4.3-machine-interrupt-register-mie">9.2.4.3 Machine Interrupt Register (MIE)</h4>
+
+<p>CSR address: 0xBC8</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[4:0]</td><td>nest_mie[4:0]</td><td>RW</td><td>Machine interrupt register. Saves the mie information for each interrupt level in multi-level interrupt nesting:<br>status.mie=nest_mie[0];<br>status.mpie=nest_mie[1].</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.4.4-debug-control-and-status-register-dcsr">9.2.4.4 Debug Control and Status Register (DCSR)</h4>
+
+<p>CSR address: 0x7B0</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:28]</td><td>exdebug[3:0]</td><td>MRO</td><td>An external debugger conforming to the debugger protocol is present.</td><td>0x4</td></tr>
+<tr><td>[27:16]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>15</td><td>ebreakm</td><td>MRW</td><td>Machine mode ebreak instruction enter debug mode enable:<br>1: When ebreak instruction is executed in machine mode, the processor enters debug mode;<br>0: When ebreak instruction is executed in machine mode, the processor enters exception.</td><td>0</td></tr>
+<tr><td>[14:13]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>ebreaku</td><td>MRW</td><td>User mode ebreak instruction enter debug mode enable:<br>1: When ebreak instruction is executed in user mode, the processor enters debug mode;<br>0: When ebreak instruction is executed in user mode, the processor enters exception.</td><td>0</td></tr>
+<tr><td>[11:10]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>9</td><td>stoptime</td><td>MRW</td><td>Timer pause enable:<br>1: Counter stops counting in debug mode;<br>0: Counter continues normally in debug mode.</td><td>0</td></tr>
+<tr><td>[8:6]</td><td>dcause[2:0]</td><td>MRW</td><td>Debug source register, used to mark the specific event that caused entry into debug mode:<br>000: Reset value;<br>001: ebreak instruction in program triggered debug (priority 3);<br>010: Trigger module caused a breakpoint exception (priority 4);<br>011: Debugger generated halt request (priority 1);<br>100: Single-step mode halt (priority 0, lowest);<br>101: Not implemented;<br>110: Not implemented;<br>111: Reserved.</td><td>0</td></tr>
+<tr><td>[5:4]</td><td>Reserved</td><td>MRO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>nmip</td><td>MRO</td><td>Core NMI interrupt pending flag.</td><td>0</td></tr>
+<tr><td>2</td><td>step</td><td>MRW</td><td>Single-step mode:<br>1: Single-step mode;<br>0: Non-single-step mode.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>prv[1:0]</td><td>MRW</td><td>Records the machine state before entering debug mode:<br>00: Entered debug mode from user mode, processor restores to user mode;<br>01, 10: Reserved;<br>11: Entered debug mode from machine mode, processor restores to machine mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.2.4.5-delay-instruction-control-register-u_nons_dly_0">9.2.4.5 Delay Instruction Control Register (U_NONS_DLY_0)</h4>
+
+<p>CSR address: 0x8C0</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>dly_mask</td><td>URW</td><td>Instruction parameter mask for dly instruction match=111.</td><td>x</td></tr>
+<tr><td>[23:16]</td><td>dly_data</td><td>URW</td><td>Matching {func, opcode} for dly instruction match=111.</td><td>x</td></tr>
+<tr><td>15</td><td>CPU_dly_busy_sta</td><td>URO</td><td>Core delay state busy flag.</td><td>0</td></tr>
+<tr><td>14</td><td>dly_tout</td><td>RW1Z</td><td>Timeout information. No matching instruction request within the delay range.</td><td>0</td></tr>
+<tr><td>13</td><td>dly_ie</td><td>URW</td><td>Delay interrupt request. When enabled, if a timeout condition occurs, a software interrupt request is generated.</td><td>0</td></tr>
+<tr><td>12</td><td>dly_priv</td><td>URW</td><td>1: Both machine mode and user mode are allowed to match;<br>0: Delay operations executed in user mode do not match instructions in machine mode.</td><td>0</td></tr>
+<tr><td>[11:10]</td><td>Reserved</td><td>URO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:0]</td><td>dly_freq</td><td>URW</td><td>Delay count division factor configuration. If configured to the main clock frequency, microsecond-based delay can be achieved.</td><td>x</td></tr>
+</tbody>
+</table>
+
+<h2 id="9.3-system-counter-systick">9.3 System Counter (SysTick)</h2>
+
+<table class="reg-list">
+<caption>Table 9-4: STK Related Register List</caption>
+<thead><tr><th>Name</th><th>Access Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_STK_CTLR</td><td>0xE000F000</td><td>System counter control register</td><td>0x00000000</td></tr>
+<tr><td>R32_STK_SR</td><td>0xE000F004</td><td>System counter status register</td><td>0x00000000</td></tr>
+<tr><td>R32_STK_CNTL</td><td>0xE000F008</td><td>System counter low register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_STK_CMPLR</td><td>0xE000F010</td><td>Counter compare low register</td><td>0xXXXXXXXX</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: Applicable to general-purpose microcontrollers based on 32-bit RISC-V instruction set and architecture design.</div>
+
+<h3 id="9.3.1-system-counter-control-register-stk_ctlr">9.3.1 System Counter Control Register (STK_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>INIT</td><td>MODE</td><td>STRE</td><td>STCLK</td><td>STIE</td><td>STE</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>INIT</td><td>RW1</td><td>Counter initial value update:<br>1: When counting up, update to 0; when counting down, update to the compare value;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>4</td><td>MODE</td><td>RW</td><td>Count mode:<br>1: Count down;<br>0: Count up.</td><td>0</td></tr>
+<tr><td>3</td><td>STRE</td><td>RW</td><td>Auto-reload count enable bit:<br>1: When counting up reaches the compare value, restart from 0; when counting down reaches 0, restart from the compare value;<br>0: Continue counting up/down.</td><td>0</td></tr>
+<tr><td>2</td><td>STCLK</td><td>RW</td><td>Counter clock source selection bit:<br>1: HCLK as time base;<br>0: HCLK/8 as time base.</td><td>0</td></tr>
+<tr><td>1</td><td>STIE</td><td>RW</td><td>Counter interrupt enable control bit:<br>1: Enable counter interrupt;<br>0: Disable counter interrupt.</td><td>0</td></tr>
+<tr><td>0</td><td>STE</td><td>RW</td><td>System counter enable control bit:<br>1: Start system counter STK;<br>0: Disable system counter STK, counter stops counting.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.3.2-system-counter-status-register-stk_sr">9.3.2 System Counter Status Register (STK_SR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>SWIE</td><td colspan="15">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>CNTIF</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>SWIE</td><td>RW</td><td>Software interrupt trigger enable (SW):<br>1: Trigger software interrupt;<br>0: Disable trigger.<br>Note: After entering software interrupt, this bit must be cleared to 0, otherwise it will keep triggering.</td><td>0</td></tr>
+<tr><td>[30:1]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>CNTIF</td><td>RW</td><td>Count value compare flag. Write 0 to clear, write 1 has no effect:<br>1: Counting up reached the compare value, or counting down reached 0;<br>0: Compare value not reached.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.3.3-system-counter-low-register-stk_cntl">9.3.3 System Counter Low Register (STK_CNTL)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">CNT[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>CNT[31:0]</td><td>RW</td><td>Low 32 bits of the current counter value.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.3.4-counter-compare-low-register-stk_cmplr">9.3.4 Counter Compare Low Register (STK_CMPLR)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">CMP[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CMP[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>CMP[31:0]</td><td>RW</td><td>Sets the low 32 bits of the compare counter value. When counting up, if the CMP register value equals the CNT counter value, or when counting down, if the CNT counter value reaches 0, an STK interrupt will be triggered.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h2 id="9.4-interrupts-and-events-pfic">9.4 Interrupts and Events (PFIC)</h2>
+
+<h3 id="9.4.1-pfic-controller">9.4.1 PFIC Controller</h3>
+<ul>
+<li>Each interrupt request has independent trigger and mask control bits, with dedicated status bits</li>
+<li>Supports configurable up to 2-level interrupt nesting</li>
+<li>Unique fast interrupt entry/exit mechanism, hardware automatic stacking and restoration, maximum hardware stacking depth of 2 levels, no instruction overhead required</li>
+<li>Unique Vector Table Free (VTF) interrupt response mechanism, 4-channel programmable direct interrupt vector address</li>
+</ul>
+
+<h3 id="9.4.2-vector-table-for-interrupts-and-exceptions">9.4.2 Vector Table for Interrupts and Exceptions</h3>
+
+<table class="data-table">
+<caption>Table 9-5: Vector Table</caption>
+<thead><tr><th>Number</th><th>Priority</th><th>Type</th><th>Name</th><th>Description</th><th>Entry Address</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>-6</td><td>Fixed</td><td>RESET</td><td>Reset interrupt</td><td>0x00000000</td></tr>
+<tr><td>1</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0x00000004</td></tr>
+<tr><td>2</td><td>-5</td><td>Fixed</td><td>NMI</td><td>Non-maskable interrupt</td><td>0x00000008</td></tr>
+<tr><td>3</td><td>-4</td><td>Fixed</td><td>HardFault</td><td>Exception interrupt</td><td>0x0000000C</td></tr>
+<tr><td>4</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0x00000010</td></tr>
+<tr><td>5</td><td>-3</td><td>Fixed</td><td>Ecall-M</td><td>Machine mode ecall interrupt</td><td>0x00000014</td></tr>
+<tr><td>6-7</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0x00000018-0x0000001C</td></tr>
+<tr><td>8</td><td>-2</td><td>Fixed</td><td>Ecall-U</td><td>User mode ecall interrupt</td><td>0x00000020</td></tr>
+<tr><td>9</td><td>-1</td><td>Fixed</td><td>BreakPoint</td><td>Breakpoint interrupt</td><td>0x00000024</td></tr>
+<tr><td>10-11</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0x00000028-0x0000002C</td></tr>
+<tr><td>12</td><td>0</td><td>Programmable</td><td>SysTick0</td><td>System timer interrupt 0</td><td>0x00000030</td></tr>
+<tr><td>13</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0x00000034</td></tr>
+<tr><td>14</td><td>1</td><td>Programmable</td><td>SW</td><td>Software interrupt</td><td>0x00000038</td></tr>
+<tr><td>15</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0x0000003C</td></tr>
+<tr><td>16</td><td>2</td><td>Programmable</td><td>WWDG</td><td>Window watchdog interrupt</td><td>0x00000040</td></tr>
+<tr><td>17</td><td>3</td><td>Programmable</td><td>PVD</td><td>Power voltage detector interrupt (EXTI)</td><td>0x00000044</td></tr>
+<tr><td>18</td><td>4</td><td>Programmable</td><td>TAMPER</td><td>Tamper detection interrupt</td><td>0x00000048</td></tr>
+<tr><td>19</td><td>5</td><td>Programmable</td><td>RTC</td><td>Real-time clock interrupt</td><td>0x0000004C</td></tr>
+<tr><td>20</td><td>6</td><td>Programmable</td><td>FLASH</td><td>Flash global interrupt</td><td>0x00000050</td></tr>
+<tr><td>21</td><td>7</td><td>Programmable</td><td>RCC</td><td>Reset and clock control interrupt</td><td>0x00000054</td></tr>
+<tr><td>22</td><td>8</td><td>Programmable</td><td>EXTI0</td><td>EXTI line 0 interrupt</td><td>0x00000058</td></tr>
+<tr><td>23</td><td>9</td><td>Programmable</td><td>EXTI1</td><td>EXTI line 1 interrupt</td><td>0x0000005C</td></tr>
+<tr><td>24</td><td>10</td><td>Programmable</td><td>EXTI2</td><td>EXTI line 2 interrupt</td><td>0x00000060</td></tr>
+<tr><td>25</td><td>11</td><td>Programmable</td><td>EXTI3</td><td>EXTI line 3 interrupt</td><td>0x00000064</td></tr>
+<tr><td>26</td><td>12</td><td>Programmable</td><td>EXTI4</td><td>EXTI line 4 interrupt</td><td>0x0000006C</td></tr>
+<tr><td>27</td><td>13</td><td>Programmable</td><td>DMA1_CH1</td><td>DMA channel 1 global interrupt</td><td>0x00000070</td></tr>
+<tr><td>28</td><td>14</td><td>Programmable</td><td>DMA1_CH2</td><td>DMA channel 2 global interrupt</td><td>0x00000074</td></tr>
+<tr><td>29</td><td>15</td><td>Programmable</td><td>DMA1_CH3</td><td>DMA channel 3 global interrupt</td><td>0x00000078</td></tr>
+<tr><td>30</td><td>16</td><td>Programmable</td><td>DMA1_CH4</td><td>DMA channel 4 global interrupt</td><td>0x0000007C</td></tr>
+<tr><td>31</td><td>17</td><td>Programmable</td><td>DMA1_CH5</td><td>DMA channel 5 global interrupt</td><td>0x00000080</td></tr>
+<tr><td>32</td><td>18</td><td>Programmable</td><td>DMA1_CH6</td><td>DMA channel 6 global interrupt</td><td>0x00000084</td></tr>
+<tr><td>33</td><td>19</td><td>Programmable</td><td>DMA1_CH7</td><td>DMA channel 7 global interrupt</td><td>0x00000088</td></tr>
+<tr><td>34</td><td>20</td><td>Programmable</td><td>ADC1_2</td><td>ADC1_2 global interrupt</td><td>0x0000008C</td></tr>
+<tr><td>35</td><td>21</td><td>Programmable</td><td>CAN1_TX</td><td>CAN1_TX global interrupt</td><td>0x00000090</td></tr>
+<tr><td>36</td><td>22</td><td>Programmable</td><td>CAN1_RX0</td><td>CAN1_RX0 global interrupt</td><td>0x00000094</td></tr>
+<tr><td>37</td><td>23</td><td>Programmable</td><td>CAN1_RX1</td><td>CAN1_RX1 global interrupt</td><td>0x00000098</td></tr>
+<tr><td>38</td><td>24</td><td>Programmable</td><td>CAN1_SCE</td><td>CAN1_SCE global interrupt</td><td>0x0000009C</td></tr>
+<tr><td>39</td><td>25</td><td>Programmable</td><td>EXTI9_5</td><td>EXTI line[9:5] interrupt</td><td>0x000000A0</td></tr>
+<tr><td>40</td><td>26</td><td>Programmable</td><td>TIM1_BRK</td><td>TIM1 break interrupt</td><td>0x000000A4</td></tr>
+<tr><td>41</td><td>27</td><td>Programmable</td><td>TIM1_UP</td><td>TIM1 update interrupt</td><td>0x000000A8</td></tr>
+<tr><td>42</td><td>28</td><td>Programmable</td><td>TIM1_TRG_COM</td><td>TIM1 trigger and communication interrupt</td><td>0x000000AC</td></tr>
+<tr><td>43</td><td>29</td><td>Programmable</td><td>TIM1_CC</td><td>TIM1 capture/compare interrupt</td><td>0x000000B0</td></tr>
+<tr><td>44</td><td>30</td><td>Programmable</td><td>TIM2</td><td>TIM2 global interrupt</td><td>0x000000B4</td></tr>
+<tr><td>45</td><td>31</td><td>Programmable</td><td>TIM3</td><td>TIM3 global interrupt</td><td>0x000000B8</td></tr>
+<tr><td>46</td><td>32</td><td>Programmable</td><td>TIM4</td><td>TIM4 global interrupt</td><td>0x000000BC</td></tr>
+<tr><td>47</td><td>33</td><td>Programmable</td><td>I2C_EV</td><td>I2C event interrupt</td><td>0x000000C0</td></tr>
+<tr><td>48</td><td>34</td><td>Programmable</td><td>I2C_ER</td><td>I2C error interrupt</td><td>0x000000C4</td></tr>
+<tr><td>49</td><td>35</td><td>Programmable</td><td>I3C_EV</td><td>I3C event interrupt</td><td>0x000000C8</td></tr>
+<tr><td>50</td><td>36</td><td>Programmable</td><td>I3C_ER</td><td>I3C error interrupt</td><td>0x000000CC</td></tr>
+<tr><td>51</td><td>37</td><td>Programmable</td><td>SPI1</td><td>SPI1 global interrupt</td><td>0x000000D0</td></tr>
+<tr><td>52</td><td>38</td><td>Programmable</td><td>SPI2</td><td>SPI2 global interrupt</td><td>0x000000D4</td></tr>
+<tr><td>53</td><td>39</td><td>Programmable</td><td>USART1</td><td>USART1 global interrupt</td><td>0x000000D8</td></tr>
+<tr><td>54</td><td>40</td><td>Programmable</td><td>USART2</td><td>USART2 global interrupt</td><td>0x000000DC</td></tr>
+<tr><td>55</td><td>41</td><td>Programmable</td><td>USART3</td><td>USART3 global interrupt</td><td>0x000000E0</td></tr>
+<tr><td>56</td><td>42</td><td>Programmable</td><td>EXTI15_10</td><td>EXTI line[15:10] interrupt</td><td>0x000000E4</td></tr>
+<tr><td>57</td><td>43</td><td>Programmable</td><td>RTCAlarm</td><td>RTC alarm interrupt (EXTI)</td><td>0x000000E8</td></tr>
+<tr><td>58</td><td>44</td><td>Programmable</td><td>USBHS1WakeUP</td><td>USBHS1 wake-up interrupt</td><td>0x000000EC</td></tr>
+<tr><td>59</td><td>45</td><td>Programmable</td><td>TIM8_BRK</td><td>TIM8 break interrupt</td><td>0x000000F0</td></tr>
+<tr><td>60</td><td>46</td><td>Programmable</td><td>TIM8_UP</td><td>TIM8 update interrupt</td><td>0x000000F4</td></tr>
+<tr><td>61</td><td>47</td><td>Programmable</td><td>TIM8_TRG_COM</td><td>TIM8 trigger and communication interrupt</td><td>0x000000F8</td></tr>
+<tr><td>62</td><td>48</td><td>Programmable</td><td>TIM8_CC</td><td>TIM8 capture/compare interrupt</td><td>0x000000FC</td></tr>
+<tr><td>63</td><td>49</td><td>Programmable</td><td>RNG</td><td>RNG global interrupt</td><td>0x00000100</td></tr>
+<tr><td>64</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0x00000104</td></tr>
+<tr><td>65</td><td>50</td><td>Programmable</td><td>SDIO</td><td>SDIO global interrupt</td><td>0x00000108</td></tr>
+<tr><td>66</td><td>51</td><td>Programmable</td><td>TIM5</td><td>TIM5 global interrupt</td><td>0x0000010C</td></tr>
+<tr><td>67</td><td>52</td><td>Programmable</td><td>SPI3</td><td>SPI3 global interrupt</td><td>0x00000110</td></tr>
+<tr><td>68</td><td>53</td><td>Programmable</td><td>USART4</td><td>USART4 global interrupt</td><td>0x00000114</td></tr>
+<tr><td>69</td><td>54</td><td>Programmable</td><td>USART5</td><td>USART5 global interrupt</td><td>0x00000118</td></tr>
+<tr><td>70</td><td>55</td><td>Programmable</td><td>TIM6</td><td>TIM6 global interrupt</td><td>0x0000011C</td></tr>
+<tr><td>71</td><td>56</td><td>Programmable</td><td>TIM7</td><td>TIM7 global interrupt</td><td>0x00000120</td></tr>
+<tr><td>72</td><td>57</td><td>Programmable</td><td>DMA2_CH1</td><td>DMA2 channel 1 global interrupt</td><td>0x00000124</td></tr>
+<tr><td>73</td><td>58</td><td>Programmable</td><td>DMA2_CH2</td><td>DMA2 channel 2 global interrupt</td><td>0x00000128</td></tr>
+<tr><td>74</td><td>59</td><td>Programmable</td><td>DMA2_CH3</td><td>DMA2 channel 3 global interrupt</td><td>0x0000012C</td></tr>
+<tr><td>75</td><td>60</td><td>Programmable</td><td>DMA2_CH4</td><td>DMA2 channel 4 global interrupt</td><td>0x00000130</td></tr>
+<tr><td>76</td><td>61</td><td>Programmable</td><td>DMA2_CH5</td><td>DMA2 channel 5 global interrupt</td><td>0x00000134</td></tr>
+<tr><td>77</td><td>62</td><td>Programmable</td><td>ETH</td><td>ETH global interrupt</td><td>0x00000138</td></tr>
+<tr><td>78</td><td>63</td><td>Programmable</td><td>ETH_WKUP</td><td>ETH wake-up interrupt</td><td>0x0000013C</td></tr>
+<tr><td>79</td><td>64</td><td>Programmable</td><td>LTDC</td><td>LTDC global interrupt</td><td>0x00000140</td></tr>
+<tr><td>80</td><td>65</td><td>Programmable</td><td>PSRAM</td><td>PSRAM global interrupt</td><td>0x00000144</td></tr>
+<tr><td>81</td><td>66</td><td>Programmable</td><td>USART9</td><td>USART9 global interrupt</td><td>0x00000148</td></tr>
+<tr><td>82</td><td>67</td><td>Programmable</td><td>USART10</td><td>USART10 global interrupt</td><td>0x0000014C</td></tr>
+<tr><td>83</td><td>68</td><td>Programmable</td><td>USBHS1</td><td>USBHS1 global interrupt</td><td>0x00000150</td></tr>
+<tr><td>84</td><td>69</td><td>Programmable</td><td>USBHS2WakeUP</td><td>USBHS2 wake-up interrupt</td><td>0x00000154</td></tr>
+<tr><td>85</td><td>70</td><td>Programmable</td><td>USBHS2</td><td>USBHS2 global interrupt</td><td>0x00000158</td></tr>
+<tr><td>86</td><td>71</td><td>Programmable</td><td>DVP</td><td>DVP global interrupt</td><td>0x0000015C</td></tr>
+<tr><td>87</td><td>72</td><td>Programmable</td><td>USART6</td><td>USART6 global interrupt</td><td>0x00000160</td></tr>
+<tr><td>88</td><td>73</td><td>Programmable</td><td>USART7</td><td>USART7 global interrupt</td><td>0x00000164</td></tr>
+<tr><td>89</td><td>74</td><td>Programmable</td><td>USART8</td><td>USART8 global interrupt</td><td>0x00000168</td></tr>
+<tr><td>90</td><td>75</td><td>Programmable</td><td>DMA1_CH8</td><td>DMA1 channel 8 global interrupt</td><td>0x0000016C</td></tr>
+<tr><td>91</td><td>76</td><td>Programmable</td><td>DMA1_CH9</td><td>DMA1 channel 9 global interrupt</td><td>0x00000170</td></tr>
+<tr><td>92</td><td>77</td><td>Programmable</td><td>DMA1_CH10</td><td>DMA1 channel 10 global interrupt</td><td>0x00000174</td></tr>
+<tr><td>93</td><td>78</td><td>Programmable</td><td>DMA1_CH11</td><td>DMA1 channel 11 global interrupt</td><td>0x00000178</td></tr>
+<tr><td>94</td><td>79</td><td>Programmable</td><td>DMA1_CH12</td><td>DMA1 channel 12 global interrupt</td><td>0x0000017C</td></tr>
+<tr><td>95</td><td>80</td><td>Programmable</td><td>DMA1_CH13</td><td>DMA1 channel 13 global interrupt</td><td>0x00000180</td></tr>
+<tr><td>96</td><td>81</td><td>Programmable</td><td>I3CWakeUP</td><td>I3C wake-up interrupt</td><td>0x00000184</td></tr>
+<tr><td>97</td><td>82</td><td>Programmable</td><td>ARGB</td><td>ARGB global interrupt</td><td>0x00000188</td></tr>
+<tr><td>98</td><td>83</td><td>Programmable</td><td>DMA2_CH6</td><td>DMA2 channel 6 global interrupt</td><td>0x0000018C</td></tr>
+<tr><td>99</td><td>84</td><td>Programmable</td><td>DMA2_CH7</td><td>DMA2 channel 7 global interrupt</td><td>0x00000190</td></tr>
+<tr><td>100</td><td>85</td><td>Programmable</td><td>DMA2_CH8</td><td>DMA2 channel 8 global interrupt</td><td>0x00000194</td></tr>
+<tr><td>101</td><td>86</td><td>Programmable</td><td>DMA2_CH9</td><td>DMA2 channel 9 global interrupt</td><td>0x00000198</td></tr>
+<tr><td>102</td><td>87</td><td>Programmable</td><td>DMA2_CH10</td><td>DMA2 channel 10 global interrupt</td><td>0x0000019C</td></tr>
+<tr><td>103</td><td>88</td><td>Programmable</td><td>DMA2_CH11</td><td>DMA2 channel 11 global interrupt</td><td>0x000001A0</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.4.3-external-interrupt-and-event-controller-exti">9.4.3 External Interrupt and Event Controller (EXTI)</h3>
+
+<h4 id="9.4.3.1-overview">9.4.3.1 Overview</h4>
+
+<figure><img src="figures/fig_9_1.png"><figcaption>Figure 9-1: External interrupt (EXTI) interface block diagram</figcaption></figure>
+
+<p>As shown in Figure 9-1, the trigger source of an external interrupt can be either a software interrupt (SWIEVR) or an actual external interrupt channel. The signal of the external interrupt channel first passes through the edge detect circuit for filtering. As long as either a software interrupt or an external interrupt signal is generated, it will be output through the OR gate in the diagram to the event enable and interrupt enable AND gate circuits. As long as an interrupt or event is enabled, an interrupt or event will be generated. The six EXTI registers are accessed by the processor through the PB2 interface.</p>
+
+<h4 id="9.4.3.2-wake-up-event-description">9.4.3.2 Wake-up Event Description</h4>
+
+<p>The system can be woken up from sleep mode caused by the WFE instruction through wake-up events. Wake-up events are generated through the following two configurations:</p>
+<ul>
+<li>Enable an interrupt in a peripheral's register, but do not enable this interrupt in the core's PFIC, and enable the SEVONPEND bit in the core. For EXTI, this means enabling the EXTI interrupt, but not enabling the EXTI interrupt in the PFIC, while enabling the SEVONPEND bit. After the CPU wakes up from WFE, the EXTI interrupt flag bit and PFIC pending bit need to be cleared.</li>
+<li>Enable an EXTI channel as an event channel. After the CPU wakes up from WFE, there is no need to clear the interrupt flag bit and PFIC pending bit.</li>
+</ul>
+
+<h4 id="9.4.3.3-notes">9.4.3.3 Notes</h4>
+
+<p>To use external interrupts, the corresponding external interrupt channel must be configured, i.e., select the trigger edge and enable the corresponding interrupt. When the configured trigger edge appears on the external interrupt channel, an interrupt request will be generated, and the corresponding interrupt flag bit will be set. Writing 1 to the flag bit can clear it.</p>
+
+<p>Steps for using external hardware interrupts:</p>
+<ol>
+<li>Configure GPIO operation;</li>
+<li>Configure the interrupt enable bit of the corresponding external interrupt channel (EXTI_INTENR);</li>
+<li>Configure the trigger edge (EXTI_RTENR or EXTI_FTENR), selecting rising edge trigger, falling edge trigger, or both edge trigger;</li>
+<li>Configure the EXTI interrupt in the core's PFIC to ensure it can be correctly responded to.</li>
+</ol>
+
+<p>Steps for using external hardware events:</p>
+<ol>
+<li>Configure GPIO operation;</li>
+<li>Configure the event enable bit of the corresponding external interrupt channel (EXTI_EVENR);</li>
+<li>Configure the trigger edge (EXTI_RTENR or EXTI_FTENR), selecting rising edge trigger, falling edge trigger, or both edge trigger.</li>
+</ol>
+
+<p>Steps for using software interrupt/event:</p>
+<ol>
+<li>Enable external interrupt (EXTI_INTENR) or external event (EXTI_EVENR);</li>
+<li>If using an interrupt service function, configure the EXTI interrupt in the core's PFIC;</li>
+<li>Set the software interrupt trigger (EXTI_SWIEVR), which will generate an interrupt.</li>
+</ol>
+
+<h4 id="9.4.3.4-external-event-mapping">9.4.3.4 External Event Mapping</h4>
+
+<table class="data-table">
+<caption>Table 9-6: EXTI Interrupt Mapping</caption>
+<thead><tr><th>External Interrupt/Event Line</th><th>Mapped Event Description</th></tr></thead>
+<tbody>
+<tr><td>EXTI0-EXTI15</td><td>Px0-Px15 (x=A/B/C/D/E). Any IO port can enable the external interrupt/event function, configured by the AFIO_EXTICRx register.</td></tr>
+<tr><td>EXTI16</td><td>PVD event: voltage monitoring threshold exceeded</td></tr>
+<tr><td>EXTI17</td><td>RTC alarm event</td></tr>
+<tr><td>EXTI18</td><td>USBHS1 wake-up event</td></tr>
+<tr><td>EXTI19</td><td>ETH wake-up event</td></tr>
+<tr><td>EXTI20</td><td>USBHS2 wake-up event</td></tr>
+<tr><td>EXTI21</td><td>I3C wake-up event</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.4.4-exti-register-description">9.4.4 EXTI Register Description</h3>
+
+<table class="reg-list">
+<caption>Table 9-7: EXTI Related Register List</caption>
+<thead><tr><th>Name</th><th>Access Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_EXTI_INTENR</td><td>0x40010400</td><td>Interrupt enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_EXTI_EVENR</td><td>0x40010404</td><td>Event enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_EXTI_RTENR</td><td>0x40010408</td><td>Rising edge trigger enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_EXTI_FTENR</td><td>0x4001040C</td><td>Falling edge trigger enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_EXTI_SWIEVR</td><td>0x40010410</td><td>Software interrupt event register</td><td>0x00000000</td></tr>
+<tr><td>R32_EXTI_INTFR</td><td>0x40010414</td><td>Interrupt flag register</td><td>0x0000XXXX</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.4.1-interrupt-enable-register-exti_intenr">9.4.4.1 Interrupt Enable Register (EXTI_INTENR)</h4>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>MR21</td><td>MR20</td><td>MR19</td><td>MR18</td><td>MR17</td><td>MR16</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>MR15</td><td>MR14</td><td>MR13</td><td>MR12</td><td>MR11</td><td>MR10</td><td>MR9</td><td>MR8</td><td>MR7</td><td>MR6</td><td>MR5</td><td>MR4</td><td>MR3</td><td>MR2</td><td>MR1</td><td>MR0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:22]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[21:0]</td><td>MRx</td><td>RW</td><td>Enable the interrupt request signal of external interrupt channel x:<br>1: Enable the interrupt of this channel;<br>0: Mask the interrupt of this channel.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.4.2-event-enable-register-exti_evenr">9.4.4.2 Event Enable Register (EXTI_EVENR)</h4>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>MR21</td><td>MR20</td><td>MR19</td><td>MR18</td><td>MR17</td><td>MR16</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>MR15</td><td>MR14</td><td>MR13</td><td>MR12</td><td>MR11</td><td>MR10</td><td>MR9</td><td>MR8</td><td>MR7</td><td>MR6</td><td>MR5</td><td>MR4</td><td>MR3</td><td>MR2</td><td>MR1</td><td>MR0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:22]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[21:0]</td><td>MRx</td><td>RW</td><td>Enable the event request signal of external interrupt channel x:<br>1: Enable the event of this channel;<br>0: Mask the event of this channel.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.4.3-rising-edge-trigger-enable-register-exti_rtenr">9.4.4.3 Rising Edge Trigger Enable Register (EXTI_RTENR)</h4>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>TR21</td><td>TR20</td><td>TR19</td><td>TR18</td><td>TR17</td><td>TR16</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>TR15</td><td>TR14</td><td>TR13</td><td>TR12</td><td>TR11</td><td>TR10</td><td>TR9</td><td>TR8</td><td>TR7</td><td>TR6</td><td>TR5</td><td>TR4</td><td>TR3</td><td>TR2</td><td>TR1</td><td>TR0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:22]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[21:0]</td><td>TRx</td><td>RW</td><td>Enable rising edge trigger of external interrupt channel x:<br>1: Enable rising edge trigger of this channel;<br>0: Disable rising edge trigger of this channel.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.4.4-falling-edge-trigger-enable-register-exti_ftenr">9.4.4.4 Falling Edge Trigger Enable Register (EXTI_FTENR)</h4>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>TR21</td><td>TR20</td><td>TR19</td><td>TR18</td><td>TR17</td><td>TR16</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>TR15</td><td>TR14</td><td>TR13</td><td>TR12</td><td>TR11</td><td>TR10</td><td>TR9</td><td>TR8</td><td>TR7</td><td>TR6</td><td>TR5</td><td>TR4</td><td>TR3</td><td>TR2</td><td>TR1</td><td>TR0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:22]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[21:0]</td><td>TRx</td><td>RW</td><td>Enable falling edge trigger of external interrupt channel x:<br>1: Enable falling edge trigger of this channel;<br>0: Disable falling edge trigger of this channel.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.4.5-software-interrupt-event-register-exti_swievr">9.4.4.5 Software Interrupt Event Register (EXTI_SWIEVR)</h4>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>SWIER21</td><td>SWIER20</td><td>SWIER19</td><td>SWIER18</td><td>SWIER17</td><td>SWIER16</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>SWIER15</td><td>SWIER14</td><td>SWIER13</td><td>SWIER12</td><td>SWIER11</td><td>SWIER10</td><td>SWIER9</td><td>SWIER8</td><td>SWIER7</td><td>SWIER6</td><td>SWIER5</td><td>SWIER4</td><td>SWIER3</td><td>SWIER2</td><td>SWIER1</td><td>SWIER0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:22]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[21:0]</td><td>SWIERx</td><td>RW</td><td>Set a software interrupt on the corresponding external trigger interrupt channel. Setting this bit will set the corresponding bit in the interrupt flag register (EXTI_INTFR). If interrupt enable (EXTI_INTENR) or event enable (EXTI_EVENR) is on, an interrupt or event will be generated.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.4.6-interrupt-flag-register-exti_intfr">9.4.4.6 Interrupt Flag Register (EXTI_INTFR)</h4>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>IF21</td><td>IF20</td><td>IF19</td><td>IF18</td><td>IF17</td><td>IF16</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>IF15</td><td>IF14</td><td>IF13</td><td>IF12</td><td>IF11</td><td>IF10</td><td>IF9</td><td>IF8</td><td>IF7</td><td>IF6</td><td>IF5</td><td>IF4</td><td>IF3</td><td>IF2</td><td>IF1</td><td>IF0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:22]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[21:0]</td><td>IFx</td><td>RW1</td><td>Interrupt flag bit. This bit being set indicates that the corresponding external interrupt has occurred. Writing 1 can clear this bit.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="9.4.5-pfic-registers">9.4.5 PFIC Registers</h3>
+
+<table class="reg-list">
+<caption>Table 9-8: PFIC Related Register List</caption>
+<thead><tr><th>Name</th><th>Access Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_PFIC_ISR1</td><td>0xE000E000</td><td>PFIC interrupt enable status register 1</td><td>0x0000032C</td></tr>
+<tr><td>R32_PFIC_ISR2</td><td>0xE000E004</td><td>PFIC interrupt enable status register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_ISR3</td><td>0xE000E008</td><td>PFIC interrupt enable status register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_ISR4</td><td>0xE000E00C</td><td>PFIC interrupt enable status register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPR1</td><td>0xE000E020</td><td>PFIC interrupt pending status register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPR2</td><td>0xE000E024</td><td>PFIC interrupt pending status register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPR3</td><td>0xE000E028</td><td>PFIC interrupt pending status register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPR4</td><td>0xE000E02C</td><td>PFIC interrupt pending status register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_ITHRESDR</td><td>0xE000E040</td><td>PFIC interrupt priority threshold configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_CFGR</td><td>0xE000E048</td><td>PFIC interrupt configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_GISR</td><td>0xE000E04C</td><td>PFIC interrupt global status register</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_VTFIDR</td><td>0xE000E050</td><td>PFIC VTF interrupt ID configuration register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_PFIC_VTFADDRR0</td><td>0xE000E060</td><td>PFIC VTF interrupt 0 offset address register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_PFIC_VTFADDRR1</td><td>0xE000E064</td><td>PFIC VTF interrupt 1 offset address register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_PFIC_VTFADDRR2</td><td>0xE000E068</td><td>PFIC VTF interrupt 2 offset address register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_PFIC_VTFADDRR3</td><td>0xE000E06C</td><td>PFIC VTF interrupt 3 offset address register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_PFIC_IENR1</td><td>0xE000E100</td><td>PFIC interrupt enable set register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IENR2</td><td>0xE000E104</td><td>PFIC interrupt enable set register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IENR3</td><td>0xE000E108</td><td>PFIC interrupt enable set register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IENR4</td><td>0xE000E10C</td><td>PFIC interrupt enable set register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IRER1</td><td>0xE000E180</td><td>PFIC interrupt enable clear register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IRER2</td><td>0xE000E184</td><td>PFIC interrupt enable clear register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IRER3</td><td>0xE000E188</td><td>PFIC interrupt enable clear register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IRER4</td><td>0xE000E18C</td><td>PFIC interrupt enable clear register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPSR1</td><td>0xE000E200</td><td>PFIC interrupt pending set register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPSR2</td><td>0xE000E204</td><td>PFIC interrupt pending set register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPSR3</td><td>0xE000E208</td><td>PFIC interrupt pending set register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPSR4</td><td>0xE000E20C</td><td>PFIC interrupt pending set register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPRR1</td><td>0xE000E280</td><td>PFIC interrupt pending clear register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPRR2</td><td>0xE000E284</td><td>PFIC interrupt pending clear register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPRR3</td><td>0xE000E288</td><td>PFIC interrupt pending clear register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPRR4</td><td>0xE000E28C</td><td>PFIC interrupt pending clear register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IACTR1</td><td>0xE000E300</td><td>PFIC interrupt active status register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IACTR2</td><td>0xE000E304</td><td>PFIC interrupt active status register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IACTR3</td><td>0xE000E308</td><td>PFIC interrupt active status register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IACTR4</td><td>0xE000E30C</td><td>PFIC interrupt active status register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_IPRIORx</td><td>0xE000E400</td><td>PFIC interrupt priority configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_WAKEIP0</td><td>0xE000E720</td><td>PFIC wake-up instruction pointer register 0</td><td>0x00000001</td></tr>
+<tr><td>R32_PFIC_CSTAR0</td><td>0xE000E780</td><td>PFIC core status register 0</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_EENR</td><td>0xE000EC80</td><td>PFIC event enable register</td><td>0xFFFFFFFF</td></tr>
+<tr><td>R32_PFIC_EPR</td><td>0xE000EC84</td><td>PFIC event pending register</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_EWUPR</td><td>0xE000EC88</td><td>PFIC event wake-up register</td><td>0x00000000</td></tr>
+<tr><td>R32_PFIC_SCTLR</td><td>0xE000ED10</td><td>PFIC system control register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note:<br>1. NMI, HardFault, ECALL-M, ECALL-U, BREAKPOINT interrupts are always enabled by default.<br>2. ECALL-M, ECALL-U, BREAKPOINT are all cases of EXC, the status is indicated by EXC status bit bit3.<br>3. NMI and EXC support interrupt pending clear and set operations, but do not support interrupt enable clear and set operations.<br>4. ECALL-M, ECALL-U, BREAKPOINT do not support interrupt pending clear and set, or interrupt enable clear and set operations.</div>
+
+<h4 id="9.4.5.1-pfic-interrupt-enable-status-register-1-pfic_isr1">9.4.5.1 PFIC Interrupt Enable Status Register 1 (PFIC_ISR1)</h4>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTENSTA[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>INTENSTA14</td><td>Reserved</td><td>INTENSTA12</td><td colspan="2">Reserved</td><td>INTENSTA9</td><td>INTENSTA8</td><td colspan="2">Reserved</td><td>INTENSTA5</td><td>Reserved</td><td>INTENSTA3</td><td>INTENSTA2</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #16-#31.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0</td></tr>
+<tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #14.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #12.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0</td></tr>
+<tr><td>[11:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:8]</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #8-#9.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0x3</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #5.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>1</td></tr>
+<tr><td>4</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #2-#3.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0x3</td></tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.2-pfic-interrupt-enable-status-register-2-pfic_isr2">9.4.5.2 PFIC Interrupt Enable Status Register 2 (PFIC_ISR2)</h4>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTENSTA[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">INTENSTA[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #32-#63.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.3-pfic-interrupt-enable-status-register-3-pfic_isr3">9.4.5.3 PFIC Interrupt Enable Status Register 3 (PFIC_ISR3)</h4>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTENSTA[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">INTENSTA[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #64-#95.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.4-pfic-interrupt-enable-status-register-4-pfic_isr4">9.4.5.4 PFIC Interrupt Enable Status Register 4 (PFIC_ISR4)</h4>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">INTENSTA[103:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>INTENSTA</td><td>RO</td><td>Current enable status of interrupt #96-#103.<br>1: The interrupt of the current number is enabled;<br>0: The interrupt of the current number is not enabled.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.5-pfic-interrupt-pending-status-register-1-pfic_ipr1">9.4.5.5 PFIC Interrupt Pending Status Register 1 (PFIC_IPR1)</h4>
+
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSTA[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>PENDSTA14</td><td>Reserved</td><td>PENDSTA12</td><td colspan="2">Reserved</td><td>PENDSTA9</td><td>PENDSTA8</td><td colspan="2">Reserved</td><td>PENDSTA5</td><td>Reserved</td><td>PENDSTA3</td><td>PENDSTA2</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #16-#31.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+<tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #14.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #12.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+<tr><td>[11:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:8]</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #8-#9.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #5.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+<tr><td>4</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #2-#3.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.6-pfic-interrupt-pending-status-register-2-pfic_ipr2">9.4.5.6 PFIC Interrupt Pending Status Register 2 (PFIC_IPR2)</h4>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSTA[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSTA[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #32-#63.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.7-pfic-interrupt-pending-status-register-3-pfic_ipr3">9.4.5.7 PFIC Interrupt Pending Status Register 3 (PFIC_IPR3)</h4>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSTA[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSTA[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #64-#95.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.8-pfic-interrupt-pending-status-register-4-pfic_ipr4">9.4.5.8 PFIC Interrupt Pending Status Register 4 (PFIC_IPR4)</h4>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">PENDSTA[103:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>PENDSTA</td><td>RO</td><td>Current pending status of interrupt #96-#103.<br>1: The interrupt of the current number is pending;<br>0: The interrupt of the current number is not pending.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.9-pfic-interrupt-priority-threshold-configuration-register-pfic_ithresdr">9.4.5.9 PFIC Interrupt Priority Threshold Configuration Register (PFIC_ITHRESDR)</h4>
+
+<p><strong>Offset address:</strong> 0x40</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">THRESHOLD[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>THRESHOLD</td><td>RW</td><td>Interrupt priority threshold setting value. Interrupts with priority lower than the set threshold will not execute interrupt service when pending. When this register is 0, the threshold register function is invalid.<br>[7:4]: Priority threshold;<br>[3:0]: Reserved, fixed to 0.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.10-pfic-interrupt-configuration-register-pfic_cfgr">9.4.5.10 PFIC Interrupt Configuration Register (PFIC_CFGR)</h4>
+
+<p><strong>Offset address:</strong> 0x48</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">KEYCODE[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td>SYSRST</td><td colspan="7">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>KEYCODE[15:0]</td><td>WO</td><td>Key control keyword. Effective when written as 0xBEEF, otherwise the operation is invalid.</td><td>0</td></tr>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>SYSRST</td><td>WO</td><td>Reset register. Writing 0xBEEF0080 triggers a system reset, other values are invalid.<br>Note: Same function as the PFIC_SCTLR register SYSRST bit.</td><td>0</td></tr>
+<tr><td>[6:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.11-pfic-interrupt-global-status-register-pfic_gisr">9.4.5.11 PFIC Interrupt Global Status Register (PFIC_GISR)</h4>
+
+<p><strong>Offset address:</strong> 0x4C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="2">EX_STATE[1:0]</td><td>LOCK_UP</td><td>DBG_MODE</td><td>GLOBL_IE</td><td>Reserved</td><td>GPENDSTA</td><td>GACTSTA</td><td colspan="8">NESTSTA[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[15:14]</td><td>EX_STATE[1:0]</td><td>RO</td><td>Core status register, used to obtain the running state of the core:<br>00: Running;<br>01: Light sleep;<br>10: Deep sleep;<br>11: Deep sleep (locked).</td><td>0</td></tr>
+<tr><td>13</td><td>LOCK_UP</td><td>RO</td><td>Core lock status register, used to query whether the core is in a locked state.<br>1: Locked;<br>0: Not locked.</td><td>0</td></tr>
+<tr><td>12</td><td>DBG_MODE</td><td>RO</td><td>Core debug mode register, used to query whether the core is in debug mode:<br>1: Core is in debug mode;<br>0: Core is not in debug mode.</td><td>0</td></tr>
+<tr><td>11</td><td>GLOBL_IE</td><td>RO</td><td>Core global interrupt enable register, used to query whether the core global interrupt is enabled:<br>1: Core global interrupt enable is on;<br>0: Core global interrupt enable is off.</td><td>0</td></tr>
+<tr><td>10</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>9</td><td>GPENDSTA</td><td>RO</td><td>Whether any interrupt is currently pending:<br>1: Yes; 0: No.</td><td>0</td></tr>
+<tr><td>8</td><td>GACTSTA</td><td>RO</td><td>Whether any interrupt is currently being executed:<br>1: Yes; 0: No.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>NESTSTA</td><td>RO</td><td>Current interrupt nesting status, used to query the nesting status of core interrupts.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.12-pfic-vtf-interrupt-id-configuration-register-pfic_vtfidr">9.4.5.12 PFIC VTF Interrupt ID Configuration Register (PFIC_VTFIDR)</h4>
+
+<p><strong>Offset address:</strong> 0x50</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">VTFID3</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">VTFID1</td><td colspan="8">VTFID0</td></tr></tbody>
+</table>
+
+<p>Note: VTFID2 occupies bits [23:16].</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>VTFID3</td><td>RW</td><td>Configure the interrupt number for VTF interrupt 3.</td><td>X</td></tr>
+<tr><td>[23:16]</td><td>VTFID2</td><td>RW</td><td>Configure the interrupt number for VTF interrupt 2.</td><td>X</td></tr>
+<tr><td>[15:8]</td><td>VTFID1</td><td>RW</td><td>Configure the interrupt number for VTF interrupt 1.</td><td>X</td></tr>
+<tr><td>[7:0]</td><td>VTFID0</td><td>RW</td><td>Configure the interrupt number for VTF interrupt 0.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.13-pfic-vtf-interrupt-0-address-register-pfic_vtfaddrr0">9.4.5.13 PFIC VTF Interrupt 0 Address Register (PFIC_VTFADDRR0)</h4>
+
+<p><strong>Offset address:</strong> 0x60</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">ADDR0[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">ADDR0[15:1]</td><td>VTF0EN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:1]</td><td>ADDR0</td><td>RW</td><td>VTF interrupt 0 service program address bit[31:1].</td><td>X</td></tr>
+<tr><td>0</td><td>VTF0EN</td><td>RW</td><td>VTF interrupt 0 enable bit:<br>1: Enable VTF interrupt 0 channel;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.14-pfic-vtf-interrupt-1-address-register-pfic_vtfaddrr1">9.4.5.14 PFIC VTF Interrupt 1 Address Register (PFIC_VTFADDRR1)</h4>
+
+<p><strong>Offset address:</strong> 0x64</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">ADDR1[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">ADDR1[15:1]</td><td>VTF1EN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:1]</td><td>ADDR1</td><td>RW</td><td>VTF interrupt 1 service program address bit[31:1].</td><td>X</td></tr>
+<tr><td>0</td><td>VTF1EN</td><td>RW</td><td>VTF interrupt 1 enable bit:<br>1: Enable VTF interrupt 1 channel;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.15-pfic-vtf-interrupt-2-address-register-pfic_vtfaddrr2">9.4.5.15 PFIC VTF Interrupt 2 Address Register (PFIC_VTFADDRR2)</h4>
+
+<p><strong>Offset address:</strong> 0x68</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">ADDR2[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">ADDR2[15:1]</td><td>VTF2EN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:1]</td><td>ADDR2</td><td>RW</td><td>VTF interrupt 2 service program address bit[31:1].</td><td>X</td></tr>
+<tr><td>0</td><td>VTF2EN</td><td>RW</td><td>VTF interrupt 2 enable bit:<br>1: Enable VTF interrupt 2 channel;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.16-pfic-vtf-interrupt-3-address-register-pfic_vtfaddrr3">9.4.5.16 PFIC VTF Interrupt 3 Address Register (PFIC_VTFADDRR3)</h4>
+
+<p><strong>Offset address:</strong> 0x6C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">ADDR3[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">ADDR3[15:1]</td><td>VTF3EN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:1]</td><td>ADDR3</td><td>RW</td><td>VTF interrupt 3 service program address bit[31:1].</td><td>X</td></tr>
+<tr><td>0</td><td>VTF3EN</td><td>RW</td><td>VTF interrupt 3 enable bit:<br>1: Enable VTF interrupt 3 channel;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.17-pfic-interrupt-enable-set-register-1-pfic_ienr1">9.4.5.17 PFIC Interrupt Enable Set Register 1 (PFIC_IENR1)</h4>
+
+<p><strong>Offset address:</strong> 0x100</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTEN[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>INTEN14</td><td>Reserved</td><td>INTEN12</td><td colspan="12">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>INTEN</td><td>WO</td><td>Interrupt #16-#31 enable control.<br>1: Enable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>INTEN</td><td>WO</td><td>Interrupt #14 enable control.<br>1: Enable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>INTEN</td><td>WO</td><td>Interrupt #12 enable control.<br>1: Enable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[11:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.18-pfic-interrupt-enable-set-register-2-pfic_ienr2">9.4.5.18 PFIC Interrupt Enable Set Register 2 (PFIC_IENR2)</h4>
+
+<p><strong>Offset address:</strong> 0x104</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTEN[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">INTEN[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>INTEN</td><td>WO</td><td>Interrupt #32-#63 enable control.<br>1: Enable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.19-pfic-interrupt-enable-set-register-3-pfic_ienr3">9.4.5.19 PFIC Interrupt Enable Set Register 3 (PFIC_IENR3)</h4>
+
+<p><strong>Offset address:</strong> 0x108</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTEN[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">INTEN[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>INTEN</td><td>WO</td><td>Interrupt #64-#95 enable control.<br>1: Enable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.20-pfic-interrupt-enable-set-register-4-pfic_ienr4">9.4.5.20 PFIC Interrupt Enable Set Register 4 (PFIC_IENR4)</h4>
+
+<p><strong>Offset address:</strong> 0x10C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">INTEN[103:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>INTEN</td><td>WO</td><td>Interrupt #96-#103 enable control.<br>1: Enable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.21-pfic-interrupt-enable-clear-register-1-pfic_irer1">9.4.5.21 PFIC Interrupt Enable Clear Register 1 (PFIC_IRER1)</h4>
+
+<p><strong>Offset address:</strong> 0x180</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTRSET[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>INTRSET14</td><td>Reserved</td><td>INTRSET12</td><td colspan="12">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>INTRSET</td><td>WO</td><td>Interrupt #16-#31 disable control.<br>1: Disable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>INTRSET</td><td>WO</td><td>Interrupt #14 disable control.<br>1: Disable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>INTRSET</td><td>WO</td><td>Interrupt #12 disable control.<br>1: Disable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[11:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.22-pfic-interrupt-enable-clear-register-2-pfic_irer2">9.4.5.22 PFIC Interrupt Enable Clear Register 2 (PFIC_IRER2)</h4>
+
+<p><strong>Offset address:</strong> 0x184</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTRSET[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">INTRSET[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>INTRSET</td><td>WO</td><td>Interrupt #32-#63 disable control.<br>1: Disable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.23-pfic-interrupt-enable-clear-register-3-pfic_irer3">9.4.5.23 PFIC Interrupt Enable Clear Register 3 (PFIC_IRER3)</h4>
+
+<p><strong>Offset address:</strong> 0x188</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">INTRSET[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">INTRSET[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>INTRSET</td><td>WO</td><td>Interrupt #64-#95 disable control.<br>1: Disable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.24-pfic-interrupt-enable-clear-register-4-pfic_irer4">9.4.5.24 PFIC Interrupt Enable Clear Register 4 (PFIC_IRER4)</h4>
+
+<p><strong>Offset address:</strong> 0x18C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">INTRSET[103:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>INTRSET</td><td>WO</td><td>Interrupt #96-#103 disable control.<br>1: Disable the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.25-pfic-interrupt-pending-set-register-1-pfic_ipsr1">9.4.5.25 PFIC Interrupt Pending Set Register 1 (PFIC_IPSR1)</h4>
+
+<p><strong>Offset address:</strong> 0x200</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSET[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>PENDSET14</td><td>Reserved</td><td>PENDSET12</td><td colspan="2">Reserved</td><td>PENDSET9</td><td>PENDSET8</td><td colspan="2">Reserved</td><td>PENDSET5</td><td>Reserved</td><td>PENDSET3</td><td>PENDSET2</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>PENDSET</td><td>WO</td><td>Interrupt #16-#31 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>PENDSET</td><td>WO</td><td>Interrupt #14 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>PENDSET</td><td>WO</td><td>Interrupt #12 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[11:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:8]</td><td>PENDSET</td><td>RO</td><td>Interrupt #8-#9 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>PENDSET</td><td>RO</td><td>Interrupt #5 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>4</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>PENDSET</td><td>WO</td><td>Interrupt #2-#3 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.26-pfic-interrupt-pending-set-register-2-pfic_ipsr2">9.4.5.26 PFIC Interrupt Pending Set Register 2 (PFIC_IPSR2)</h4>
+
+<p><strong>Offset address:</strong> 0x204</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSET[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSET[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>PENDSET</td><td>WO</td><td>Interrupt #32-#63 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.27-pfic-interrupt-pending-set-register-3-pfic_ipsr3">9.4.5.27 PFIC Interrupt Pending Set Register 3 (PFIC_IPSR3)</h4>
+
+<p><strong>Offset address:</strong> 0x208</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSET[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PENDSET[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>PENDSET</td><td>WO</td><td>Interrupt #64-#95 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.28-pfic-interrupt-pending-set-register-4-pfic_ipsr4">9.4.5.28 PFIC Interrupt Pending Set Register 4 (PFIC_IPSR4)</h4>
+
+<p><strong>Offset address:</strong> 0x20C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">PENDSET[103:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>PENDSET</td><td>WO</td><td>Interrupt #96-#103 pending set.<br>1: Set the interrupt of the current number as pending;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.29-pfic-interrupt-pending-clear-register-1-pfic_iprr1">9.4.5.29 PFIC Interrupt Pending Clear Register 1 (PFIC_IPRR1)</h4>
+
+<p><strong>Offset address:</strong> 0x280</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDRST[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>PENDRST14</td><td>Reserved</td><td>PENDRST12</td><td colspan="2">Reserved</td><td>PENDRST9</td><td>PENDRST8</td><td colspan="2">Reserved</td><td>PENDRST5</td><td>Reserved</td><td>PENDRST3</td><td>PENDRST2</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>PENDRST</td><td>WO</td><td>Interrupt #16-#31 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>PENDRST</td><td>WO</td><td>Interrupt #14 pending clear, #13 and #15 are reserved.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>PENDRST</td><td>WO</td><td>Interrupt #12 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[11:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:8]</td><td>PENDRST</td><td>RO</td><td>Interrupt #8-#9 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>PENDRST</td><td>RO</td><td>Interrupt #5 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>4</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>PENDRST</td><td>WO</td><td>Interrupt #2-#3 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.30-pfic-interrupt-pending-clear-register-2-pfic_iprr2">9.4.5.30 PFIC Interrupt Pending Clear Register 2 (PFIC_IPRR2)</h4>
+
+<p><strong>Offset address:</strong> 0x284</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDRST[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PENDRST[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>PENDRST</td><td>WO</td><td>Interrupt #32-#63 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.31-pfic-interrupt-pending-clear-register-3-pfic_iprr3">9.4.5.31 PFIC Interrupt Pending Clear Register 3 (PFIC_IPRR3)</h4>
+
+<p><strong>Offset address:</strong> 0x288</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PENDRST[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PENDRST[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>PENDRST</td><td>WO</td><td>Interrupt #64-#95 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.32-pfic-interrupt-pending-clear-register-4-pfic_iprr4">9.4.5.32 PFIC Interrupt Pending Clear Register 4 (PFIC_IPRR4)</h4>
+
+<p><strong>Offset address:</strong> 0x28C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">PENDRST[103:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>PENDSET</td><td>WO</td><td>Interrupt #96-#103 pending clear.<br>1: Clear the pending status of the interrupt of the current number;<br>0: No effect.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.33-pfic-interrupt-active-status-register-1-pfic_iactr1">9.4.5.33 PFIC Interrupt Active Status Register 1 (PFIC_IACTR1)</h4>
+
+<p><strong>Offset address:</strong> 0x300</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">IACTS[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>IACTS14</td><td>Reserved</td><td>IACTS12</td><td colspan="8">Reserved</td><td>IACTS3</td><td>IACTS2</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>IACTS</td><td>RO</td><td>Interrupt #16-#31 active status.<br>1: The interrupt of the current number is executing;<br>0: The interrupt of the current number is not executing.</td><td>0</td></tr>
+<tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>IACTS</td><td>RO</td><td>Interrupt #14 active status.<br>1: The interrupt of the current number is executing;<br>0: The interrupt of the current number is not executing.</td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>IACTS</td><td>RO</td><td>Interrupt #12 active status.<br>1: The interrupt of the current number is executing;<br>0: The interrupt of the current number is not executing.</td><td>0</td></tr>
+<tr><td>[11:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>IACTS</td><td>RO</td><td>Interrupt #2-#3 active status.<br>1: The interrupt of the current number is executing;<br>0: The interrupt of the current number is not executing.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.34-pfic-interrupt-active-status-register-2-pfic_iactr2">9.4.5.34 PFIC Interrupt Active Status Register 2 (PFIC_IACTR2)</h4>
+
+<p><strong>Offset address:</strong> 0x304</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">IACTS[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">IACTS[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>IACTS</td><td>RO</td><td>Interrupt #32-#63 active status.<br>1: The interrupt of the current number is executing;<br>0: The interrupt of the current number is not executing.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.35-pfic-interrupt-active-status-register-3-pfic_iactr3">9.4.5.35 PFIC Interrupt Active Status Register 3 (PFIC_IACTR3)</h4>
+
+<p><strong>Offset address:</strong> 0x308</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">IACTS[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">IACTS[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>IACTS</td><td>RO</td><td>Interrupt #64-#95 active status.<br>1: The interrupt of the current number is executing;<br>0: The interrupt of the current number is not executing.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.36-pfic-interrupt-active-status-register-4-pfic_iactr4">9.4.5.36 PFIC Interrupt Active Status Register 4 (PFIC_IACTR4)</h4>
+
+<p><strong>Offset address:</strong> 0x30C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">IACTS[103:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>IACTS</td><td>WO</td><td>Interrupt #96-#103 active status.<br>1: The interrupt of the current number is executing;<br>0: The interrupt of the current number is not executing.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.37-pfic-interrupt-priority-configuration-register-pfic_ipriorx-x-0-63">9.4.5.37 PFIC Interrupt Priority Configuration Register (PFIC_IPRIORx) (x=0-63)</h4>
+
+<p><strong>Offset address:</strong> 0x400-0x4FF</p>
+
+<p>The controller supports 256 interrupts (0-255), each using 8 bits to set the control priority.</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[2047:2040]</td><td>IP_255</td><td>RW</td><td>Same as IP_0 description.</td><td>0</td></tr>
+<tr><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td></tr>
+<tr><td>[31:24]</td><td>IP_3</td><td>RW</td><td>Same as IP_0 description.</td><td>0</td></tr>
+<tr><td>[23:16]</td><td>IP_2</td><td>RW</td><td>Same as IP_0 description.</td><td>0</td></tr>
+<tr><td>[15:8]</td><td>IP_1</td><td>RW</td><td>Same as IP_0 description.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>IP_0</td><td>RW</td><td>Interrupt #0 priority configuration:<br>[7:4]: Priority control bits. The smaller the value, the higher the priority. The preemption bits are controlled by the CSR register preempt.<br>When the preempt register value is 0, there are no preemption bits.<br>When the preempt register value is 1, bit7 is the preemption bit.<br>When the preempt register value is 2, bits7-6 are the preemption bits.<br>When the preempt register value is 3, bits7-5 are the preemption bits.<br>The core supports a maximum of 2 levels of nesting. When nesting is full, further preemption is not possible.<br>[3:0] bits are fixed to 0.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.38-pfic-wake-up-instruction-pointer-register-0-pfic_wakeip0">9.4.5.38 PFIC Wake-up Instruction Pointer Register 0 (PFIC_WAKEIP0)</h4>
+
+<p><strong>Offset address:</strong> 0x720</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">IP_RELOAD0[30:15]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">IP_RELOAD0[14:0]</td><td>SHUTDOWN0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:1]</td><td>IP_RELOAD0</td><td>RW</td><td>Core wake-up PC address register, used for PC value reload after power-on wake-up and reset wake-up.</td><td>0</td></tr>
+<tr><td>0</td><td>SHUTDOWN0</td><td>RW</td><td>Core deep sleep (locked) cancel register, used to cancel the locked state of the core that entered deep sleep (locked) after power-on, allowing wake-up by time:<br>1: Locked;<br>0: Unlock the lock.</td><td>1</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.39-pfic-core-status-register-0-pfic_cstar0">9.4.5.39 PFIC Core Status Register 0 (PFIC_CSTAR0)</h4>
+
+<p><strong>Offset address:</strong> 0x780</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="2">CPU_EX_STATE_0</td><td>CPU_LOCK_UP_0</td><td>CPU_DBG_MODE_0</td><td>CPU_GLOBL_IE_0</td><td>RESERVED</td><td>CPU_IRQ_PEND_0</td><td>CPU_IRQ_ACTIVE_0</td><td colspan="8">CPU_NEST_STA_0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[15:14]</td><td>CPU_EX_STATE_0</td><td>RO</td><td>Core status register, used to obtain the running state of the core:<br>00: Running;<br>01: Light sleep;<br>10: Deep sleep;<br>11: Deep sleep (locked).</td><td>0</td></tr>
+<tr><td>13</td><td>CPU_LOCK_UP_0</td><td>RO</td><td>Core lock status register, used to query whether the core is in a locked state:<br>1: Locked;<br>0: Not locked.</td><td>0</td></tr>
+<tr><td>12</td><td>CPU_DBG_MODE_0</td><td>RO</td><td>Core debug mode register, used to query whether the core is in debug mode:<br>1: Core is in debug mode;<br>0: Core is not in debug mode.</td><td>0</td></tr>
+<tr><td>11</td><td>CPU_GLOBL_IE_0</td><td>RO</td><td>Core global interrupt enable register, used to query whether the core global interrupt is enabled:<br>1: Core global interrupt enable is on;<br>0: Core global interrupt enable is off.</td><td>0</td></tr>
+<tr><td>10</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>9</td><td>CPU_IRQ_PEND_0</td><td>RO</td><td>Core interrupt pending flag register, used to query whether the core has unprocessed interrupts:<br>1: Core has unprocessed interrupts;<br>0: Core has no unprocessed interrupts.</td><td>0</td></tr>
+<tr><td>8</td><td>CPU_IRQ_ACTIVE_0</td><td>RO</td><td>Core interrupt active flag register, used to query whether the core is currently processing an interrupt:<br>1: Core is processing an interrupt;<br>0: Core is not processing an interrupt.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>CPU_NEST_STA_0</td><td>RO</td><td>Core interrupt nesting status register, used to query the nesting status of core interrupts.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.40-pfic-event-enable-register-pfic_eenr">9.4.5.40 PFIC Event Enable Register (PFIC_EENR)</h4>
+
+<p><strong>Offset address:</strong> 0xC80</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">EVENTEN[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">EVENTEN[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>EVENTEN</td><td>RW</td><td>Event #31-#0 wake-up enable:<br>1: Allow the corresponding event to wake up the core during sleep;<br>0: Mask the corresponding event, this event is not allowed to wake up the core.<br>Supports up to 32 event sources, of which 0-7 are level triggered (active high), 8-31 are pulse triggered:<br>#0: Core halt request;<br>#1: Core interrupt request;<br>#7-#2: Reserved;<br>#8: Core enters interrupt;<br>#9: Core exits interrupt;<br>#10: New interrupt pending; (for shared interrupts, does not distinguish whether the interrupt is routed to the local core)<br>#11: Core sends event; (send event of the local core)<br>#12: Core receives event; (send event of other cores)<br>#13: System receives event; (system configured events, e.g. GPIO toggle events...)<br>#31-#14: Reserved.</td><td>0xFFFFFFFF</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.41-pfic-event-pending-register-pfic_epr">9.4.5.41 PFIC Event Pending Register (PFIC_EPR)</h4>
+
+<p><strong>Offset address:</strong> 0xC84</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">EVENT_PEND[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">EVENT_PEND[15:8]</td><td colspan="8">EVENT_PEND[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>EVENT_PEND</td><td>RW1Z</td><td>Event #31-#8 pending status, write 1 to clear:<br>1: The corresponding event occurred and has not been processed;<br>0: The corresponding event did not occur.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>EVENT_PEND</td><td>RO</td><td>Event #7-#0 pending status, cannot be cleared:<br>1: The corresponding event occurred and has not been processed;<br>0: The corresponding event did not occur.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.42-pfic-event-wake-up-register-pfic_ewupr">9.4.5.42 PFIC Event Wake-up Register (PFIC_EWUPR)</h4>
+
+<p><strong>Offset address:</strong> 0xC88</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">EVENT_WUP[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">EVENT_WUP[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>EVENT_WUP</td><td>RO</td><td>Event #31-#0 wake-up register:<br>1: The corresponding event woke up the core from sleep;<br>0: The corresponding event is not the event that woke up the core this time.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="9.4.5.43-pfic-system-control-register-pfic_sctlr">9.4.5.43 PFIC System Control Register (PFIC_SCTLR)</h4>
+
+<p><strong>Offset address:</strong> 0xD10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>SYSRST</td><td colspan="7">Reserved</td><td colspan="8">HART_ID</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="9">Reserved</td><td>SENDEVENT</td><td>SEVONPEND</td><td>WFITOWFE</td><td>SLEEPDEEP</td><td>SLEEPONEXIT</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>SYSRST</td><td>RW1</td><td>System reset, auto-clears to 0. Write 1 is effective, write 0 has no effect. Same function as PFIC_CFGR register.</td><td>0</td></tr>
+<tr><td>[30:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[23:16]</td><td>HART_ID</td><td>RO</td><td>Core ID register, used to obtain the core ID that reads this register.</td><td>0</td></tr>
+<tr><td>[15:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>SENDEVENT</td><td>WO</td><td>Send event, generates a send event, which can be used to wake up other cores.</td><td>0</td></tr>
+<tr><td>4</td><td>SEVONPEND</td><td>RW</td><td>When an event or interrupt pending status occurs, the system can be woken up from after the WFE instruction. If the WFE instruction has not been executed, the system will wake up immediately after executing the instruction next time.<br>1: Enabled events and all interrupts (including those with interrupts not enabled) can wake up the system;<br>0: Only enabled events and enabled interrupts can wake up.</td><td>0</td></tr>
+<tr><td>3</td><td>WFITOWFE</td><td>RW</td><td>WFI command executes as WFE. WFE is a custom instruction. When this register is set to 1, the core enters low-power state after executing the WFI instruction, and can be woken up after an external event occurs.<br>1: Wait for event to wake up the core after WFI instruction;<br>0: Wait for interrupt to wake up the core after WFI instruction.</td><td>0</td></tr>
+<tr><td>2</td><td>SLEEPDEEP</td><td>RW</td><td>Control the system's low-power mode:<br>1: deep sleep; 0: sleep.</td><td>0</td></tr>
+<tr><td>1</td><td>SLEEPONEXIT</td><td>RW</td><td>Control the system state after leaving the interrupt service program:<br>1: System enters low-power mode;<br>0: System enters main program.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>

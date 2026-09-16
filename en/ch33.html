@@ -1,0 +1,144 @@
+<h1 id="chapter-33-extended-configuration-exten">Chapter 33: Extended Configuration (EXTEN)</h1>
+
+<h2 id="33.1-extended-configuration">33.1 Extended Configuration</h2>
+
+<p>The system provides an EXTEN extended configuration unit (EXTEN_CTR register). This unit uses the HB clock and only performs reset actions during system reset. It mainly includes the following extended control bit functions:</p>
+<ol>
+<li><strong>Internal voltage adjustment:</strong> The ULLDOTRIM field selects the default value, which can be modified when adjusting performance and power consumption.</li>
+<li><strong>Lock-up function monitoring:</strong> When the LKUPEN field is enabled, the system's Lock-up condition monitoring is turned on. Once a Lock-up condition occurs, the system performs a software reset and sets the LKUPRST field to 1, which can be cleared by writing 1 after reading.</li>
+<li><strong>VDD18 adjustment:</strong> The voltage of VDD18 can be configured.</li>
+</ol>
+
+<h2 id="33.2-register-description">33.2 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 33-1: EXTEN related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_EXTEN_CTR</td><td>0x40023800</td><td>Extended control configuration register</td><td>0x00000440</td></tr>
+<tr><td>R32_FEATURE_SIGN</td><td>0x1FFFF7D0</td><td>Feature information indication register</td><td>0xE339XXXX</td></tr>
+</tbody>
+</table>
+
+<h3 id="33.2.1-extended-control-configuration-register-exten_ctr">33.2.1 Extended Control Configuration Register (EXTEN_CTR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="2">Reserved</td><td>LDO18_ADJ</td><td colspan="2">Reserved</td><td>ULLDOTRIM[1:0]</td><td>LKUPRST</td><td>LKUPEN</td><td colspan="6">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:13]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>LDO18_ADJ</td>
+<td>RW</td>
+<td>VDD18 adjustment bit.<br>
+1: 1.9V;<br>
+0: 1.8V.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:8]</td>
+<td>ULLDOTRIM[1:0]</td>
+<td>RW</td>
+<td>Adjusts the ULLDO voltage value in low-power mode.</td>
+<td>10b</td>
+</tr>
+<tr>
+<td>7</td>
+<td>LKUPRST</td>
+<td>RW1</td>
+<td>LOCKUP reset flag:<br>
+1: A LOCKUP occurred causing a system reset, write 1 to clear;<br>
+0: Normal.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>LKUPEN</td>
+<td>RW</td>
+<td>LOCKUP monitoring function:<br>
+1: Enabled, the system performs a reset and sets LOCKUP_RST when a lock-up occurs;<br>
+0: Not enabled.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>[5:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="33.2.2-feature-information-indication-register-feature_sign">33.2.2 Feature Information Indication Register (FEATURE_SIGN)</h3>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="7">Reserved</td><td>ETH_LED_EN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0xE339</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>bit[15:8] reset value is the bitwise inversion of bit[7:0] reset value.</td>
+<td>X</td>
+</tr>
+<tr>
+<td>[7:1]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0x7F</td>
+</tr>
+<tr>
+<td>0</td>
+<td>ETH_LED_EN</td>
+<td>RO</td>
+<td>ETH LED function indication bit:<br>
+1: ETH LED function is enabled, providing LINK and ACT functions;<br>
+0: ETH LED function is not enabled, providing only LINK function.</td>
+<td>X</td>
+</tr>
+</tbody>
+</table>

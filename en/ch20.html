@@ -1,0 +1,534 @@
+<h1 id="chapter-20-serial-peripheral-interface-spi-i2s">Chapter 20: Serial Peripheral Interface (SPI/I2S)</h1>
+
+<p>SPI supports data exchange in three-wire synchronous serial mode. With the chip select line, it supports hardware switching between master and slave modes, and supports communication over a single data line.</p>
+<p>I2S is also a three-wire synchronous serial interface communication protocol. It supports four audio standards, including the Philips I2S standard, MSB-aligned standard, LSB-aligned standard, and PCM standard.</p>
+
+<h2 id="20.1-main-features">20.1 Main Features</h2>
+<h3 id="20.1.1-spi-features">20.1.1 SPI Features</h3>
+<ul>
+<li>Supports full-duplex synchronous serial mode</li>
+<li>Supports single-wire half-duplex mode</li>
+<li>Supports master mode and slave mode, multi-slave mode</li>
+<li>Supports 8-bit or 16-bit data structure</li>
+<li>Maximum clock frequency supports up to half of Fpclk</li>
+<li>Data order supports MSB-first or LSB-first</li>
+<li>Supports hardware or software controlled NSS pin</li>
+<li>Transmit and receive support hardware CRC verification</li>
+<li>Transmit and receive buffers support DMA transfer</li>
+<li>Supports configurable clock phase and polarity</li>
+</ul>
+
+<h3 id="20.1.2-i2s-features">20.1.2 I2S Features</h3>
+<ul>
+<li>Supports simplex communication</li>
+<li>Supports master mode and slave mode</li>
+<li>Supports 16-bit, 24-bit, and 32-bit data formats</li>
+<li>Audio sampling frequency range: 8 kHz – 562.2 kHz</li>
+<li>Supports programmable clock polarity</li>
+<li>Supports common I2S protocols: Philips standard, MSB-aligned standard, LSB-aligned standard, and PCM standard</li>
+<li>Transmit and receive buffers support DMA transfer</li>
+<li>Supports master clock output to external audio devices</li>
+</ul>
+
+<h2 id="20.2-spi-functional-description">20.2 SPI Functional Description</h2>
+<h3 id="20.2.1-overview">20.2.1 Overview</h3>
+
+<figure><img src="figures/fig_20_1.png"><figcaption>Figure 20-1: SPI block diagram</figcaption></figure>
+
+<p>As can be seen from Figure 20-1, the four pins mainly related to SPI are MISO, MOSI, SCK, and NSS. Among them, the MISO pin is the data input pin when the SPI module operates in master mode, and the data output pin when operating in slave mode. The MOSI pin is the data output pin when operating in master mode, and the data input pin when operating in slave mode. SCK is the clock pin; the clock signal is always output by the master, and the slave receives the clock signal and synchronizes data transmission/reception. The NSS pin is the chip select pin, with the following usage:</p>
+<ol>
+<li>NSS controlled by software: In this case SSM is set, and the internal NSS signal level (high or low) is determined by SSI. This is generally used in SPI master mode.</li>
+<li>NSS controlled by hardware: When NSS output is enabled (SSOE set), the SPI master actively pulls the NSS pin low when transmitting outward. If the NSS pin cannot be successfully pulled low, it indicates that another master device is still communicating on the bus, and a hardware error is generated. When SSOE is not set, it can be used in multi-master mode; if it is pulled low, the device is forced into slave mode and the MSTR bit is automatically cleared.</li>
+</ol>
+<p>The operating mode of SPI can be configured through CPHA and CPOL. CPHA set means the module samples data on the second clock edge and data is latched; CPHA not set means the SPI module samples data on the first clock edge and data is latched. CPOL indicates whether the clock stays high or low when there is no data. See Figure 20-2 below for details.</p>
+
+<figure><img src="figures/fig_20_2.png"><figcaption>Figure 20-2: SPI modes</figcaption></figure>
+
+<p>The master and device need to be set to the same SPI mode. Before configuring the SPI mode, the SPE bit must be cleared. The DFF bit determines whether a single SPI data length is 8-bit or 16-bit. LSBFIRST controls whether a single data word is sent MSB-first or LSB-first.</p>
+
+<h3 id="20.2.2-master-mode">20.2.2 Master Mode</h3>
+<p>When the SPI module operates in master mode, SCK generates the serial clock. The steps to configure master mode are as follows:</p>
+<ul>
+<li>Configure the BR[2:0] field of the control register to determine the clock frequency;</li>
+<li>Configure CPOL and CPHA bits to determine the SPI mode;</li>
+<li>Configure DFF to determine the data word length;</li>
+<li>Configure LSBFIRST to determine the frame format;</li>
+<li>Configure the NSS pin, e.g., set the SSOE bit to let hardware control NSS. Alternatively, set the SSM bit and set SSI high;</li>
+<li>Set the MSTR bit and SPE bit; ensure NSS is already high at this point.</li>
+</ul>
+<p>To send data, simply write the data to be transmitted to the data register. SPI transfers data from the transmit buffer to the shift register in parallel, then shifts data out from the shift register according to the LSBFIRST setting. When data has been moved to the shift register, the TXE flag is set; if TXEIE has been set, an interrupt is generated. When the TXE flag is set, data needs to be written to the data register to maintain a complete data stream.</p>
+<p>When receiving data, upon the last sampling clock edge of the data word, data is transferred in parallel from the shift register to the receive buffer, and the RXNE bit is set. If RXNEIE was previously set, an interrupt is also generated. At this point the data register should be read as soon as possible to retrieve the data.</p>
+
+<h3 id="20.2.3-slave-mode">20.2.3 Slave Mode</h3>
+<p>When the SPI module operates in slave mode, SCK is used to receive the clock from the master, and the local baud rate setting has no effect. The steps to configure slave mode are as follows:</p>
+<ul>
+<li>Configure the DFF bit to set the data bit length;</li>
+<li>Configure CPOL and CPHA bits to match the master mode;</li>
+<li>Configure LSBFIRST to match the master data frame format;</li>
+<li>In hardware management mode, the NSS pin must be kept low. If NSS is set to software management (SSM set), keep SSI not set;</li>
+<li>Clear the MSTR bit, set the SPE bit to enable the SPI module.</li>
+</ul>
+<p>During transmission, when the first slave sampling clock edge appears on SCK, the slave begins transmitting. The transmission process moves data from the transmit buffer to the transmit shift register; once the data in the transmit buffer has been moved to the shift register, the TXE flag is set. If TXEIE was previously set, an interrupt is generated.</p>
+<p>During reception, after the last sampling clock edge, the RXNE bit is set, and the byte received by the shift register is transferred to the receive buffer. Reading the data register retrieves the data from the receive buffer. If RXNEIE was set before RXNE is set, an interrupt is generated.</p>
+
+<h3 id="20.2.4-simplex-mode">20.2.4 Simplex Mode</h3>
+<p>The SPI interface can operate in half-duplex mode, where the master device uses the MOSI pin and the slave device uses the MISO pin for communication. To use half-duplex communication, BIDIMODE must be set, and BIDIOE controls the transfer direction.</p>
+<p>In normal full-duplex mode, setting the RXONLY bit puts the SPI module into receive-only simplex mode. After RXONLY is set, one data pin is released; the released pin differs between master and slave modes. Alternatively, the received data can be ignored and the SPI can be set to transmit-only mode.</p>
+
+<h3 id="20.2.5-crc">20.2.5 CRC</h3>
+<p>The SPI module uses CRC verification to ensure the reliability of full-duplex communication. Separate CRC calculators are used for data transmission and reception. The polynomial used for CRC calculation is determined by the polynomial register. Different calculation methods are used for 8-bit data width and 16-bit data width respectively.</p>
+<p>Setting the CRCEN bit enables CRC verification and simultaneously resets the CRC calculators. After transmitting the last data byte, setting the CRCNEXT bit causes the calculation result of the TXCRCR calculator to be transmitted after the current byte is sent. If the value of the last received shift register does not match the locally calculated RXCRCR value, the CRCERR bit is set. To use CRC verification, the polynomial calculator must be configured and the CRCEN bit set when configuring the SPI operating mode. The CRCNEXT bit should be set on the last word or half-word to send the CRC and verify the received CRC. Note: the CRC calculation polynomial must be the same for both the transmitter and receiver.</p>
+
+<h3 id="20.2.6-dma">20.2.6 DMA</h3>
+<p>The SPI module supports using DMA to accelerate data communication speed. DMA can be used to fill data into the transmit buffer or to promptly retrieve data from the receive buffer. DMA uses RXNE and TXE as signals to promptly retrieve or send data. DMA can also operate in simplex or CRC-verified mode.</p>
+
+<h3 id="20.2.7-errors">20.2.7 Errors</h3>
+<p><strong>Master mode fault error</strong></p>
+<p>When the SPI operates in NSS pin hardware management mode and an external operation pulls the NSS pin low; or in NSS pin software management mode, the SSI bit is cleared; or the SPE bit is cleared, causing the SPI to be disabled; or the MSTR bit is cleared, the SPI enters slave mode. If the ERRIE bit has been set, an interrupt is generated. To clear the MODF bit: first perform a read or write operation on R16_SPI1_STATR, then write R16_SPI1_CTLR1.</p>
+<p><strong>Overrun error</strong></p>
+<p>If the master sends data while the slave's receive buffer still contains unread data, an overrun error occurs and the OVR bit is set. If ERRIE is set, an interrupt is generated. An overrun error should cause the current transmission to restart. Reading the data register followed by reading the status register clears this bit.</p>
+<p><strong>CRC error</strong></p>
+<p>When the received CRC verification word does not match the RXCRCR value, a CRC verification error occurs and the CRCERR bit is set.</p>
+
+<h3 id="20.2.8-interrupts">20.2.8 Interrupts</h3>
+<p>The SPI module supports five interrupt sources. The transmit buffer empty and receive buffer not empty events set the TXE and RXNE flags respectively, generating interrupts when the TXEIE and RXNEIE bits are set. In addition, the three errors mentioned above — MODF, OVR, and CRCERR — also generate interrupts when the ERRIE bit is enabled.</p>
+
+<h2 id="20.3-i2s-functional-description">20.3 I2S Functional Description</h2>
+<h3 id="20.3.1-i2s-overview">20.3.1 I2S Overview</h3>
+
+<figure><img src="figures/fig_20_3.png"><figcaption>Figure 20-3: I2S block diagram</figcaption></figure>
+
+<p>By setting the I2SMOD bit of the I2SCFGR register, the I2S function is enabled. At this point, the SPI module can be used as an I2S audio interface. I2S shares three pins with SPI:</p>
+<ul>
+<li>SD: Serial data (mapped to the MOSI pin), used to transmit and receive time-division multiplexed data for 2 channels;</li>
+<li>WS: Word select (mapped to the NSS pin), output as a data control signal in master mode, input in slave mode;</li>
+<li>CK: Serial clock (mapped to the SCK pin), output as a clock signal in master mode, input in slave mode.</li>
+</ul>
+<p>When some external audio devices require a master clock, an additional pin can output the clock:</p>
+<ul>
+<li>MCK: Master clock (independently mapped). When I2S is configured as master mode and the MCKOE bit of the I2SPR register is 1, it is used as a pin to output an additional clock signal. The output clock signal frequency is preset to 256×Fs, where Fs is the sampling frequency of the audio signal.</li>
+</ul>
+<p>When configured as master mode, I2S uses its own clock generator to produce the clock signal for communication. This clock generator is also the clock source for the master clock output. In I2S mode there are 2 additional registers: one is the I2SPR register related to clock generator configuration, and the other is the I2S general configuration register I2SCFGR (which can set parameters such as audio standard, slave/master mode, data format, data packet frame, clock polarity, etc.). In I2S mode, the CTLR1 register and all CRCR registers are not used. Likewise, in I2S mode the SSOE bit of the CTLR2 register, and the MODF and CRCERR bits of the STATR register are not used. I2S uses the same DATAR register as SPI for 16-bit-wide mode data transfer.</p>
+
+<h3 id="20.3.2-supported-audio-protocols">20.3.2 Supported Audio Protocols</h3>
+<p>The three-wire bus supports time-division multiplexing of audio data on 2 channels: left channel and right channel, but only one 16-bit register is used for transmission or reception. Therefore, software must write the corresponding data to the data register according to the channel currently being transmitted. Similarly, when reading register data, the CHSIDE bit of the STATR register is checked to determine which channel the received data belongs to. The left channel is always transmitted before the right channel (the CHSIDE bit has no meaning under the PCM protocol). There are four available data and packet frame combinations. Data can be sent in the following four data formats:</p>
+<ul>
+<li>16-bit data packed into a 16-bit frame</li>
+<li>16-bit data packed into a 32-bit frame</li>
+<li>24-bit data packed into a 32-bit frame</li>
+<li>32-bit data packed into a 32-bit frame</li>
+</ul>
+<p>When extending 16-bit data to a 32-bit frame, the first 16 bits (MSB) are meaningful data and the last 16 bits (LSB) are forced to 0. This operation requires no software intervention and no additional DMA request (only one read or write operation is needed). The 24-bit and 32-bit data frames require the CPU to perform 2 read or write operations on the DATAR register; when using DMA, 2 DMA transfers are needed. For 24-bit data, after extension to 32 bits, the lowest 8 bits are set to 0 by hardware. For all data formats and communication standards, the most significant bit (MSB) is always sent first. The I2S interface supports four audio standards, selectable by setting the I2SSTD[1:0] bits and the PCMSYNC bit of the I2SCFGR register.</p>
+
+<h4 id="20.3.2.1-i2s-philips-standard">20.3.2.1 I2S Philips Standard</h4>
+<p>In this standard, the WS pin is used to indicate which channel the data being transmitted belongs to. The WS signal becomes active 1 clock cycle before the first data bit (MSB) is transmitted. The transmitter changes data on the falling edge of the clock signal (CK), and the receiver reads data on the rising edge. The WS signal also changes on the falling edge of the clock signal.</p>
+
+<figure><img src="figures/fig_20_4.png"><figcaption>Figure 20-4: Philips protocol waveform (16/32-bit full precision, CPOL=0)</figcaption></figure>
+
+<figure><img src="figures/fig_20_5.png"><figcaption>Figure 20-5: Philips protocol waveform (24-bit frame, CPOL=0)</figcaption></figure>
+
+<p>This mode requires 2 read or write operations to the SPI_DATAR register. In transmit mode, to send 0x8EAA33 (24-bit):</p>
+<ul>
+<li>First write to Data register: 0x8EAA</li>
+<li>Second write to Data register: 0x33XX — Only the 8 MSB are sent to complete the 24 bits. The 8 LSB have no meaning and could be anything.</li>
+</ul>
+<p>In receive mode, to receive 0x8EAA33:</p>
+<ul>
+<li>First read from Data register: 0x8EAA</li>
+<li>Second read from Data register: 0x3300 — Only the 8 MSB are valid; the 8 LSB will always be 00.</li>
+</ul>
+
+<figure><img src="figures/fig_20_6.png"><figcaption>Figure 20-6: Philips protocol waveform (16-bit extended to 32-bit packet frame, CPOL=0)</figcaption></figure>
+
+<p>During the I2S configuration phase, if 16-bit data is selected to be extended to a 32-bit channel frame, only one access to the DATAR register is needed. The lower 16 bits used for extension to 32 bits are set to 0x0000 by hardware. If the data to be transmitted or received is 0x76A3 (extended to 32 bits: 0x76A30000), only one operation on DATAR is needed. When transmitting, the MSB must be written to the DATAR register; the TXE flag being 1 indicates that new data can be written, and if the corresponding interrupt is enabled, an interrupt can be generated. Transmission is completed by hardware; even before the trailing 16 bits of 0x0000 have been sent out, TXE is set and the corresponding interrupt is generated. When receiving, each time the upper 16-bit half-word (MSB) is received, the RXNE flag is set to 1, and if the corresponding interrupt is enabled, an interrupt can be generated. This gives more time between 2 reads and writes, preventing underflow or overflow conditions.</p>
+
+<h4 id="20.3.2.2-msb-aligned-standard">20.3.2.2 MSB-Aligned Standard</h4>
+<p>In this standard, the WS signal is generated simultaneously with the first data bit, i.e., the most significant bit (MSB).</p>
+
+<figure><img src="figures/fig_20_7.png"><figcaption>Figure 20-7: MSB-aligned 16-bit or 32-bit full precision (CPOL=0)</figcaption></figure>
+
+<p>The transmitter changes data on the falling edge of the clock signal; the receiver reads data on the rising edge.</p>
+
+<figure><img src="figures/fig_20_8.png"><figcaption>Figure 20-8: MSB-aligned 24-bit data, CPOL=0</figcaption></figure>
+
+<figure><img src="figures/fig_20_9.png"><figcaption>Figure 20-9: MSB-aligned 16-bit data extended to 32-bit packet frame, CPOL=0</figcaption></figure>
+
+<h4 id="20.3.2.3-lsb-aligned-standard">20.3.2.3 LSB-Aligned Standard</h4>
+<p>This standard is similar to the MSB-aligned standard (no difference in 16-bit or 32-bit full-precision frame format).</p>
+
+<figure><img src="figures/fig_20_10.png"><figcaption>Figure 20-10: LSB-aligned 16 or 32-bit full precision, CPOL=0</figcaption></figure>
+
+<figure><img src="figures/fig_20_11.png"><figcaption>Figure 20-11: LSB-aligned 24-bit data, CPOL=0</figcaption></figure>
+
+<p>In transmit mode, to send data 0x3478AE, 2 write operations to the DATAR register are needed via software or DMA:</p>
+<ul>
+<li>First time TXE='1' when the data register is written: 0xXX34 — Only the lower 8 bits in the halfword have meaning; the higher 8 bits are forced to 0x00.</li>
+<li>Second time TXE='1' when the data register is written: 0x78AE.</li>
+</ul>
+<p>In receive mode, to receive data 0x3478AE, 1 read operation of the DATAR register is needed for each of 2 consecutive RXNE events:</p>
+<ul>
+<li>First time RXNE='1' when the data register is read: 0xXX34 — Only the lower 8 bits in the halfword have meaning; the higher 8 bits are forced to 0x00.</li>
+<li>Second time RXNE='1' when the data register is read: 0x78AE.</li>
+</ul>
+
+<figure><img src="figures/fig_20_12.png"><figcaption>Figure 20-12: LSB-aligned 16-bit data extended to 32-bit packet frame, CPOL=0</figcaption></figure>
+
+<p>During the I2S configuration phase, if 16-bit data is selected to be extended to a 32-bit channel frame, only one access to the DATAR register is needed. At this point, the upper half-word (16-bit MSB) after extension to 32 bits is set to 0x0000 by hardware. If the data to be transmitted or received is 0x76A3 (extended to 32 bits: 0x000076A3), only one operation on DATAR is needed. When transmitting, if TXE is 1, the user needs to write the data to be transmitted (i.e., 0x76A3). The 0x0000 portion used for extension to 32 bits is sent out by hardware first; once valid data starts being sent from the SD pin, the next TXE event occurs. When receiving, once valid data is received (rather than the 0x0000 portion), the RXNE event occurs. This gives more time between 2 reads and writes, preventing underflow or overflow conditions.</p>
+
+<h4 id="20.3.2.4-pcm-standard">20.3.2.4 PCM Standard</h4>
+<p>In the PCM standard, there is no channel selection information. The PCM standard has 2 available frame structures: short frame or long frame, selectable by setting the PCMSYNC bit of the I2SCFGR register.</p>
+
+<figure><img src="figures/fig_20_13.png"><figcaption>Figure 20-13: PCM standard waveform (16-bit)</figcaption></figure>
+
+<p>For the long frame, in master mode, the WS signal used for synchronization is active for a fixed duration of 13 bits. For the short frame, the WS signal used for synchronization is only 1 bit long.</p>
+
+<figure><img src="figures/fig_20_14.png"><figcaption>Figure 20-14: PCM standard waveform (16-bit)</figcaption></figure>
+
+<p>Regardless of the mode (master or slave) or the synchronization method (short frame or long frame), the time difference between 2 consecutive data frames and between 2 synchronization signals (even in slave mode) must be determined by setting the DATLEN and CHLEN bits of the I2SCFGR register.</p>
+
+<h3 id="20.3.3-clock-generator">20.3.3 Clock Generator</h3>
+<p>The I2S bit rate determines the data stream on the I2S data line and the I2S clock signal frequency. I2S bit rate = number of bits per channel × number of channels × audio sampling frequency.</p>
+<p>For a signal with left and right channels and 16-bit audio, the I2S bit rate is calculated as follows:</p>
+<p>I2S bit rate = 16 × 2 × Fs</p>
+<p>If the packet length is 32 bits, the I2S bit rate is calculated as follows:</p>
+<p>I2S bit rate = 32 × 2 × Fs</p>
+
+<figure><img src="figures/fig_20_15.png"><figcaption>Figure 20-15: Audio sampling frequency definition</figcaption></figure>
+
+<p>In master mode, to obtain the required audio frequency, the linear divider must be set correctly.</p>
+
+<figure><img src="figures/fig_20_16.png"><figcaption>Figure 20-16: I2S clock generator structure</figcaption></figure>
+
+<p>In the figure, the clock source of I2SxCLK is the system clock (i.e., the HSI, HSE, or PLL that drives the HB clock). I2SxCLK can come from SYSCLK, ETH_PLL, or USB_PLL clock, selectable via the I2S2SRC and I2S3SRC bits of the RCC_CFGR2 register. The audio sampling frequency can be 96 kHz, 48 kHz, 44.1 kHz, 32 kHz, 22.05 kHz, 16 kHz, 11.025 kHz, or 8 kHz (or any value within this range). To obtain the required frequency, set the linear divider according to the following formulas:</p>
+<p>When the master clock needs to be generated (MCKOE bit of the SPI_I2SPR register is 1):</p>
+<p>For 16-bit channel frame length: Fs = I2SxCLK / [(16×2) × ((2×I2SDIV) + ODD) × 8]</p>
+<p>For 32-bit channel frame length: Fs = I2SxCLK / [(32×2) × ((2×I2SDIV) + ODD) × 4]</p>
+<p>When the master clock is disabled (MCKOE bit is '0'):</p>
+<p>For 16-bit channel frame length: Fs = I2SxCLK / [(16×2) × ((2×I2SDIV) + ODD)]</p>
+<p>For 32-bit channel frame length: Fs = I2SxCLK / [(32×2) × ((2×I2SDIV) + ODD)]</p>
+
+<h3 id="20.3.4-i2s-master-mode">20.3.4 I2S Master Mode</h3>
+<p>To set I2S to operate in master mode, the serial clock is output from the CK pin, and the word select signal is generated from the WS pin. The MCKOE bit of the I2SPR register can be set to choose whether or not to output the master clock (MCK).</p>
+
+<h4 id="20.3.4.1-configuration-procedure">20.3.4.1 Configuration Procedure</h4>
+<ul>
+<li>Set the I2SDIV[7:0] of the I2SPR register to define the serial clock baud rate matching the audio sampling frequency. Also define the ODD bit of the I2SPR register.</li>
+<li>Set the CKPOL bit to define the idle-state level of the communication clock. If a master clock MCK needs to be provided to an external DAC/ADC audio device, the MCKOE bit of the I2SPR register must be set.</li>
+<li>Set the I2SMOD bit of the I2SCFGR register to 1 to activate I2S functionality. Set I2SSTD[1:0] and the PCMSYNC bit to select the I2S standard to be used. Set CHLEN to select the number of data bits per channel. Also set the I2SCFG[1:0] of the SPI_I2SCFGR register to select I2S master mode and direction (transmitter or receiver).</li>
+<li>If needed, enable the required interrupt and DMA functions by setting the CR2 register.</li>
+<li>The I2SE bit of the I2SCFGR register must be set to 1.</li>
+<li>The WS and CK pins need to be configured as output mode. If the MCKOE bit of the SPI_I2SPR register is 1, the MCK pin must also be configured as output mode.</li>
+</ul>
+
+<h4 id="20.3.4.2-transmit-procedure">20.3.4.2 Transmit Procedure</h4>
+<p>The transmit procedure begins when 1 half-word (16-bit) of data is written to the transmit buffer. Assume the first data written to the transmit buffer corresponds to the left channel. When data is moved from the transmit buffer to the shift register, the TXE flag is set, and the data corresponding to the right channel must be written to the transmit buffer. The CHSIDE flag indicates which channel the data currently being transmitted corresponds to. The CHSIDE flag value is updated when TXE is 1, so it is meaningful when TXE is 1. A complete data frame is considered complete only after both the left channel and then the right channel data have been transmitted. It is not permissible to transmit only a partial data frame, e.g., only left channel data.</p>
+<p>When the first data bit is sent, the half-word data is transferred in parallel to the 16-bit shift register, and then the subsequent bits are sent out from the MOSI/SD pin in MSB-first order. Each time data is moved from the transmit buffer to the shift register, the TXE flag is set to 1; if the TXEIE bit of the CR2 register is 1, an interrupt is generated.</p>
+<p>To ensure continuous audio data transmission, it is recommended to write the next data to be transmitted to the DATAR register before the current transmission completes. When disabling the I2S function, it is recommended to wait for TXE=1 and BSY=0, then clear the I2SE bit to '0'.</p>
+
+<h4 id="20.3.4.3-receive-procedure">20.3.4.3 Receive Procedure</h4>
+<p>The configuration steps for the receive procedure are the same as for the transmit procedure (see "Transmit Procedure" above), except for step 3: the master receive mode must be selected by configuring I2SCFG[1:0]. Regardless of the data and channel length, audio data is always received in 16-bit packets. That is, each time the receive buffer is filled, the RXNE flag is set to 1; if the RXNEIE bit of the CR2 register is 1, an interrupt is generated. Depending on the configured data and channel length, receiving left or right channel data may require 1 or 2 transfers of data to the receive buffer. A read operation on the DATAR register clears the RXNE flag. CHSIDE is updated after each reception. Its value depends on the WS signal generated by the I2S unit. If the previously received data has not been read and new data is received, an overrun occurs, the OVR flag is set to 1, and if the ERRIE bit of the CR2 register is 1, an interrupt is generated indicating an error. To disable the I2S function, special operations are required to ensure the I2S module can properly complete the transmission cycle without starting a new data transfer. The procedure depends on the data configuration, channel length, and audio protocol mode:</p>
+<ul>
+<li><p>16-bit data extended to 32-bit channel length (DATLEN=00 and CHLEN=1), using LSB-aligned mode (I2SSTD=10):</p>
+<ol type="a">
+<li>Wait for the second-to-last (n-1) RXNE=1;</li>
+<li>Wait for 17 I2S clock cycles (using software delay);</li>
+<li>Disable I2S (I2SE=0).</li>
+</ol>
+</li>
+<li><p>16-bit data extended to 32-bit channel length (DATLEN=00 and CHLEN=1), using MSB-aligned, I2S, or PCM mode (I2SSTD=00, I2SSTD=01, or I2SSTD=11 respectively):</p>
+<ol type="a">
+<li>Wait for the last RXNE=1;</li>
+<li>Wait for 1 I2S clock cycle (using software delay);</li>
+<li>Disable I2S (I2SE=0).</li>
+</ol>
+</li>
+<li><p>All other combinations of DATLEN and CHLEN, with any audio mode selected by I2SSTD, disable I2S as follows:</p>
+<ol type="a">
+<li>Wait for the second-to-last (n-1) RXNE=1;</li>
+<li>Wait for 1 I2S clock cycle (using software delay);</li>
+<li>Disable I2S (I2SE=0).</li>
+</ol>
+</li>
+</ul>
+<div class="note">Note: During transmission, the BSY flag is always low.</div>
+
+<h3 id="20.3.5-i2s-slave-mode">20.3.5 I2S Slave Mode</h3>
+<p>In slave mode, I2S can be set to transmit and receive modes. The slave mode configuration basically follows the same procedure as master mode configuration. In slave mode, the I2S interface does not need to provide a clock. The clock signal and WS signal are provided by the external master I2S device, connected to the corresponding pins. Therefore, the user does not need to configure the clock.</p>
+<p>Configuration steps are as follows:</p>
+<ul>
+<li>Set the I2SMOD bit of the I2SCFGR register to activate I2S functionality; set I2SSTD[1:0] to select the I2S standard to be used; set DATLEN[1:0] to select the number of data bits; set CHLEN to select the number of data bits per channel. Set I2SCFG[1:0] of the I2SCFGR register to select the I2S slave mode data direction (transmitter or receiver).</li>
+<li>As needed, set the CR2 register to enable the required interrupt and DMA functions.</li>
+<li>The I2SE bit of the I2SCFGR register must be set to 1.</li>
+</ul>
+
+<h4 id="20.3.5.1-transmit-procedure">20.3.5.1 Transmit Procedure</h4>
+<p>When the external master device sends a clock signal and the NSS_WS signal requests data transfer, the transmit procedure begins. The slave must be enabled and data written to the I2S data register before the external master can begin communication. For I2S MSB-aligned and LSB-aligned modes, the first data item written to the data register corresponds to the left channel data. When communication starts, data is transferred from the transmit buffer to the shift register, and the TXE flag is set to 1; at this point, the data item corresponding to the right channel must be written to the I2S data register. The CHSIDE flag indicates which channel the data currently being transmitted corresponds to. Compared to the master mode transmit procedure, in slave mode CHSIDE depends on the WS signal from the external master I2S. This means the slave I2S must have the first data to be transmitted ready before receiving the clock signal generated by the master. A WS signal of 1 indicates that the left channel is sent first.</p>
+
+<h4 id="20.3.5.2-receive-procedure">20.3.5.2 Receive Procedure</h4>
+<p>The configuration steps are the same as the transmit procedure, except for step 1. The master receive mode must be selected by configuring I2SCFG[1:0]. Regardless of the data and channel length, audio data is always received in 16-bit packets, i.e., each time the receive buffer is filled, the RXNE flag is set to 1; if the RXNEIE bit of the I2S_CTLR2 register is 1, an interrupt is generated. Depending on the data and channel length settings, receiving left or right channel data may require 1 or 2 transfers of data to the receive buffer. CHSIDE is updated after each data reception (about to be read from DATAR), corresponding to the WS signal generated by the I2S unit. Reading the SPI_DATAR register clears the RXNE bit. When new data is received before the previously received data has been read, an overrun occurs and the OVR flag is set to 1; if the ERRIE bit of the I2S_CTLR2 register is 1, an interrupt is generated indicating an error. To disable the I2S function, the I2SE bit must be cleared to 0 upon receiving the last RXNE=1.</p>
+
+<h3 id="20.3.6-status-flags">20.3.6 Status Flags</h3>
+<p>There are 3 status flags for the user to monitor the status of the I2S bus.</p>
+
+<h4 id="20.3.6.1-status-flag-bsy">20.3.6.1 Status Flag (BSY)</h4>
+<p>The BSY flag is set and cleared by hardware (writing to this bit has no effect). This flag indicates the status of the I2S communication layer. When this bit is 1, it indicates I2S communication is in progress, with one exception: in master receive mode (I2SCFG=11), the BSY flag is always low during reception. Before software disables the SPI module, the BSY flag can be used to detect whether transmission has ended, avoiding corruption of the last transmission. The following procedure must be strictly followed. When transmission starts, the BSY flag is set to 1 unless the I2S module is in master receive mode. When transmission ends or when the I2S module is disabled, this flag is cleared. In continuous communication, in master transmit mode, the BSY flag remains high throughout the entire transmission; in slave mode, the BSY flag goes low for 1 I2S clock cycle between each data item transmission.</p>
+
+<h4 id="20.3.6.2-transmit-buffer-flag-txe">20.3.6.2 Transmit Buffer Flag (TXE)</h4>
+<p>This flag being 1 indicates the transmit buffer is empty and new data to be transmitted can be written to the transmit buffer. When the transmit buffer already contains data, the flag is cleared to 0. When I2S is disabled (I2SE bit is 0), this flag is also 0.</p>
+
+<h4 id="20.3.6.3-receive-buffer-not-empty-flag-rxne">20.3.6.3 Receive Buffer Not Empty Flag (RXNE)</h4>
+<p>This flag being set to 1 indicates that valid received data is in the receive buffer. When the DATAR register is read, this bit is cleared to 0.</p>
+
+<h4 id="20.3.6.4-channel-flag-chside">20.3.6.4 Channel Flag (CHSIDE)</h4>
+<p>In transmit mode, this flag is updated when TXE is high, indicating the channel of the data being sent from the SD pin. If an underflow error occurs in slave transmit mode, the flag value is invalid; the I2S must be disabled and re-enabled before resuming communication. In receive mode, this flag is updated when data is received in the DATAR register, indicating the channel of the received data. Note: if an error occurs, this flag is meaningless; the I2S must be disabled and re-enabled. Under the PCM standard, this flag has no meaning in either short-frame or long-frame format. If the OVR or UDR flag of the STATR register is 1, and the ERRIE bit of the CR2 register is 1, an interrupt is generated. (After the interrupt source has been cleared) the interrupt flag can be cleared by reading the STATR register.</p>
+
+<h3 id="20.3.7-error-flags">20.3.7 Error Flags</h3>
+<h4 id="20.3.7.1-underflow-flag-udr">20.3.7.1 Underflow Flag (UDR)</h4>
+<p>In slave transmit mode, if new data has not been written to the DATAR register when the first clock edge of data transfer arrives, this flag is set to 1. This flag is valid only after the I2SMOD bit of the I2SCFGR register is set to 1. If the ERRIE bit of the CR2 register is 1, an interrupt is generated. This flag is cleared by performing a read operation on the STATR register.</p>
+
+<h4 id="20.3.7.2-overrun-flag-ovr">20.3.7.2 Overrun Flag (OVR)</h4>
+<p>If new data is received before the previously received data has been read, an overrun occurs and this flag is set to 1. If the ERRIE bit of the CTLR2 register is 1, an interrupt is generated indicating an error. In this case, the content of the receive buffer is not updated with the new data from the transmitting device. A read operation on the DATAR register returns the last correctly received data. All other 16-bit data sent by the transmitter after the overrun occurs are lost. This flag is cleared by first reading the DATAR register and then reading the STATR register.</p>
+
+<h3 id="20.3.8-i2s-interrupts">20.3.8 I2S Interrupts</h3>
+<p>I2S has 4 interrupt sources. The transmit buffer empty and receive buffer not empty events set TXE and RXNE respectively, generating interrupts when TXEIE and RXNEIE are set. If new data is received before the previously received data has been read, an overrun occurs; if ERRIE is set, an overrun interrupt is generated. In slave transmit mode, if new data has not been written to the DATAR register when the first clock edge of data transfer arrives, if ERRIE is set, an underflow interrupt is generated.</p>
+
+<h3 id="20.3.9-dma-function">20.3.9 DMA Function</h3>
+<p>The DMA operation in I2S mode is identical to that in SPI mode, except that the CRC function is not available. This is because there is no data transfer protection system in I2S mode.</p>
+
+<h2 id="20.4-register-description">20.4 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 20-1: SPI1 related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_SPI1_CTLR1</td><td>0x40013000</td><td>SPI1 control register 1</td><td>0x0000</td></tr>
+<tr><td>R16_SPI1_CTLR2</td><td>0x40013004</td><td>SPI1 control register 2</td><td>0x0000</td></tr>
+<tr><td>R16_SPI1_STATR</td><td>0x40013008</td><td>SPI1 status register</td><td>0x0002</td></tr>
+<tr><td>R16_SPI1_DATAR</td><td>0x4001300C</td><td>SPI1 data register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI1_CRCR</td><td>0x40013010</td><td>SPI1 polynomial register</td><td>0x0007</td></tr>
+<tr><td>R16_SPI1_RCRCR</td><td>0x40013014</td><td>SPI1 receive CRC register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI1_TCRCR</td><td>0x40013018</td><td>SPI1 transmit CRC register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI1_I2S_CFGR</td><td>0x4001301C</td><td>SPI1_I2S configuration register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI1_HSCR</td><td>0x40013024</td><td>SPI1 high-speed control register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 20-2: SPI2 related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_SPI2_CTLR1</td><td>0x40003800</td><td>SPI2 control register 1</td><td>0x0000</td></tr>
+<tr><td>R16_SPI2_CTLR2</td><td>0x40003804</td><td>SPI2 control register 2</td><td>0x0000</td></tr>
+<tr><td>R16_SPI2_STATR</td><td>0x40003808</td><td>SPI2 status register</td><td>0x0002</td></tr>
+<tr><td>R16_SPI2_DATAR</td><td>0x4000380C</td><td>SPI2 data register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI2_CRCR</td><td>0x40003810</td><td>SPI2 polynomial register</td><td>0x0007</td></tr>
+<tr><td>R16_SPI2_RCRCR</td><td>0x40003814</td><td>SPI2 receive CRC register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI2_TCRCR</td><td>0x40003818</td><td>SPI2 transmit CRC register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI2_I2S_CFGR</td><td>0x4000381C</td><td>SPI2_I2S configuration register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI2_I2SPR</td><td>0x40003820</td><td>SPI2_I2S prescaler register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI2_HSCR</td><td>0x40003824</td><td>SPI2 high-speed control register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 20-3: SPI3 related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_SPI3_CTLR1</td><td>0x40003C00</td><td>SPI3 control register 1</td><td>0x0000</td></tr>
+<tr><td>R16_SPI3_CTLR2</td><td>0x40003C04</td><td>SPI3 control register 2</td><td>0x0000</td></tr>
+<tr><td>R16_SPI3_STATR</td><td>0x40003C08</td><td>SPI3 status register</td><td>0x0002</td></tr>
+<tr><td>R16_SPI3_DATAR</td><td>0x40003C0C</td><td>SPI3 data register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI3_CRCR</td><td>0x40003C10</td><td>SPI3 polynomial register</td><td>0x0007</td></tr>
+<tr><td>R16_SPI3_RCRCR</td><td>0x40003C14</td><td>SPI3 receive CRC register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI3_TCRCR</td><td>0x40003C18</td><td>SPI3 transmit CRC register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI3_I2S_CFGR</td><td>0x40003C1C</td><td>SPI3_I2S configuration register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI3_I2SPR</td><td>0x40003C20</td><td>SPI3_I2S prescaler register</td><td>0x0000</td></tr>
+<tr><td>R16_SPI3_HSCR</td><td>0x40003C24</td><td>SPI3 high-speed control register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.1-spi-control-register-1-spix_ctlr1-x-1-2-3">20.4.1 SPI Control Register 1 (SPIx_CTLR1) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr>
+<td>BIDIMODE</td><td>BIDIOE</td><td>CRCEN</td><td>CRCNEXT</td><td>DFF</td><td>RXONLY</td><td>SSM</td><td>SSI</td><td>LSBFIRST</td><td>SPE</td><td colspan="3">BR[2:0]</td><td>MSTR</td><td>CPOL</td><td>CPHA</td>
+</tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>15</td><td>BIDIMODE</td><td>RW</td><td>Unidirectional data mode enable bit.<br>1: Select single-wire bidirectional mode;<br>0: Select two-wire bidirectional mode.</td><td>0</td></tr>
+<tr><td>14</td><td>BIDIOE</td><td>RW</td><td>Single-wire output enable bit, used together with BIDIMODE.<br>1: Enable output, transmit only;<br>0: Disable output, receive only.</td><td>0</td></tr>
+<tr><td>13</td><td>CRCEN</td><td>RW</td><td>Hardware CRC verification enable bit. This bit can only be written when SPE is 0. This bit can only be used in full-duplex mode.<br>1: Enable CRC calculation;<br>0: Disable CRC calculation.</td><td>0</td></tr>
+<tr><td>12</td><td>CRCNEXT</td><td>RW</td><td>Transmit the CRC register value after the next data transfer. This bit should be set immediately after writing the last data to the data register.<br>1: Transmit CRC verification result;<br>0: Continue transmitting data register data.</td><td>0</td></tr>
+<tr><td>11</td><td>DFF</td><td>RW</td><td>Data frame length bit. This bit can only be written when SPE is 0.<br>1: Use 16-bit data length for transmit/receive;<br>0: Use 8-bit data length for transmit/receive.</td><td>0</td></tr>
+<tr><td>10</td><td>RXONLY</td><td>RW</td><td>Receive-only bit in two-wire mode, used together with BIDIMODE. Setting this bit allows the device to only receive without transmitting.<br>1: Receive only, simplex mode;<br>0: Full-duplex mode.</td><td>0</td></tr>
+<tr><td>9</td><td>SSM</td><td>RW</td><td>Chip select pin management bit. This bit determines whether the NSS pin level is controlled by hardware or software.<br>1: Software controls NSS pin;<br>0: Hardware controls NSS pin.</td><td>0</td></tr>
+<tr><td>8</td><td>SSI</td><td>RW</td><td>Chip select pin control bit. When SSM is set, this bit determines the NSS pin level.<br>1: NSS is high;<br>0: NSS is low.</td><td>0</td></tr>
+<tr><td>7</td><td>LSBFIRST</td><td>RW</td><td>Frame format control bit. This bit cannot be modified during communication.<br>1: Send LSB first;<br>0: Send MSB first.</td><td>0</td></tr>
+<tr><td>6</td><td>SPE</td><td>RW</td><td>SPI enable bit.<br>1: Enable SPI;<br>0: Disable SPI.</td><td>0</td></tr>
+<tr><td>[5:3]</td><td>BR[2:0]</td><td>RW</td><td>Baud rate setting field. This field cannot be modified during communication.<br>When HSRXEN bit is 0, SCK frequency is:<br>000: FPCLK/2; 001: FPCLK/4;<br>010: FPCLK/8; 011: FPCLK/16;<br>100: FPCLK/32; 101: FPCLK/64;<br>110: FPCLK/128; 111: FPCLK/256.<br>When HSRXEN bit is 1, SCK frequency is:<br>000: FPCLK/2; 001: FPCLK/3;<br>010: FPCLK/4; 011: FPCLK/5;<br>100: FPCLK/6; 101: FPCLK/7;<br>110: FPCLK/8; 111: FPCLK/9.</td><td>000b</td></tr>
+<tr><td>2</td><td>MSTR</td><td>RW</td><td>Master/slave selection bit. This bit cannot be modified during communication.<br>1: Configure as master device;<br>0: Configure as slave device.</td><td>0</td></tr>
+<tr><td>1</td><td>CPOL</td><td>RW</td><td>Clock polarity selection bit. This bit cannot be modified during communication.<br>1: SCK stays high in idle state;<br>0: SCK stays low in idle state.</td><td>0</td></tr>
+<tr><td>0</td><td>CPHA</td><td>RW</td><td>Clock phase setting bit. This bit cannot be modified during communication.<br>1: Data sampling starts from the second clock edge;<br>0: Data sampling starts from the first clock edge.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.2-spi-control-register-2-spix_ctlr2-x-1-2-3">20.4.2 SPI Control Register 2 (SPIx_CTLR2) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr>
+<td colspan="8">Reserved</td><td>TXEIE</td><td>RXNEIE</td><td>ERRIE</td><td colspan="2">Reserved</td><td>SSOE</td><td>TXDMAEN</td><td>RXDMAEN</td>
+</tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>TXEIE</td><td>RW</td><td>Transmit buffer empty interrupt enable bit:<br>1: Enable interrupt when TXE is set;<br>0: Disable interrupt when TXE is set.</td><td>0</td></tr>
+<tr><td>6</td><td>RXNEIE</td><td>RW</td><td>Receive buffer not empty interrupt enable bit:<br>1: Enable interrupt when RXNE is set;<br>0: Disable interrupt when RXNE is set.</td><td>0</td></tr>
+<tr><td>5</td><td>ERRIE</td><td>RW</td><td>Error interrupt enable bit:<br>1: Enable interrupt on error (CRCERR, OVR, MODF);<br>0: Disable interrupt on error (CRCERR, OVR, MODF).</td><td>0</td></tr>
+<tr><td>[4:3]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>SSOE</td><td>RW</td><td>SS output enable. Disabling SS output allows operation in multi-master mode.<br>1: Enable SS output;<br>0: Disable SS output in master mode.</td><td>0</td></tr>
+<tr><td>1</td><td>TXDMAEN</td><td>RW</td><td>Transmit buffer DMA enable bit.<br>1: Enable transmit buffer DMA;<br>0: Disable transmit buffer DMA.</td><td>0</td></tr>
+<tr><td>0</td><td>RXDMAEN</td><td>RW</td><td>Receive buffer DMA enable bit.<br>1: Enable receive buffer DMA;<br>0: Disable receive buffer DMA.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.3-spi-status-register-spix_statr-x-1-2-3">20.4.3 SPI Status Register (SPIx_STATR) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr>
+<td colspan="8">Reserved</td><td>BSY</td><td>OVR</td><td>MODF</td><td>CRCERR</td><td>UDR</td><td>CHSIDE</td><td>TXE</td><td>RXNE</td>
+</tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>BSY</td><td>RO</td><td>Busy flag bit. This bit is set or cleared by hardware.<br>1: SPI is communicating, or transmit buffer is not empty;<br>0: SPI is not communicating.</td><td>0</td></tr>
+<tr><td>6</td><td>OVR</td><td>RO</td><td>Overrun flag bit. This bit is set by hardware, cleared by software.<br>1: Overrun error occurred;<br>0: No overrun error.</td><td>0</td></tr>
+<tr><td>5</td><td>MODF</td><td>RO</td><td>Mode fault flag bit. This bit is set by hardware, cleared by software.<br>1: Mode fault occurred;<br>0: No mode fault.</td><td>0</td></tr>
+<tr><td>4</td><td>CRCERR</td><td>RW0</td><td>CRC error flag bit. This bit is set by hardware, cleared by software.<br>1: Received CRC value does not match RCRCR value;<br>0: Received CRC value matches RCRCR value.</td><td>0</td></tr>
+<tr><td>3</td><td>UDR</td><td>RO</td><td>Underflow flag bit. This bit is set by hardware, cleared by software.<br>1: Underflow occurred;<br>0: No underflow.</td><td>0</td></tr>
+<tr><td>2</td><td>CHSIDE</td><td>RO</td><td>Channel. This bit is set by hardware, cleared by software.<br>1: Right channel to be transmitted or received;<br>0: Left channel to be transmitted or received.</td><td>0</td></tr>
+<tr><td>1</td><td>TXE</td><td>RO</td><td>Transmit buffer empty flag bit:<br>1: Transmit buffer is empty;<br>0: Transmit buffer is not empty.</td><td>1</td></tr>
+<tr><td>0</td><td>RXNE</td><td>RO</td><td>Receive buffer not empty flag bit:<br>1: Receive buffer is not empty;<br>0: Receive buffer is empty.<br>Note: Reading DATAR automatically clears this bit.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.4-spi-data-register-spix_datar-x-1-2-3">20.4.4 SPI Data Register (SPIx_DATAR) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DR[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>DR[15:0]</td><td>RW</td><td>Data register. The data register is used to store received data or pre-store data to be transmitted. Therefore, reads and writes of the data register actually correspond to different areas: reads correspond to the receive buffer, writes correspond to the transmit buffer. Data reception and transmission can be 8-bit or 16-bit; the number of data bits must be determined before transmission. When using 8-bit data transfer, only the lower 8 bits of the data register are used, and the upper 8 bits are forced to 0 upon reception. Using 16-bit data structure causes all 16 bits of the data register to be used.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.5-spi-polynomial-register-spix_crcr-x-1-2-3">20.4.5 SPI Polynomial Register (SPIx_CRCR) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CRCPOLY[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>CRCPOLY[15:0]</td><td>RW</td><td>CRC polynomial. This field defines the polynomial used for CRC calculation.</td><td>0x0007</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.6-spi-receive-crc-register-spix_rcrcr-x-1-2-3">20.4.6 SPI Receive CRC Register (SPIx_RCRCR) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x14</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RXCRC[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>RXCRC[15:0]</td><td>RO</td><td>Receive CRC value. Stores the calculated CRC verification result of received bytes. Setting CRCEN resets this register. The calculation method uses the polynomial defined by CRCPOLY. In 8-bit mode, only the lower 8 bits participate in the calculation; in 16-bit mode, all 16 bits participate. This register should be read when BSY is 0.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.7-spi-transmit-crc-register-spix_tcrcr-x-1-2-3">20.4.7 SPI Transmit CRC Register (SPIx_TCRCR) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x18</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TXCRC[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>TXCRC[15:0]</td><td>RO</td><td>Transmit CRC value. Stores the calculated CRC verification result of transmitted bytes. Setting CRCEN resets this register. The calculation method uses the polynomial defined by CRCPOLY. In 8-bit mode, only the lower 8 bits participate in the calculation; in 16-bit mode, all 16 bits participate. This register should be read when BSY is 0.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.8-spi_i2s-configuration-register-spi_i2s_cfgr-x-1-2-3">20.4.8 SPI_I2S Configuration Register (SPI_I2S_CFGR) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x1C</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr>
+<td colspan="4">Reserved</td><td>I2SMOD</td><td>I2SE</td><td colspan="2">I2SCFG[1:0]</td><td>PCMSYNC</td><td>Reserved</td><td colspan="2">I2SSTD[1:0]</td><td>CKPOL</td><td colspan="2">DATLEN[1:0]</td><td>CHLEN</td>
+</tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>11</td><td>I2SMOD</td><td>RW</td><td>I2S mode selection. This bit can only be set when SPI or I2S is disabled.<br>1: Select I2S mode;<br>0: Select SPI mode.</td><td>0</td></tr>
+<tr><td>10</td><td>I2SE</td><td>RW</td><td>I2S enable. Not used in SPI mode.<br>1: I2S enabled;<br>0: I2S disabled.</td><td>0</td></tr>
+<tr><td>[9:8]</td><td>I2SCFG[1:0]</td><td>RW</td><td>I2S mode selection. This bit can only be set when I2S is disabled:<br>00: Slave transmit;<br>01: Slave receive;<br>10: Master transmit;<br>11: Master receive.</td><td>00b</td></tr>
+<tr><td>7</td><td>PCMSYNC</td><td>RW</td><td>PCM frame synchronization. This bit is meaningful only when I2SSTD = 11 (PCM standard).<br>1: Long frame synchronization;<br>0: Short frame synchronization.</td><td>0</td></tr>
+<tr><td>6</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[5:4]</td><td>I2SSTD[1:0]</td><td>RW</td><td>I2S standard selection. This bit can only be set when I2S is disabled.<br>00: I2S Philips standard;<br>01: MSB-aligned standard (left-aligned);<br>10: LSB-aligned standard (right-aligned);<br>11: PCM standard.</td><td>00b</td></tr>
+<tr><td>3</td><td>CKPOL</td><td>RW</td><td>Steady-state clock polarity. For correct operation, this bit can only be set when I2S is disabled.<br>1: I2S clock steady state is high;<br>0: I2S clock steady state is low.</td><td>0</td></tr>
+<tr><td>[2:1]</td><td>DATLEN[1:0]</td><td>RW</td><td>Data length to be transmitted. For correct operation, this bit can only be set when I2S is disabled.<br>00: 16-bit data length;<br>01: 24-bit data length;<br>10: 32-bit data length;<br>11: Not allowed.</td><td>00b</td></tr>
+<tr><td>0</td><td>CHLEN</td><td>RW</td><td>Channel length. Writing this bit is meaningful only when DATLEN = 00; otherwise the channel length is fixed to 32 bits by hardware.<br>1: 32-bit wide;<br>0: 16-bit wide.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.9-spi_i2s-prescaler-register-spix_i2spr-x-2-3">20.4.9 SPI_I2S Prescaler Register (SPIx_I2SPR) (x=2/3)</h3>
+<p><strong>Offset address:</strong> 0x20</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr>
+<td colspan="6">Reserved</td><td>MCKOE</td><td>ODD</td><td colspan="8">I2SDIV[7:0]</td>
+</tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>9</td><td>MCKOE</td><td>RW</td><td>Master clock output enable. For correct operation, this bit can only be set when I2S is disabled. Used only in I2S master mode.<br>1: Master clock output enabled;<br>0: Master clock output disabled.</td><td>0</td></tr>
+<tr><td>8</td><td>ODD</td><td>RW</td><td>Odd factor prescaler. For correct operation, this bit can only be set when I2S is disabled. Used only in I2S master mode.<br>1: Actual division factor = (I2SDIV × 2) + 1;<br>0: Actual division factor = I2SDIV × 2.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>I2SDIV[7:0]</td><td>RW</td><td>I2S linear prescaler. For correct operation, this bit can only be set when I2S is disabled. Used only in I2S master mode. Setting I2SDIV[7:0] = 0 or I2SDIV[7:0] = 1 is prohibited. See section 20.3.3.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="20.4.10-spi-high-speed-control-register-spix_hscr-x-1-2-3">20.4.10 SPI High-Speed Control Register (SPIx_HSCR) (x=1/2/3)</h3>
+<p><strong>Offset address:</strong> 0x24</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr>
+<td colspan="12">Reserved</td><td>I2S_WS_SYNC</td><td>HSRXEN2</td><td>Reserved</td><td>HSRXEN</td>
+</tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>I2S_WS_SYNC</td><td>RW</td><td>Enhanced I2S slave synchronization capability:<br>1: Enabled;<br>0: Disabled.</td><td>0</td></tr>
+<tr><td>2</td><td>HSRXEN2</td><td>RW</td><td>SPI high-speed read mode 2:<br>This mode is only used when HSRXEN is enabled and SPI PCLK is ≥ 120 MHz; below 120 MHz, using this bit is not recommended. Can achieve higher master read speed than enabling HSRXEN alone.<br>1: Enable high-speed read mode 2;<br>0: Disable high-speed read mode 2.</td><td>0</td></tr>
+<tr><td>1</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>HSRXEN</td><td>RW</td><td>High-speed read mode enable bit:<br>1: Enable high-speed read mode;<br>0: Disable high-speed read mode.<br>This mode is only valid when the clock is divided by 2 (i.e., BR = 000 in the CTLR1 register).</td><td>0</td></tr>
+</tbody>
+</table>

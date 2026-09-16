@@ -100,7 +100,7 @@ int main (void) {
     // ClockTree_Diag();
 
     SystemCoreClockUpdate();
-    Delay_Init();
+    //Delay_Init();
     USART_Printf_Init (921600);
     PWR_VDD18LevelConfig(PWR_VDD18_Level1);
     printf ("SystemClk:%d\r\n", SystemCoreClock);
@@ -110,17 +110,17 @@ int main (void) {
      * until a mapper is selected - safe because PSRAM is not yet
      * initialised. PSRAM_Init() must complete before any non-NONE
      * mapper is accepted (see Cart_SetMapper). */
-    Init_Cart();
+   // Init_Cart();
 
     /* CLI early: lets the host see diagnostic output while PSRAM is
      * being brought up, and lets us report PSRAM_Init errors over
      * the serial line. */
-    CLI_Init();
+    ///CLI_Init();
 
     /* USBHS host init. The enumeration runs only when the user types
      * the `USB` CLI command (see cli.c); this just powers up the
      * controller so it's ready. */
-    USB_Initialization ();
+    //USB_Initialization ();
     printf ("USBHS: host controller ready (enumeration deferred to `USB` cmd)\r\n");
 
     /* Bring up PSRAM. After this, the 64 Mbit / 8 MiB external memory

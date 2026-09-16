@@ -1,0 +1,311 @@
+<h1 id="chapter-4-backup-registers-bkp">Chapter 4: Backup Registers (BKP)</h1>
+
+<p>The Backup Registers (BKP) provide 42 16-bit backup data registers, which can be used to store 84 bytes of user data. After the main power supply (VDD) is powered off, this data can still be maintained by VBAT power, unaffected by standby state, system reset, or power reset. In addition, the BKP unit also provides tamper detection management, RTC clock calibration, and pulse output functions.</p>
+
+<h2 id="4.1-main-features">4.1 Main Features</h2>
+<ul>
+<li>Provides 84 bytes of backup data registers</li>
+<li>RTC clock calibration function</li>
+<li>Outputs RTC clock divided by 64, alarm pulse, or second pulse on the PC13 pin</li>
+<li>Tamper detection (TAMPER) function</li>
+</ul>
+
+<h2 id="4.2-functional-description">4.2 Functional Description</h2>
+<p>After the microcontroller is reset, access to the backup registers and RTC is disabled. Access to the backup registers must be enabled through the following operations:</p>
+<ol>
+<li>Set the PWREN and BKPEN bits of the RCC_PB1PCENR register to enable the operating clocks for power and backup interface;</li>
+<li>Set the DBP bit of the power control register PWR_CTLR to enable access to the backup registers and RTC registers.</li>
+</ol>
+
+<h3 id="4.2.1-backup-data-registers">4.2.1 Backup Data Registers</h3>
+<p>The backup data registers can be used as general-purpose data storage. Since they retain data under VBAT power when VDD is lost, they can be used to store important or sensitive data. However, this data will be entirely cleared after a tamper event occurs.</p>
+
+<h3 id="4.2.2-tamper-detection">4.2.2 Tamper Detection</h3>
+<p>Tamper detection means that when an external signal is provided (rising edge or falling edge), it indicates that a "tamper event" has occurred, and the hardware will automatically clear important information retained in the current system. This method can increase the security of system information.</p>
+<p>When a transition edge appears on the tamper detection pin (depending on the TPAL bit), a tamper event is generated. If the tamper detection interrupt is enabled, a tamper detection interrupt will also be generated at the same time. Whenever a tamper event occurs, all backup data registers will be cleared. In addition, the hardware detection uses a latching method; even when the tamper detection function is not enabled (TPE=0), the system will sample whether a transition edge has occurred, and under the condition selected by the TPAL bit, it will pre-lock the tamper event and trigger the tamper event when the TPE bit is set to 1.</p>
+<p>For example: When TPAL=0, if TPE=0 means the function is not enabled, but the TAMPER pin is already at a high level, once TPE=1, an additional tamper event will be generated (the system pre-locked the rising edge). When TPAL=1, if TPE=0 means the function is not enabled, but the TAMPER pin is already at a low level, once TPE=1, an additional tamper event will be generated (the system pre-locked the falling edge).</p>
+<p>Therefore, to prevent unnecessary tamper events that would clear the backup registers, it is recommended that at the moment when hardware detection of the tamper pin is desired to start, by writing 1 to the CTE bit of the BKP_TPCSR register, first clear any tamper event that the hardware may have memorized, and ensure that the current state of the tamper detection pin is inactive.</p>
+<div class="note">Note: When the VDD power is disconnected, the tamper detection function remains active. To avoid unnecessary resetting of the backup data registers, the TAMPER pin should be connected to the correct logic level externally.</div>
+
+<h3 id="4.2.3-rtc-calibration">4.2.3 RTC Calibration</h3>
+<p>This function must be configured to use the tamper detection pin as a regular I/O port. Clear the TPE bit of the BKP_TPCTLR register.</p>
+<ul>
+<li>Pulse output: Configure the ASOE bit of the BKP_OCTLR register to enable RTC pulse output; set the ASOS bit to select between second pulse output and alarm pulse output.</li>
+<li>RTC calibration: After configuring the CCO bit of the BKP_OCTLR register, the internal RTC clock will be output to the tamper detection pin (TAMPER) after being divided by 64. Through actual testing, the software cooperates with modifying the CAL[6:0] bits to adjust the clock and calibrate the RTC.</li>
+</ul>
+
+<h3 id="4.2.4-bkp-interface-reset">4.2.4 BKP Interface Reset</h3>
+<p>The BKP domain can be independently powered by VBAT when the VDD main power is off. During application code control of BKP domain register reset, the backup data registers BKP_DATAR1-10, ASOS bit, and ASOE bit are reset under software configuration of the BDRST bit of the RCC_BDCTLR register, and are not affected by the RCC peripheral interface control BKPRST bit.</p>
+
+<h2 id="4.3-register-description">4.3 Register Description</h2>
+<table class="reg-list">
+<caption>Table 4-1: BKP-related register list</caption>
+<thead>
+<tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+</thead>
+<tbody>
+<tr><td>R16_BKP_DATAR1</td><td>0x40006C04</td><td>Backup data register 1</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR2</td><td>0x40006C08</td><td>Backup data register 2</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR3</td><td>0x40006C0C</td><td>Backup data register 3</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR4</td><td>0x40006C10</td><td>Backup data register 4</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR5</td><td>0x40006C14</td><td>Backup data register 5</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR6</td><td>0x40006C18</td><td>Backup data register 6</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR7</td><td>0x40006C1C</td><td>Backup data register 7</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR8</td><td>0x40006C20</td><td>Backup data register 8</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR9</td><td>0x40006C24</td><td>Backup data register 9</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR10</td><td>0x40006C28</td><td>Backup data register 10</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_OCTLR</td><td>0x40006C2C</td><td>RTC calibration register</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_TPCTLR</td><td>0x40006C30</td><td>Tamper detection control register</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_TPCSR</td><td>0x40006C34</td><td>Tamper detection status register</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR11</td><td>0x40006C40</td><td>Backup data register 11</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR12</td><td>0x40006C44</td><td>Backup data register 12</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR13</td><td>0x40006C48</td><td>Backup data register 13</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR14</td><td>0x40006C4C</td><td>Backup data register 14</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR15</td><td>0x40006C50</td><td>Backup data register 15</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR16</td><td>0x40006C54</td><td>Backup data register 16</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR17</td><td>0x40006C58</td><td>Backup data register 17</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR18</td><td>0x40006C5C</td><td>Backup data register 18</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR19</td><td>0x40006C60</td><td>Backup data register 19</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR20</td><td>0x40006C64</td><td>Backup data register 20</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR21</td><td>0x40006C68</td><td>Backup data register 21</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR22</td><td>0x40006C6C</td><td>Backup data register 22</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR23</td><td>0x40006C70</td><td>Backup data register 23</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR24</td><td>0x40006C74</td><td>Backup data register 24</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR25</td><td>0x40006C78</td><td>Backup data register 25</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR26</td><td>0x40006C7C</td><td>Backup data register 26</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR27</td><td>0x40006C80</td><td>Backup data register 27</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR28</td><td>0x40006C84</td><td>Backup data register 28</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR29</td><td>0x40006C88</td><td>Backup data register 29</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR30</td><td>0x40006C8C</td><td>Backup data register 30</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR31</td><td>0x40006C90</td><td>Backup data register 31</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR32</td><td>0x40006C94</td><td>Backup data register 32</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR33</td><td>0x40006C98</td><td>Backup data register 33</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR34</td><td>0x40006C9C</td><td>Backup data register 34</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR35</td><td>0x40006CA0</td><td>Backup data register 35</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR36</td><td>0x40006CA4</td><td>Backup data register 36</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR37</td><td>0x40006CA8</td><td>Backup data register 37</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR38</td><td>0x40006CAC</td><td>Backup data register 38</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR39</td><td>0x40006CB0</td><td>Backup data register 39</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR40</td><td>0x40006CB4</td><td>Backup data register 40</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR41</td><td>0x40006CB8</td><td>Backup data register 41</td><td>0x0000</td></tr>
+<tr><td>R16_BKP_DATAR42</td><td>0x40006CBC</td><td>Backup data register 42</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<h3 id="4.3.1-backup-data-register-bkp_datarx-x-1-42">4.3.1 Backup Data Register (BKP_DATARx) (x=1-42)</h3>
+<p><strong>Offset address:</strong> 0x04-0x28, 0x40-0xBC</p>
+<table class="reg-bits">
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="16">D[15:0]</td>
+</tr>
+</table>
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>D[15:0]</td>
+<td>RW</td>
+<td>Backup data, can be accessed by the user program.
+Note: They are only reset by a backup domain reset (BDRST) or (if the tamper detection pin TAMPER function is enabled) by a tamper pin event.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="4.3.2-rtc-calibration-register-bkp_octlr">4.3.2 RTC Calibration Register (BKP_OCTLR)</h3>
+<p><strong>Offset address:</strong> 0x2C</p>
+<table class="reg-bits">
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="6">Reserved</td>
+<td>ASOS</td>
+<td>ASOE</td>
+<td>CCO</td>
+<td colspan="7">CAL[6:0]</td>
+</tr>
+</table>
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>[15:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>ASOS</td>
+<td>RW</td>
+<td>TAMPER pin alarm/second pulse output selection.
+1: Output second pulse;
+0: Output alarm pulse.
+Note: This bit is only reset by backup domain reset (BDRST).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>ASOE</td>
+<td>RW</td>
+<td>TAMPER pin pulse output enable bit.
+1: Enable output of alarm pulse or second pulse;
+0: Disable output of alarm pulse or second pulse.
+Note: This bit is only reset by backup domain reset (BDRST).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>CCO</td>
+<td>RW</td>
+<td>Calibration clock output selection bit.
+1: The TAMPER pin outputs the RTC clock divided by 64;
+0: No calibration clock output.
+Note 1: To enable this function, the tamper detection function must be disabled.
+Note 2: When VDD power is disconnected, this bit is cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:0]</td>
+<td>CAL[6:0]</td>
+<td>RW</td>
+<td>Calibration value register; the value of this register indicates how many out of every 2 clock pulses are skipped. This function is used to calibrate the RTC clock. The RTC clock can be slowed down by 0 to 121 ppm.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="4.3.3-tamper-detection-control-register-bkp_tpctlr">4.3.3 Tamper Detection Control Register (BKP_TPCTLR)</h3>
+<p><strong>Offset address:</strong> 0x30</p>
+<table class="reg-bits">
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="14">Reserved</td>
+<td>TPAL</td>
+<td>TPE</td>
+</tr>
+</table>
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>[15:2]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TPAL</td>
+<td>RW</td>
+<td>Tamper detection pin (TAMPER pin) active level setting.
+1: A low level on the tamper detection pin clears all backup data registers (hardware latches falling edge);
+0: A high level on the tamper detection pin clears all backup data registers (hardware latches rising edge).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>TPE</td>
+<td>RW</td>
+<td>Tamper detection pin enable bit:
+1: TAMPER pin is used for tamper detection;
+0: TAMPER pin is used as a regular I/O port.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<div class="note">Note: Clearing both the TPAL and TPE bits at the same time will generate a false tamper event. It is recommended to change the TPAL bit state only when TPE is 0.</div>
+
+<h3 id="4.3.4-tamper-detection-status-register-bkp_tpcsr">4.3.4 Tamper Detection Status Register (BKP_TPCSR)</h3>
+<p><strong>Offset address:</strong> 0x34</p>
+<table class="reg-bits">
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="5">Reserved</td>
+<td>TIF</td>
+<td>TEF</td>
+<td colspan="4">Reserved</td>
+<td>TPIE</td>
+<td>CTI</td>
+<td>CTE</td>
+</tr>
+</table>
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>[15:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>TIF</td>
+<td>RO</td>
+<td>Tamper interrupt flag bit; this bit is set when a tamper event is detected and the TPIE bit is set to 1. This flag bit is cleared by writing 1 to the CTI bit. If the TPIE bit is reset, this bit will also be reset.
+Note: This bit is only reset upon a system reset or wakeup from standby mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>TEF</td>
+<td>RO</td>
+<td>Tamper event flag bit; this bit is set when a tamper event is detected. This bit is cleared by writing 1 to the CTE bit.
+Note: When this bit is 1, the values of all BKP_DATARx registers are cleared, and until this bit is reset, all write operations to the BKP_DATARx registers are invalid.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:3]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TPIE</td>
+<td>RW</td>
+<td>Tamper interrupt enable bit:
+1: Enable tamper detection interrupt (TPE must be set to 1);
+0: Disable tamper detection interrupt.
+Note 1: The tamper interrupt cannot wake up the core from low-power mode.
+Note 2: This bit is only reset upon a system reset or wakeup from standby mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>CTI</td>
+<td>WO</td>
+<td>Tamper detection interrupt clear bit; write 1 to clear, read is invalid.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>CTE</td>
+<td>WO</td>
+<td>Tamper detection event clear bit; write 1 to clear, read is invalid.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

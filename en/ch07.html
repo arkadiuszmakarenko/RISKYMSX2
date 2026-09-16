@@ -1,0 +1,191 @@
+<h1 id="chapter-7-independent-watchdog-iwdg">Chapter 7: Independent Watchdog (IWDG)</h1>
+
+<p>The system includes an Independent Watchdog (IWDG) to detect software faults caused by logic errors and external environmental interference. The IWDG clock source is derived from the LSI and can operate independently of the main program, making it suitable for applications with low precision requirements.</p>
+
+<h2 id="7.1-main-features">7.1 Main Features</h2>
+<ul>
+<li>12-bit down-counter</li>
+<li>Clock source derived from LSI divider; can run in low-power modes</li>
+<li>Reset condition: counter value decrements to 0</li>
+</ul>
+
+<h2 id="7.2-functional-description">7.2 Functional Description</h2>
+
+<h3 id="7.2.1-principle-and-usage">7.2.1 Principle and Usage</h3>
+
+<p>The Independent Watchdog is clocked by the LSI clock, and its function continues to operate normally in Stop and Standby modes. When the watchdog counter decrements to 0, a system reset is generated, so the timeout period is (reload value + 1) clock cycles.</p>
+
+<figure><img src="figures/fig_7_1.png"><figcaption>Figure 7-1: Independent Watchdog block diagram</figcaption></figure>
+
+<ul>
+<li><strong>Starting the Independent Watchdog</strong><br>
+After system reset, the watchdog is disabled. Writing 0xCCCC to the IWDG_CTLR register starts the watchdog; it cannot be disabled afterwards unless a reset occurs.<br>
+If the hardware Independent Watchdog enable bit (IWDGSW) is enabled in the user option bytes, the IWDG will be permanently enabled after microcontroller reset.</li>
+
+<li><strong>Watchdog Configuration</strong><br>
+The watchdog internally contains a 12-bit down-counter. When the counter value reaches 0, a system reset occurs. To enable the IWDG function, the following operations must be performed:</li>
+</ul>
+
+<ol>
+<li><strong>Counting time base:</strong> The IWDG clock is sourced from the LSI. Set the LSI divider value via the IWDG_PSCR register to configure the IWDG counting time base. The operation method is to first write 0x5555 to the IWDG_CTLR register, then modify the divider value in the IWDG_PSCR register. The PVU bit in the IWDG_STATR register indicates the divider value update status; the divider value can only be modified and read when the update is complete.</li>
+
+<li><strong>Reload value:</strong> Used to update the current counter value of the Independent Watchdog, from which the counter decrements. The operation method is to first write 0x5555 to the IWDG_CTLR register, then modify the IWDG_RLDR register to set the target reload value. The RUV bit in the IWDG_STATR register indicates the reload value update status; the IWDG_RLDR register can only be modified and read when the update is complete.</li>
+
+<li><strong>Watchdog enable:</strong> Write 0xCCCC to the IWDG_CTLR register to enable the watchdog function.</li>
+
+<li><strong>Kick (feed) the watchdog:</strong> That is, refresh the current counter value before the watchdog counter decrements to 0 to prevent a system reset. Write 0xAAAA to the IWDG_CTLR register to have the hardware load the IWDG_RLDR register value into the watchdog counter. This action must be executed periodically after the watchdog function is enabled, otherwise a watchdog reset will occur.</li>
+</ol>
+
+<h3 id="7.2.2-debug-mode">7.2.2 Debug Mode</h3>
+
+<p>When the system enters debug mode, the IWDG counter can be configured to continue running or stop via the debug module registers.</p>
+
+<h2 id="7.3-register-description">7.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 7-1: IWDG related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_IWDG_CTLR</td><td>0x40003000</td><td>Control register</td><td>0x0000</td></tr>
+<tr><td>R16_IWDG_PSCR</td><td>0x40003004</td><td>Prescaler register</td><td>0x0000</td></tr>
+<tr><td>R16_IWDG_RLDR</td><td>0x40003008</td><td>Reload register</td><td>0x0FFF</td></tr>
+<tr><td>R16_IWDG_STATR</td><td>0x4000300C</td><td>Status register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<h3 id="7.3.1-iwdg-control-register-iwdg_ctlr">7.3.1 IWDG Control Register (IWDG_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">KEY[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>KEY[15:0]</td>
+<td>WO</td>
+<td>Operation key value lock.<br>
+0xAAAA: Kick (feed) the watchdog. Load the IWDG_RLDR register value into the Independent Watchdog counter;<br>
+0x5555: Allow modification of R16_IWDG_PSCR and R16_IWDG_RLDR registers;<br>
+0xCCCC: Start the watchdog. If the hardware watchdog is enabled (configured via user option bytes), this restriction does not apply.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="7.3.2-prescaler-register-iwdg_pscr">7.3.2 Prescaler Register (IWDG_PSCR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="13">Reserved</td><td colspan="3">PR[2:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:3]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[2:0]</td>
+<td>PR[2:0]</td>
+<td>RW</td>
+<td>IWDG clock prescaler coefficient. Write 0x5555 to KEY before modifying this field.<br>
+000: divide by 4; &nbsp;&nbsp; 001: divide by 8;<br>
+010: divide by 16; &nbsp;&nbsp; 011: divide by 32;<br>
+100: divide by 64; &nbsp;&nbsp; 101: divide by 128;<br>
+110: divide by 256; &nbsp;&nbsp; 111: reserved.<br>
+IWDG counting time base = LSI / prescaler coefficient.<br>
+Note: Before reading this field, ensure that the PVU bit in the IWDG_STATR register is 0, otherwise the read value is invalid.</td>
+<td>000b</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="7.3.3-reload-register-iwdg_rldr">7.3.3 Reload Register (IWDG_RLDR)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">RL[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>RL[11:0]</td>
+<td>RW</td>
+<td>Counter reload value. Write 0x5555 to KEY before modifying this field.<br>
+After writing 0xAAAA to KEY, the value of this field is loaded into the counter by hardware, and the counter then starts decrementing from this value.<br>
+Note: Before reading or writing this field, ensure that the RUV bit in the IWDG_STATR register is 0, otherwise read/write access to this field is invalid.</td>
+<td>0xFFF</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: This register is reset in Standby mode.</div>
+
+<h3 id="7.3.4-status-register-iwdg_statr">7.3.4 Status Register (IWDG_STATR)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="14">Reserved</td><td>RVU</td><td>PVU</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:2]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>RVU</td>
+<td>RO</td>
+<td>Reload value update flag. Set or cleared by hardware.<br>
+1: Reload value update in progress;<br>
+0: Reload value update complete (up to 5 LSI cycles).<br>
+Note: The reload register IWDG_RLDR can only be read/written after the RVU bit is cleared to 0.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>PVU</td>
+<td>RO</td>
+<td>Clock prescaler coefficient update flag. Set or cleared by hardware.<br>
+1: Clock prescaler value update in progress;<br>
+0: Clock prescaler value update complete (up to 5 LSI cycles).<br>
+Note: The prescaler register IWDG_PSCR can only be read/written after the PVU bit is cleared to 0.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: After updating the prescaler or reload value, there is no need to wait for RVU or PVU to reset; code execution can continue. (Even in low-power mode, this write operation will still be completed.)</div>

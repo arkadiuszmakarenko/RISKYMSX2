@@ -1,8 +1,8 @@
 /********************************** (C) COPYRIGHT  *******************************
 * File Name          : ch32v4x7_rcc.h
 * Author             : WCH
-* Version            : V1.0.0
-* Date               : 2025/12/01
+* Version            : V1.0.1
+* Date               : 2026/06/26
 * Description        : This file provides all the RCC firmware functions.
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
@@ -202,6 +202,7 @@ typedef struct
 #define RCC_FLAG_SFTRST                  ((uint8_t)0x7C)
 #define RCC_FLAG_IWDGRST                 ((uint8_t)0x7D)
 #define RCC_FLAG_WWDGRST                 ((uint8_t)0x7E)
+#define RCC_FLAG_LPWRRST                 ((uint8_t)0x7F)
 
 /* SysTick_clock_source */
 #define SysTick_CLKSource_HCLK_Div8      ((uint32_t)0xFFFFFFFB)

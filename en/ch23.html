@@ -1,0 +1,323 @@
+<h1 id="chapter-23-digital-video-port-dvp">Chapter 23: Digital Video Port (DVP)</h1>
+
+<p>The Digital Video Port (DVP) is used to connect to camera modules to acquire image data streams. It provides an 8/10/12-bit parallel interface for communication and supports a maximum pixel clock input frequency of 150 MHz. It supports image data organized in raw line and frame formats, such as YUV, RGB, etc., and also supports compressed image data such as JPEG format. It can receive high-speed parallel data streams output by external 8-bit, 10-bit, and 12-bit camera modules. During reception, synchronization is primarily achieved through VSYNC and HSYNC signals. Image cropping functionality is supported.</p>
+
+<h2 id="23.1-main-features">23.1 Main Features</h2>
+<ul>
+  <li>Configurable 8/10/12-bit data width mode</li>
+  <li>Supports YUV and RGB format data</li>
+  <li>Supports JPEG compressed format data</li>
+  <li>Built-in FIFO, supports DMA transfer</li>
+  <li>Supports double-buffer reception</li>
+  <li>Supports cropping function</li>
+  <li>Supports continuous mode and snapshot mode</li>
+</ul>
+
+<h2 id="23.2-functional-description">23.2 Functional Description</h2>
+
+<h3 id="23.2.1-connecting-to-the-sensor">23.2.1 Connecting to the Sensor</h3>
+
+<figure><img src="figures/fig_23_1.png"><figcaption>Figure 23-1: DVP interface connection</figcaption></figure>
+
+<ul>
+  <li><strong>PCLK (Pixel clk):</strong> Pixel clock; each clock corresponds to one pixel of data (uncompressed data). The maximum supported HCLK clock frequency output by the external DVP interface sensor is 150 MHz.</li>
+  <li><strong>HSYNC (horizontal synchronization):</strong> Line synchronization signal.</li>
+  <li><strong>VSYNC (vertical synchronization):</strong> Frame synchronization signal.</li>
+  <li><strong>DATA:</strong> Pixel data or compressed data; bit width supports 8/10/12 bits.</li>
+  <li><strong>XCLK:</strong> Reference clock for the sensor; can be provided by the microcontroller or externally, typically using a crystal oscillator.</li>
+  <li><strong>I2C interface:</strong> Used to configure the sensor's registers; can be implemented by bit-banging I2C timing through ordinary GPIO pins, or by using the hardware I2C interface.</li>
+</ul>
+
+<table class="data-table">
+  <caption>Table 23-1: DVP pins</caption>
+  <thead>
+    <tr><th>Name</th><th>Signal Type</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>PCLK</td><td>Input</td><td>Pixel clock input</td></tr>
+    <tr><td>DATA[11:0]</td><td>Input</td><td>Pixel data input</td></tr>
+    <tr><td>VSYNC</td><td>Input</td><td>Frame synchronization signal input</td></tr>
+    <tr><td>HSYNC</td><td>Input</td><td>Line synchronization signal input</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.2.2-working-timing">23.2.2 Working Timing</h3>
+
+<p>The digital signal data stream output by a commonly used DVP interface sensor module has a certain relationship with the image size. The following is an example using one image data.</p>
+
+<p>As shown in Figure 23-2, the sensor internally has a complete image size of 3576×1145. After internal scaling processing, the image data size finally output from the interface is 1920×1080, with an image refresh rate of 25.</p>
+
+<figure><img src="figures/fig_23_2.png"><figcaption>Figure 23-2: Timing description</figcaption></figure>
+
+<p>HCLK is the time for one pixel transfer, so HSYNC is 3576 times HCLK. Among the 3576 pixels, only 1920 pixels are valid; during the remaining 1656 pixel periods, the sensor does not transmit data. VSYNC is the frame synchronization signal, so the VSYNC period is 3576×1145 times HCLK. Similarly, only during the 1920×1080 valid pixel periods does the sensor transmit data. If the sensor transmits JPEG compressed data, the HSYNC signal may not be needed.</p>
+
+<p>The relationship between DVP interface signals and image data is primarily based on the datasheet of the selected sensor.</p>
+
+<h3 id="23.2.3-rgb-yuv-jpeg-compressed-data-format-description">23.2.3 RGB/YUV/JPEG Compressed Data Format Description</h3>
+<ul>
+  <li><strong>RGB</strong><br>Three primary colors: red, green, blue.</li>
+  <li><strong>YUV</strong><br>Luminance signal Y, chrominance signals U and V, Pb and Pr, Cb and Cr.</li>
+  <li><strong>JPEG (Joint Photographic Experts Group)</strong><br>Lossy compression, but the lost portions are those not easily perceived by human vision. It exploits the characteristic that the human eye is insensitive to high-frequency information in computer color. It removes visually redundant information (spatial redundancy) and removes inherently redundant information in the data (structural redundancy).</li>
+</ul>
+
+<h2 id="23.3-digital-video-port-application">23.3 Digital Video Port Application</h2>
+
+<h3 id="23.3.1-dvp-configuration-description">23.3.1 DVP Configuration Description</h3>
+<ol>
+  <li>In DVP data reception, each frame of data is stored alternately in BUF0 and BUF1, starting from BUF0. For RGB and YUV data streams, the hardware resets and selects BUF0 to start each time the frame signal transitions from inactive level to active level. When one row of data is filled, it switches to BUF1, achieving alternate storage. For JPEG compressed data, the hardware sets the switching threshold between BUF0 and BUF1 based on the configured DMA reception length.</li>
+  <li>When the data bus width is 10 bits or 12 bits, each time a data is received, the system automatically performs unsigned extension to 16 bits before storing.</li>
+  <li>The R16_DVP_ROW_NUM and R16_DVP_COL_NUM registers must match the actual image size output by the sensor.</li>
+  <li>In video stream RGB mode, R16_DVP_COL_NUM represents the number of valid HCLK periods in one row of data, and R16_DVP_ROW_NUM represents the number of rows contained in one frame of image data. In image JPEG mode, R16_DVP_COL_NUM is used to configure the DMA length; in this mode, the R16_DVP_ROW_NUM register has no effect.</li>
+</ol>
+
+<h3 id="23.3.2-dvp-application-description">23.3.2 DVP Application Description</h3>
+<p>When using the digital video port to receive image data, the DVP-related control registers must be correctly configured to match the mode of the image sensor. The specific operation steps are as follows:</p>
+<ol>
+  <li>Clear the RB_DVP_ALL_CLR and RB_DVP_RCV_CLR fields through the R8_DVP_CR1 register.</li>
+  <li>Configure the image mode, data bit width, HCLK polarity, HSYNC polarity, and VSYNC polarity through the R8_DVP_CR0 register to match the SENSOR output.</li>
+  <li>Based on the valid image pixels output by the configured image sensor, configure the R16_DVP_ROW_NUM and R16_DVP_COL_NUM registers to match the SENSOR output. In image JPEG mode, only the R16_DVP_COL_NUM register needs to be configured.</li>
+  <li>Configure the DMA receive address through the R32_DVP_DMA_BUF0/1 registers.</li>
+  <li>If using snapshot mode, configure the RB_DVP_CM field through the R8_DVP_CR1 register to enable snapshot mode.</li>
+  <li>If using cropping mode, configure the RB_DVP_CROP and RB_DVP_FCRC fields through the R8_DVP_CR1 register to enable the cropping function and control the frame capture rate. At the same time, configure R16_DVP_HOFFCNT, R16_DVP_VST, R16_DVP_CAPCNT, and R16_DVP_VLINE to set the cropped image dimensions.</li>
+  <li>As needed, enable the corresponding interrupts through the R8_DVP_IER register, and configure the interrupt priority and enable the DVP interrupt through the interrupt controller (PFIC).</li>
+  <li>Enable DMA through the R8_DVP_CR1 register, and enable the DVP interface through the R8_DVP_CR0 register.</li>
+  <li>Wait for the relevant reception interrupts to be generated and process the received data in a timely manner.</li>
+</ol>
+
+<h3 id="23.3.3-capture-mode-description">23.3.3 Capture Mode Description</h3>
+<p>The DVP interface supports two capture modes: snapshot (single frame) mode and continuous mode.</p>
+
+<h4 id="23.3.3.1-snapshot-mode">23.3.3.1 Snapshot Mode</h4>
+<p>In this mode, only a single frame is captured (RB_DVP_CM set to 1 in the R8_DVP_CR1 register). After the DVP interface is enabled, the system waits for the frame start to be detected, then begins image data sampling. After receiving a complete frame of data, the DVP interface is turned off (the RB_DVP_ENABLE field in the R8_DVP_CR0 register is cleared to 0). The single-frame capture waveform in snapshot mode is shown in Figure 23-3.</p>
+
+<figure><img src="figures/fig_23_3.png"><figcaption>Figure 23-3: Single-frame capture waveform in snapshot mode</figcaption></figure>
+
+<h4 id="23.3.3.2-continuous-mode">23.3.3.2 Continuous Mode</h4>
+<p>In this mode (RB_DVP_CM cleared to 0 in the R8_DVP_CR1 register), after the DVP interface is enabled, each frame of data is continuously sampled until the RB_DVP_ENABLE field in the R8_DVP_CR0 register is cleared to 0. The frame capture waveform in continuous mode is shown in Figure 23-4.</p>
+
+<figure><img src="figures/fig_23_4.png"><figcaption>Figure 23-4: Frame capture waveform in continuous mode</figcaption></figure>
+
+<h3 id="23.3.4-cropping-function-description">23.3.4 Cropping Function Description</h3>
+<p>The DVP can use the cropping function to extract a rectangular window from the received image. The rectangular window's starting coordinates (the rectangle's top-left X coordinate R16_DVP_HOFFCNT, Y coordinate R16_DVP_VST) and window size (R16_DVP_CAPCNT for horizontal size, R16_DVP_VLINE for vertical size) are configurable. The coordinates and size of the cropping window are shown in Figure 23-5. The cropping window data capture waveform is shown in Figure 23-6.</p>
+
+<figure><img src="figures/fig_23_5.png"><figcaption>Figure 23-5: Coordinates and size of the cropping window</figcaption></figure>
+
+<figure><img src="figures/fig_23_6.png"><figcaption>Figure 23-6: Cropping window data capture waveform</figcaption></figure>
+
+<h2 id="23.4-register-description">23.4 Register Description</h2>
+
+<table class="reg-list">
+  <caption>Table 23-2: DVP-related register list</caption>
+  <thead>
+    <tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>R8_DVP_CR0</td><td>0x50050000</td><td>DVP control register 0</td><td>0x00</td></tr>
+    <tr><td>R8_DVP_CR1</td><td>0x50050001</td><td>DVP control register 1</td><td>0x06</td></tr>
+    <tr><td>R8_DVP_IER</td><td>0x50050002</td><td>DVP interrupt enable register</td><td>0x00</td></tr>
+    <tr><td>R16_DVP_ROW_NUM</td><td>0x50050004</td><td>Image row count configuration register</td><td>0x0000</td></tr>
+    <tr><td>R16_DVP_COL_NUM</td><td>0x50050006</td><td>Image column count configuration register</td><td>0x0000</td></tr>
+    <tr><td>R32_DVP_DMA_BUF0</td><td>0x50050008</td><td>DVP DMA address 0 register</td><td>0x00000000</td></tr>
+    <tr><td>R32_DVP_DMA_BUF1</td><td>0x5005000C</td><td>DVP DMA address 1 register</td><td>0x00000000</td></tr>
+    <tr><td>R8_DVP_IFR</td><td>0x50050010</td><td>DVP interrupt flag register</td><td>0x00</td></tr>
+    <tr><td>R8_DVP_STATUS</td><td>0x50050011</td><td>DVP receive FIFO status register</td><td>0x00</td></tr>
+    <tr><td>R16_DVP_ROW_CNT</td><td>0x50050014</td><td>DVP row counter register</td><td>0x0000</td></tr>
+    <tr><td>R16_DVP_HOFFCNT</td><td>0x50050018</td><td>Window start horizontal displacement register</td><td>0x0000</td></tr>
+    <tr><td>R16_DVP_VST</td><td>0x5005001A</td><td>Window start row register</td><td>0x0000</td></tr>
+    <tr><td>R16_DVP_CAPCNT</td><td>0x5005001C</td><td>Capture count register</td><td>0x0000</td></tr>
+    <tr><td>R16_DVP_VLINE</td><td>0x5005001E</td><td>Vertical line count register</td><td>0x0000</td></tr>
+    <tr><td>R32_DVP_DR</td><td>0x50050020</td><td>Data register</td><td>0x00000000</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.1-dvp-configuration-register-0-r8_dvp_cr0">23.4.1 DVP Configuration Register 0 (R8_DVP_CR0)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>7</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>6</td><td>RB_DVP_JPEG</td><td>RW</td><td>JPEG mode enable:<br>1: JPEG compressed format;<br>0: Raw data format.</td><td>0</td></tr>
+    <tr><td>[5:4]</td><td>RB_DVP_MSK_DAT_MOD[1:0]</td><td>RW</td><td>DVP data bit width configuration:<br>00: 8-bit mode;<br>01: 10-bit mode;<br>1x: 12-bit mode.</td><td>00b</td></tr>
+    <tr><td>3</td><td>RB_DVP_P_POLAR</td><td>RW</td><td>HCLK polarity configuration:<br>1: Sample data on HCLK falling edge;<br>0: Sample data on HCLK rising edge.</td><td>0</td></tr>
+    <tr><td>2</td><td>RB_DVP_H_POLAR</td><td>RW</td><td>HSYNC polarity configuration:<br>1: HSYNC low level data valid;<br>0: HSYNC high level data valid.</td><td>0</td></tr>
+    <tr><td>1</td><td>RB_DVP_V_POLAR</td><td>RW</td><td>VSYNC polarity configuration:<br>1: VSYNC high level data valid;<br>0: VSYNC low level data valid.</td><td>0</td></tr>
+    <tr><td>0</td><td>RB_DVP_ENABLE</td><td>RW</td><td>DVP function enable:<br>1: Enable DVP;<br>0: Disable DVP.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.2-dvp-configuration-register-1-r8_dvp_cr1">23.4.2 DVP Configuration Register 1 (R8_DVP_CR1)</h3>
+<p><strong>Offset address:</strong> 0x01</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[7:6]</td><td>RB_DVP_FCRC[1:0]</td><td>RW</td><td>DVP frame capture rate control:<br>00: Capture all frames;<br>01: Capture every other frame;<br>10: Capture every fourth frame;<br>11: Reserved.</td><td>00b</td></tr>
+    <tr><td>5</td><td>RB_DVP_CROP</td><td>RW</td><td>Cropping function control:<br>1: Only capture data within the window specified by the crop registers;<br>0: Capture the complete image.</td><td>0</td></tr>
+    <tr><td>4</td><td>RB_DVP_CM</td><td>RW</td><td>Capture mode:<br>1: Snapshot mode;<br>0: Continuous mode.</td><td>0</td></tr>
+    <tr><td>3</td><td>RB_DVP_BUF_TOG</td><td>RWT</td><td>Buffer address flag bit. Hardware-controlled toggle; software writes 1 to toggle this bit, writing 0 has no effect.<br>1: Data stored in receive address 1;<br>0: Data stored in receive address 0.</td><td>0</td></tr>
+    <tr><td>2</td><td>RB_DVP_RCV_CLR</td><td>RW</td><td>Receive logic reset control:<br>1: Reset receive logic circuit;<br>0: Cancel reset operation.</td><td>1</td></tr>
+    <tr><td>1</td><td>RB_DVP_ALL_CLR</td><td>RW</td><td>Flag and FIFO clear control, software writes 1 or 0:<br>1: Reset flags and FIFO;<br>0: Cancel reset operation.</td><td>1</td></tr>
+    <tr><td>0</td><td>RB_DVP_DMA_ENABLE</td><td>RW</td><td>DMA enable control bit:<br>1: Enable DMA;<br>0: Disable DMA.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.3-dvp-interrupt-enable-register-r8_dvp_ier">23.4.3 DVP Interrupt Enable Register (R8_DVP_IER)</h3>
+<p><strong>Offset address:</strong> 0x02</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[7:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>4</td><td>RB_DVP_IE_STP_FRM</td><td>RW</td><td>Frame end interrupt enable. (Interrupt is generated when VSYNC transitions from active level to inactive level)<br>1: Enable frame end interrupt;<br>0: Disable frame end interrupt.</td><td>0</td></tr>
+    <tr><td>3</td><td>RB_DVP_IE_FIFO_OV</td><td>RW</td><td>Receive FIFO overflow interrupt enable:<br>1: Enable FIFO overflow interrupt;<br>0: Disable FIFO overflow interrupt.</td><td>0</td></tr>
+    <tr><td>2</td><td>RB_DVP_IE_FRM_DONE</td><td>RW</td><td>Frame reception complete interrupt enable. (Interrupt is generated when the counter reaches the ROW/COL_NUM configured value, indicating the last data has been written to RAM)<br>1: Enable frame reception complete interrupt;<br>0: Disable frame reception complete interrupt.</td><td>0</td></tr>
+    <tr><td>1</td><td>RB_DVP_IE_ROW_DONE</td><td>RW</td><td>Row end interrupt enable. (Interrupt is generated when the counter reaches the COL_NUM configured value)<br>1: Enable row end interrupt;<br>0: Disable row end interrupt.</td><td>0</td></tr>
+    <tr><td>0</td><td>RB_DVP_IE_STR_FRM</td><td>RW</td><td>New frame start interrupt enable. (Interrupt is generated when VSYNC transitions from inactive level to active level, indicating a new frame is starting and data is about to arrive)<br>1: Enable new frame start interrupt;<br>0: Disable new frame start interrupt.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.4-dvp-image-valid-row-count-configuration-register-r16_dvp_row_num">23.4.4 DVP Image Valid Row Count Configuration Register (R16_DVP_ROW_NUM)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>RB_DVP_ROW_NUM[15:0]</td><td>RW</td><td>In RGB mode, indicates the number of rows contained in one frame of image data. In JPEG mode, this register has no practical meaning.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.5-dvp-image-valid-column-configuration-register-r16_dvp_col_num">23.4.5 DVP Image Valid Column Configuration Register (R16_DVP_COL_NUM)</h3>
+<p><strong>Offset address:</strong> 0x06</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>RB_DVP_COL_NUM[15:0]</td><td>RW</td><td>In RGB mode, indicates the number of HCLK periods contained in one row of data. In JPEG mode, used to configure the DMA reception length.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.6-dvp-dma-receive-address-0-register-r32_dvp_dma_buf0">23.4.6 DVP DMA Receive Address 0 Register (R32_DVP_DMA_BUF0)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[31:0]</td><td>RB_DVP_DMA_BUF0[31:0]</td><td>RW</td><td>DMA receive address 0.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.7-dvp-dma-receive-address-1-register-r32_dvp_dma_buf1">23.4.7 DVP DMA Receive Address 1 Register (R32_DVP_DMA_BUF1)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[31:0]</td><td>RB_DVP_DMA_BUF1[31:0]</td><td>RW</td><td>DMA receive address 1.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.8-dvp-interrupt-flag-register-r8_dvp_ifr">23.4.8 DVP Interrupt Flag Register (R8_DVP_IFR)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[7:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>4</td><td>RB_DVP_IF_STP_FRM</td><td>RW1Z</td><td>Frame end interrupt flag, active high, write 1 to clear.</td><td>0</td></tr>
+    <tr><td>3</td><td>RB_DVP_IF_FIFO_OV</td><td>RW1Z</td><td>Receive FIFO overflow interrupt flag, active high, write 1 to clear.</td><td>0</td></tr>
+    <tr><td>2</td><td>RB_DVP_IF_FRM_DONE</td><td>RW1Z</td><td>Frame reception complete interrupt flag, active high, write 1 to clear.</td><td>0</td></tr>
+    <tr><td>1</td><td>RB_DVP_IF_ROW_DONE</td><td>RW1Z</td><td>Row end interrupt flag, active high, write 1 to clear.</td><td>0</td></tr>
+    <tr><td>0</td><td>RB_DVP_IF_STR_FRM</td><td>RW1Z</td><td>Frame start interrupt flag, active high, write 1 to clear.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.9-dvp-receive-fifo-status-register-r8_dvp_status">23.4.9 DVP Receive FIFO Status Register (R8_DVP_STATUS)</h3>
+<p><strong>Offset address:</strong> 0x11</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>7</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>[6:4]</td><td>RB_DVP_FIFO_CNT[2:0]</td><td>RO</td><td>FIFO counter.</td><td>0</td></tr>
+    <tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>2</td><td>RB_DVP_FIFO_OV</td><td>RO</td><td>FIFO overflow status:<br>1: FIFO overflowed;<br>0: FIFO not overflowed.</td><td>0</td></tr>
+    <tr><td>1</td><td>RB_DVP_FIFO_FULL</td><td>RO</td><td>FIFO full status:<br>1: Buffer full;<br>0: FIFO not full.</td><td>0</td></tr>
+    <tr><td>0</td><td>RB_DVP_FIFO_RDY</td><td>RO</td><td>FIFO ready status:<br>1: FIFO has data;<br>0: FIFO has no data.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.10-dvp-received-image-row-count-register-r16_dvp_row_cnt">23.4.10 DVP Received Image Row Count Register (R16_DVP_ROW_CNT)</h3>
+<p><strong>Offset address:</strong> 0x14</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>RB_DVP_ROW_CNT[15:0]</td><td>RO</td><td>During actual reception, the number of rows contained in one frame of image data. This register is updated at frame end. In JPEG format, the value of this register is meaningless.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.11-dvp-window-start-horizontal-displacement-register-r16_dvp_hoffcnt">23.4.11 DVP Window Start Horizontal Displacement Register (R16_DVP_HOFFCNT)</h3>
+<p><strong>Offset address:</strong> 0x18</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>RB_DVP_HOFFCNT[15:0]</td><td>RW</td><td>Within the window rows, the number of HCLK periods to skip before capturing data in each row. The lower 14 bits are valid.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.12-dvp-window-start-row-register-r16_dvp_vst">23.4.12 DVP Window Start Row Register (R16_DVP_VST)</h3>
+<p><strong>Offset address:</strong> 0x1A</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>RB_DVP_VST[15:0]</td><td>RW</td><td>The row number at which image capture begins; data before this row is not captured. The lower 13 bits are valid.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.13-dvp-capture-count-register-r16_dvp_capcnt">23.4.13 DVP Capture Count Register (R16_DVP_CAPCNT)</h3>
+<p><strong>Offset address:</strong> 0x1C</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>RB_DVP_CAPCNT[15:0]</td><td>RW</td><td>The number of HCLK periods to capture within the cropping window. The lower 14 bits are valid.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.14-dvp-vertical-line-count-register-r16_dvp_vline">23.4.14 DVP Vertical Line Count Register (R16_DVP_VLINE)</h3>
+<p><strong>Offset address:</strong> 0x1E</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>RB_DVP_VLINE[15:0]</td><td>RW</td><td>The number of rows to capture within the cropping window. The lower 14 bits are valid.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="23.4.15-dvp-data-register-r32_dvp_dr">23.4.15 DVP Data Register (R32_DVP_DR)</h3>
+<p><strong>Offset address:</strong> 0x20</p>
+<table class="reg-fields">
+  <thead>
+    <tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>[31:0]</td><td>RB_DVP_DR[31:0]</td><td>RO</td><td>The DVP interface triggers a DMA request only after receiving 4 bytes of data each time. The 4-byte-deep FIFO allows sufficient time for DMA transfer, effectively preventing DMA overflow.</td><td>0</td></tr>
+  </tbody>
+</table>

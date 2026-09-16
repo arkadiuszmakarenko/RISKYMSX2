@@ -1,0 +1,945 @@
+<h1 id="chapter-24-sdio-interface-sdio">Chapter 24: SDIO Interface (SDIO)</h1>
+
+<p>The term "SDIO" in this chapter refers to a communication interface designed on the microcontroller for operating external memory cards such as SD cards or other devices; it is a peripheral of the microcontroller. The microcontroller's SDIO is directly connected to the HB bus, clocked directly by HCLK, enabling high communication speeds. The microcontroller's SDIO acts as the SDIO host, and the controlled devices are collectively referred to as SDIO devices. In applications, SDIO is generally used to read and write SD cards, TF cards, or eMMC cards, or to control other devices that use SDIO as the communication interface, such as WiFi/4G modules.</p>
+
+<h2 id="24.1-main-features">24.1 Main Features</h2>
+
+<h3 id="24.1.1-features">24.1.1 Features</h3>
+<ul>
+<li>Supports SD cards, SDIO cards, and MMC cards</li>
+<li>Supports 1-bit, 4-bit, and 8-bit bus</li>
+<li>SDIO supports selectable clock frequency, up to 80 MHz in 4-wire mode, up to 50 MHz in 8-wire mode</li>
+<li>Compatible with MMC specification 4.5 (forward compatible)</li>
+<li>Compatible with SD card specification 3.0, SDIO card specification 2.0</li>
+<li>Not compatible with SPI</li>
+</ul>
+
+<h3 id="24.1.2-overview">24.1.2 Overview</h3>
+<p>The microcontroller's SDIO supports communication with memory cards such as SD cards or MMC cards. It should be noted that SDIO only provides a set of clock, data, and command control timing sequences required for a single command transfer as defined by the SD card and MMC card specifications. The sequencing and combination of commands between each other must be determined by the user through programming. In addition, for various memory cards, SDIO can only implement read and write functions. The file system functions provided for files need to be implemented by the user through programming to build the file system.</p>
+<p>SDIO is different from the QSPI interface in that it has no chip-select pin, and has an additional CMD pin. The CMD can be considered a special data line dedicated to transmitting commands and responses. SDIO has three selectable data line widths: 1-bit, 4-bit, and 8-bit. The SDIO clock is selectable during configuration. During actual data transmission, the clock supports up to 80 MHz in 4-wire mode and up to 50 MHz in 8-wire mode. According to the protocol, when the clock received by the SDIO device exceeds a certain threshold, the peak waveform of the clock line, data line, and command line needs to be reduced to save the rise and fall time of the waveform.</p>
+<p>Unlike SD cards, SDIO cards often refer to non-storage devices such as WiFi/Bluetooth modules and 4G modules that use the SDIO interface. Unless otherwise specified, the content described in this chapter definitely applies to SD cards, and content that only applies to SDIO cards or MMC cards will be specifically noted. In this chapter, SD cards are treated as the primary potential operation target, followed by SDIO cards, and finally MMC cards.</p>
+
+<h2 id="24.2-interface-and-clock">24.2 Interface and Clock</h2>
+<p>The SDIO receives control from the CPU through the HB bus. The SDIO registers contain a FIFO interface through which the CPU or DMA reads or writes data to obtain or send data. The SDIO is clocked directly by HCLK and has an interrupt entry that supports multiple interrupt sources. The pins directly controlled by the SDIO are SDIO_CK, SDIO_CMD, and SDIO_D[7:0] — a total of ten pins — which connect to the SDIO device. The SDIO is a host-driven communication interface; all transfers must be initiated by the microcontroller.</p>
+
+<h3 id="24.2.1-peripheral-structure">24.2.1 Peripheral Structure</h3>
+<p>The structure of the SDIO is shown in Figure 24-1.</p>
+
+<figure><img src="figures/fig_24_1.png"><figcaption>Figure 24-1: SDIO structure diagram</figcaption></figure>
+
+<p>The SDIO is a peripheral through which the microcontroller directly operates SDIO devices as the host. It roughly consists of five modules: the HB interface, clock control section, CMD line control section, data line control section, and control register section. The SDIO is a half-duplex peripheral. The CPU writes the commands and data to be sent into the control registers. The command line and data line control modules are responsible for pushing the commands or data onto the IO lines with CRC added. The SDIO data flow is handled by the general-purpose DMA, which moves data from RAM to the SDIO FIFO. The SDIO FIFO has a size of 32 words (32-bit each).</p>
+
+<h3 id="24.2.2-pins-and-configuration">24.2.2 Pins and Configuration</h3>
+<p>The pins and their modes that need to be configured for the SDIO are shown in Table 24-1.</p>
+
+<table class="data-table">
+<caption>Table 24-1: SDIO pin configuration</caption>
+<thead>
+<tr><th>SDIO alternate function</th><th>Pin mode to be configured</th><th>Pin speed to be configured</th></tr>
+</thead>
+<tbody>
+<tr><td>SDIO_D[0:3]</td><td>Push-pull alternate function output</td><td>50 MHz</td></tr>
+<tr><td>SDIO_CK</td><td>Push-pull alternate function output</td><td>50 MHz</td></tr>
+<tr><td>SDIO_CMD</td><td>Push-pull alternate function output</td><td>50 MHz</td></tr>
+<tr><td>SDIO_D4</td><td>Push-pull alternate function output</td><td>50 MHz</td></tr>
+<tr><td>SDIO_D5</td><td>Push-pull alternate function output</td><td>50 MHz</td></tr>
+<tr><td>SDIO_D6</td><td>Push-pull alternate function output</td><td>50 MHz</td></tr>
+<tr><td>SDIO_D7</td><td>Push-pull alternate function output</td><td>50 MHz</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: In slave mode, the SDIO_CK pin should be configured as floating input.</div>
+
+<h3 id="24.2.3-clock">24.2.3 Clock</h3>
+<p>The clock pin of the SDIO is SDIO_CK. Its output clock is derived by dividing HCLK. The division factor can be configured to any integer value between 2 and 261. SDIO devices generally only support a single-bus mode with a maximum clock of 400 kHz during initialization. After initialization, the host generally initiates a switch to low-voltage operation while raising the clock to the maximum clock acceptable to both the microcontroller and the SDIO device. The supported clock speeds and switching procedures differ among different versions and speed classes of SD cards; the user needs to understand this independently.</p>
+
+<h3 id="24.2.4-command-state-machine">24.2.4 Command State Machine</h3>
+<p>The command workflow of the SDIO follows the state machine shown below.</p>
+
+<figure><img src="figures/fig_24_2.png"><figcaption>Figure 24-2: Command state machine</figcaption></figure>
+
+<h3 id="24.2.5-data-state-machine">24.2.5 Data State Machine</h3>
+<p>The data workflow of the SDIO follows the state machine shown below.</p>
+
+<figure><img src="figures/fig_24_3.png"><figcaption>Figure 24-3: Data state machine</figcaption></figure>
+
+<h2 id="24.3-sdio-protocol-overview">24.3 SDIO Protocol Overview</h2>
+<p>Communication on the SDIO uses the transfer as the minimum unit. Each transfer always starts with the host sending a command on the CMD line. After some commands are sent, the SDIO device will also send a segment of data on the CMD line to reply to the host, called a "response." Sometimes it is also accompanied by data transfer, which takes place on the D line. The formats of commands and responses are fixed, and the bit definitions of each field are determined by the specific command or response. Responses and data transfers must be sent or stopped within a specified time after the command or response ends; otherwise, a timeout error will occur.</p>
+<p>The purpose of this section is to give users a preliminary understanding of some necessary specification details for using SDIO in a concise manner. It does not guarantee completeness or timely updates. The microcontroller's SDIO only guarantees the hardware operation basis for implementing the SD 2.0, SDIO 2.0, and MMC 4.5 specifications. For functions defined by higher-version specifications, such as double-edge sampling, support is not necessarily provided. Users should program SDIO interactions based on the SD specification, SDIO specification, and MMC specification during actual development.</p>
+
+<h3 id="24.3.1-bus-timing">24.3.1 Bus Timing</h3>
+<p>SD card transfers are always initiated by the host sending a CMD. The SD card may not reply with a response, may reply with a short response or a long response, and some responses are followed by data transfers. In SDIO card or MMC card communication, there may also be cases where the SDIO device actively reports an interrupt. The timing diagrams are shown in the figure set below.</p>
+
+<figure><img src="figures/fig_24_4.png"><figcaption>Figure 24-4: SDIO no-response timing and no-data timing (SD card example)</figcaption></figure>
+
+<figure><img src="figures/fig_24_5.png"><figcaption>Figure 24-5: SDIO multi-block read timing (SD card example)</figcaption></figure>
+
+<figure><img src="figures/fig_24_6.png"><figcaption>Figure 24-6: SDIO multi-block write timing (SD card example)</figcaption></figure>
+
+<figure><img src="figures/fig_24_7.png"><figcaption>Figure 24-7: SDIO data stream read timing (SDIO card example)</figcaption></figure>
+
+<figure><img src="figures/fig_24_8.png"><figcaption>Figure 24-8: SDIO data stream write timing (SDIO card example)</figcaption></figure>
+
+<h3 id="24.3.2-commands">24.3.2 Commands</h3>
+<p>Most SDIO transfers begin with a command (CMD). The SDIO host informs the device of its intention through commands. The command format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-2: Command format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Start bit</th><th>Transmitter bit</th><th>Command index</th><th>Command parameter</th><th>CRC7</th><th>End bit</th></tr>
+</thead>
+<tbody>
+<tr><td>Bit position/width</td><td>47</td><td>46</td><td>[45:40]/6 bits</td><td>[39:8]/32 bits</td><td>[7:1]/7 bits</td><td>0</td></tr>
+<tr><td>Value</td><td>0b</td><td>1b</td><td>X</td><td>X</td><td>X</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<p>There are roughly four types of commands:</p>
+<ol>
+<li>Broadcast command (bc): sent to all cards on the bus, with no response returned;</li>
+<li>Broadcast command with response (bcr): sent to all cards on the bus, with a response returned;</li>
+<li>Addressed (point-to-point) command (ac): sent to a specific card, but with no data transfer;</li>
+<li>Addressed (point-to-point) command with data transfer (adtc): sent to a specific card, with accompanying data transfer.</li>
+</ol>
+<p>The following are some commonly used commands.</p>
+
+<h4 id="24.3.2.1-basic-commands">24.3.2.1 Basic Commands</h4>
+<p>Basic commands are some relatively fundamental functions supported by SD cards.</p>
+
+<table class="data-table">
+<caption>Table 24-3: SD card basic commands</caption>
+<thead>
+<tr><th>Command index</th><th>Type</th><th>Parameter</th><th>Response type</th><th>Abbreviation</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>CMD0</td><td>bc</td><td>[31:0] stuffing bits, no meaning</td><td>None</td><td>GO_IDLE_STATE</td><td>Reset all cards to IDLE state.</td></tr>
+<tr><td>CMD2</td><td>bcr</td><td>[31:0] stuffing bits, no meaning</td><td>R2</td><td>ALL_SEND_CID</td><td>All cards reply with CID.</td></tr>
+<tr><td>CMD3</td><td>bcr</td><td>[31:0] stuffing bits, no meaning</td><td>R6</td><td>SEND_RELATIVE_ADDR</td><td>Reply with a new RCA.</td></tr>
+<tr><td>CMD7</td><td>ac</td><td>[31:16] RCA; [15:0] stuffing bits, no meaning</td><td>R1b</td><td>SELECT/DESELECT_CARD</td><td>Select or deselect a card.</td></tr>
+<tr><td>CMD8</td><td>bcr</td><td>[31:12] reserved; [11:8] supply voltage; [7:0] check pattern</td><td>R7</td><td>SEND_IF_COND</td><td>Send SD card interface condition.</td></tr>
+<tr><td>CMD9</td><td>ac</td><td>[31:16] RCA; [15:0] stuffing bits, no meaning</td><td>R2</td><td>SEND_CSD</td><td>Request CSD.</td></tr>
+<tr><td>CMD10</td><td>ac</td><td>[31:16] RCA; [15:0] stuffing bits, no meaning</td><td>R2</td><td>SEND_CID</td><td>Request CID.</td></tr>
+<tr><td>CMD11</td><td>ac</td><td>[31:0] stuffing bits, no meaning</td><td>R1</td><td>VOLATGE_SWITCH</td><td>Switch to 1.8 V voltage level.</td></tr>
+<tr><td>CMD12</td><td>ac</td><td>[31:0] stuffing bits, no meaning</td><td>R1b</td><td>STOP_TRANSMISSION</td><td>Force the card to stop transmission.</td></tr>
+<tr><td>CMD13</td><td>ac</td><td>[31:16] RCA; [15] send task status register; [14:0] stuffing bits</td><td>R1</td><td>SEND_STATUS/SEND_TASK_STATUS</td><td>Send status or task status register.</td></tr>
+<tr><td>CMD15</td><td>ac</td><td>[31:16] RCA; [15:0] stuffing bits, no meaning</td><td>None</td><td>GO_INACTIVE_STATE</td><td>Request the card to enter INACTIVE mode.</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.3.2.2-erase-commands">24.3.2.2 Erase Commands</h4>
+<p>SD cards also have a FLASH structure and require erasing before writing. However, SD cards have integrated erase logic; if a write command is executed and it is found that erasing has not been done, the erase operation is automatically added. In many cases, especially before large-scale writes, proactively performing an erase helps improve efficiency.</p>
+
+<table class="data-table">
+<caption>Table 24-4: SD card erase commands</caption>
+<thead>
+<tr><th>Command index</th><th>Type</th><th>Parameter</th><th>Response type</th><th>Abbreviation</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>CMD32</td><td>ac</td><td>[31:0] start erase address<sup>[2]</sup></td><td>R1</td><td>ERASE_WR_BLK_START</td><td>Set the first erase address</td></tr>
+<tr><td>CMD33</td><td>ac</td><td>[31:0] end erase address<sup>[2]</sup></td><td>R1</td><td>ERASE_WR_BLK_END</td><td>Set the last erase address</td></tr>
+<tr><td>CMD38</td><td>ac</td><td>[31:0] erase mode</td><td>R1b</td><td>ERASE</td><td>Parameter 0 means normal erase</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note 1: The erase commands here are the SD card erase commands defined by the SD protocol specification. The erase commands for SDIO cards and MMC cards differ from these.<br>
+Note 2: For commonly used SDHC/SDXC (2 GB to 2 TB) class cards, the erase address for writing must be a block address, i.e., 512-byte aligned.</div>
+
+<h4 id="24.3.2.3-block-transfer-read-commands">24.3.2.3 Block Transfer Read Commands</h4>
+
+<table class="data-table">
+<caption>Table 24-5: SD card block read commands</caption>
+<thead>
+<tr><th>Command index</th><th>Type</th><th>Parameter</th><th>Response type</th><th>Abbreviation</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>CMD16</td><td>ac</td><td>[31:0] block length</td><td>R1</td><td>SET_BLOCKLEN</td><td>Set block length, 512</td></tr>
+<tr><td>CMD17</td><td>adtc</td><td>[31:0] single block address<sup>[1]</sup></td><td>R1</td><td>READ_SINGLE_BLOCK</td><td>Set the start address for a single read</td></tr>
+<tr><td>CMD18</td><td>adtc</td><td>[31:0] multiple block address<sup>[1]</sup></td><td>R1</td><td>READ_MULTIPLE_BLOCK</td><td>Continuously transfer data blocks from the card to the host until interrupted by a STOP_TRANSMISSION command</td></tr>
+<tr><td>CMD19</td><td>adtc</td><td>[31:0] reserved bits</td><td>R1</td><td>SEND_TUNING_BLOCK</td><td>Send a 64-byte sequence indicating mode change</td></tr>
+<tr><td>CMD20</td><td>ac</td><td>[31:28] speed control bits; [27:0] see command description</td><td>R1b</td><td>SPEED_CLASS_CONTROL</td><td>Speed class control command: [27:0] speed class; [27:0] UHS speed class; [27:0] video speed class</td></tr>
+<tr><td>CMD22</td><td>ac</td><td>[31:6] reserved bits; [5:0] extended address</td><td>R1</td><td>ADDRESS_EXTENSION</td><td>Only used by SDUC</td></tr>
+<tr><td>CMD23</td><td>ac</td><td>[31:0] block counter</td><td>R1</td><td>SET_BLOCK_COUNT</td><td>Block counter</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note 1: For commonly used SDHC/SDXC (2 GB to 2 TB) class cards, the erase address for writing must be a block address, i.e., 512-byte aligned.</div>
+
+<h4 id="24.3.2.4-block-transfer-write-commands">24.3.2.4 Block Transfer Write Commands</h4>
+
+<table class="data-table">
+<caption>Table 24-6: SD card block write commands</caption>
+<thead>
+<tr><th>Command index</th><th>Type</th><th>Parameter</th><th>Response type</th><th>Abbreviation</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>CMD16</td><td>ac</td><td>[31:0] block length</td><td>R1</td><td>SET_BLOCKLEN</td><td>Set block length, 512</td></tr>
+<tr><td>CMD24</td><td>adtc</td><td>[31:0] block address<sup>[1]</sup></td><td>R1</td><td>WRITE_BLOCK</td><td>Set the start address for a single block write</td></tr>
+<tr><td>CMD25</td><td>adtc</td><td>[31:0] multiple block address<sup>[1]</sup></td><td>R1</td><td>WRITE_MULTIPLE_BLOCK</td><td>Set the start address for a multiple block write</td></tr>
+<tr><td>CMD27</td><td>adtc</td><td>[31:0] stuffing bits</td><td>R1</td><td>PROGRAM_CSD</td><td>Program the programmable fields of the CSD</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note 1: For commonly used SDHC/SDXC (2 GB to 2 TB) class cards, the erase address for writing must be a block address, i.e., 512-byte aligned.</div>
+
+<h3 id="24.3.3-responses">24.3.3 Responses</h3>
+<p>Responses, as the necessary replies from the SDIO device to the host, are also transmitted on the CMD line and must be replied within a specified time. The response is transmitted with the most significant bit first and the least significant bit last. The response length and the definition of each bit and field are determined by the response type, but all responses begin with a start bit fixed at 0, followed by a transmission direction bit fixed at 0<sup>[1]</sup>. All responses end with a stop bit fixed at 1<sup>[1]</sup>. There are roughly 7 types of responses. SD cards support R1/R1b/R2/R3/R6/R7, and SDIO cards also support R4/R5. The formats are described below.</p>
+
+<h4 id="24.3.3.1-r1-response">24.3.3.1 R1 Response</h4>
+<p>A normal response, 48 bits total, with CRC7 check, and the card status field is 32 bits. The format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-7: R1 format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Start bit</th><th>Transmitter bit</th><th>Response index</th><th>Card status</th><th>CRC7</th><th>End bit</th></tr>
+</thead>
+<tbody>
+<tr><td>Bit position/width</td><td>47</td><td>46</td><td>[45:40]/6 bits</td><td>[39:8]/32 bits</td><td>[7:1]/7 bits</td><td>0</td></tr>
+<tr><td>Value</td><td>0b</td><td>0b</td><td>Follows CMD index</td><td>X</td><td>X</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.3.3.2-r1b-response">24.3.3.2 R1b Response</h4>
+<p>The format of R1b is the same as R1, but a busy signal can be added after the response, i.e., clamping the data line D2 low. After the host receives the busy signal (detecting SDIO_D2 low), it needs to handle it accordingly.</p>
+
+<h4 id="24.3.3.3-r2-response">24.3.3.3 R2 Response</h4>
+<p>A response to certain specific commands, 136 bits total, with CRC7 check included in the card status field, and the card status field is 128 bits. The card status field stores the value of the CID register or CSD register. The CID register is generally the reply to CMD2/CMD10, and the CSD register is generally the reply to CMD9. The specific meaning of the CID/CSD registers is described in section 28.4.2 Device Registers. Note that R2 only replies with the [127:1] segment of the CID/CSD register. The reserved bit CID/CSD[0] fixed at 1<sup>[2]</sup> is occupied by the end bit, which is also fixed at 1. The format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-8: R2 format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Start bit</th><th>Transmitter bit</th><th>Command index</th><th>Card status</th><th>End bit</th></tr>
+</thead>
+<tbody>
+<tr><td>Bit position/width</td><td>135</td><td>134</td><td>[133:128]/6 bits</td><td>[127:1]/127 bits</td><td>0</td></tr>
+<tr><td>Value</td><td>0b</td><td>0b</td><td>111111b</td><td>CID/CSD</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.3.3.4-r3-response">24.3.3.4 R3 Response</h4>
+<p>A dedicated response that replies with the OCR register, 48 bits total, with no CRC7 check. The OCR register is generally the reply to ACMD41. The format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-9: R3 format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Start bit</th><th>Transmitter bit</th><th>Command index</th><th>Card status</th><th>Reserved</th><th>End bit</th></tr>
+</thead>
+<tbody>
+<tr><td>Bit position/width</td><td>47</td><td>46</td><td>[45:40]/6 bits</td><td>[39:8]/32 bits</td><td>[7:1]/7 bits</td><td>0</td></tr>
+<tr><td>Value</td><td>0b</td><td>0b</td><td>111111b</td><td>OCR</td><td>1111111b</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.3.3.5-r4-response">24.3.3.5 R4 Response</h4>
+<p>A dedicated response to CMD5 that replies with the OCR and related registers, 48 bits total, with CRC7 check. R4 is used in SDIO cards. The format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-10: R4 format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Bit position</th><th>Width (bits)</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Start bit</td><td>47</td><td>1</td><td>0b</td></tr>
+<tr><td>Transmitter bit</td><td>46</td><td>1</td><td>0b</td></tr>
+<tr><td>Reserved</td><td>[45:40]</td><td>6</td><td>111111b</td></tr>
+<tr><td>Card ready</td><td>39</td><td>1</td><td>X</td></tr>
+<tr><td>Number of IO functions</td><td>[38:36]</td><td>3</td><td>X</td></tr>
+<tr><td>Current register</td><td>[35]</td><td>1</td><td>X</td></tr>
+<tr><td>Stuff bits</td><td>[34:33]</td><td>2</td><td>00b</td></tr>
+<tr><td>S18A</td><td>32</td><td>1</td><td>X</td></tr>
+<tr><td>IO OCR</td><td>[31:8]</td><td>24</td><td>OCR</td></tr>
+<tr><td>CRC check field</td><td>[7:1]</td><td>7</td><td>1111111b</td></tr>
+<tr><td>End bit</td><td>0</td><td>1</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: The R4 format for MMC cards differs from that of SDIO cards.</div>
+
+<h4 id="24.3.3.6-r5-response">24.3.3.6 R5 Response</h4>
+<p>A dedicated response to CMD5, 48 bits total, with CRC7 check. R5 is used in SDIO cards. The format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-11: R5 format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Start bit</th><th>Transmitter bit</th><th>Command index</th><th>Stuff bits</th><th>Response format</th><th>Read/write data</th><th>CRC7</th><th>End bit</th></tr>
+</thead>
+<tbody>
+<tr><td>Bit position</td><td>47</td><td>46</td><td>[45:40]</td><td>[39:24]</td><td>[23:16]</td><td>[15:8]</td><td>[7:1]</td><td>0</td></tr>
+<tr><td>Width</td><td>1</td><td>1</td><td>6</td><td>16</td><td>8</td><td>8</td><td>7</td><td>1</td></tr>
+<tr><td>Value</td><td>0b</td><td>0b</td><td>110100b</td><td>0000h</td><td>X</td><td>X</td><td>X</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: The R5 format for MMC cards differs from that of SDIO cards.</div>
+
+<h4 id="24.3.3.7-r6-response">24.3.3.7 R6 Response</h4>
+<p>A dedicated response that replies with the RCA, 48 bits total, with CRC7 check. The format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-12: R6 format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Start bit</th><th>Transmitter bit</th><th>Command index</th><th>Card RCA</th><th>Card status bits</th><th>CRC7</th><th>End bit</th></tr>
+</thead>
+<tbody>
+<tr><td>Bit position</td><td>47</td><td>46</td><td>[45:40]</td><td>[39:24]</td><td>[23:8]</td><td>[7:1]</td><td>0</td></tr>
+<tr><td>Width</td><td>1</td><td>1</td><td>6</td><td>16</td><td>16</td><td>7</td><td>1</td></tr>
+<tr><td>Value</td><td>0b</td><td>0b</td><td>000011b</td><td>X</td><td>X</td><td>X</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.3.3.8-r7-response">24.3.3.8 R7 Response</h4>
+<p>A dedicated response to CMD8, indicating the supported voltage information, 48 bits total, with CRC7 check. The format is shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-13: R7 format</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Start bit</th><th>Transmitter bit</th><th>Command index</th><th>Reserved</th><th>PCIe 1V2 support</th><th>PCIe response</th><th>Accepted voltage</th><th>Check pattern</th><th>CRC7</th><th>End bit</th></tr>
+</thead>
+<tbody>
+<tr><td>Bit position</td><td>47</td><td>46</td><td>[45:40]</td><td>[39:22]</td><td>21</td><td>20</td><td>[19:16]</td><td>[15:8]</td><td>[7:1]</td><td>0</td></tr>
+<tr><td>Width</td><td>1</td><td>1</td><td>6</td><td>18</td><td>1</td><td>1</td><td>4</td><td>8</td><td>7</td><td>1</td></tr>
+<tr><td>Value</td><td>0b</td><td>0b</td><td>001000b</td><td>00000h</td><td>X</td><td>X</td><td>X</td><td>X</td><td>X</td><td>1b</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.3.4-data-transfer">24.3.4 Data Transfer</h3>
+<p>Data transfer takes place on the data line SDIO_D, with three widths: 1/4/8 bits. During data transfer, a start bit of one clock period generally precedes the data, and each byte is transmitted with the most significant bit first and the least significant bit last. For SD cards, which only support block transfer mode, each block of data transfer is followed by a CRC check.</p>
+<p>By enabling the RANDOM_LEN_EN bit, configuring the byte length represented by DBLOCKSIZE2, configuring the total transfer data length represented by R32_SDIO_DLEN, enabling the DTEN bit, and writing data to R32_SDIO_FIFO, block transfer of any byte length with CRC check can be accomplished.</p>
+<p>MMC cards also support data stream transfer mode, which does not include CRC. The format of data transfer is shown in the figure below.</p>
+
+<figure><img src="figures/fig_24_9.png"><figcaption>Figure 24-9: SD card single-bus data transfer byte format</figcaption></figure>
+
+<figure><img src="figures/fig_24_10.png"><figcaption>Figure 24-10: SD card 4-bus data transfer byte format</figcaption></figure>
+
+<figure><img src="figures/fig_24_11.png"><figcaption>Figure 24-11: SD card single-bus data transfer format for a 512-bit word</figcaption></figure>
+
+<figure><img src="figures/fig_24_12.png"><figcaption>Figure 24-12: SD card 4-bus data transfer format for a 512-bit word</figcaption></figure>
+
+<h3 id="24.3.5-slave-mode">24.3.5 Slave Mode</h3>
+<p>By enabling the SLV_MODE bit, the controller enters a state waiting for host commands. The received command parameters are placed in RESP1, the received command index is placed in RESP2, and an R1-type response is automatically sent to the host, with the response parameter being the value of CMDARG.</p>
+<p>For data transmission and reception in slave mode, refer to the master mode. However, the slave can use the SLV_FORCE_ERR bit to force a data block CRC error, thereby indicating an undesired read or write.</p>
+<div class="note">Note: The slave only supports R1-type responses. The command indices and parameter meanings used for master-slave communication are all software-defined.</div>
+
+<h2 id="24.4-application">24.4 Application</h2>
+
+<h3 id="24.4.1-device-initialization-and-device-registers">24.4.1 Device Initialization and Device Registers</h3>
+
+<h4 id="24.4.1.1-ocr-register">24.4.1.1 OCR Register</h4>
+<p>The Operation Conditions Register stores information about the supply voltage accepted by the SD card and related status bits. The relevant bit definitions are shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-14: OCR register bit definitions</caption>
+<thead>
+<tr><th>Bit position</th><th>Bit definition</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>[0:3]</td><td>Reserved</td><td></td></tr>
+<tr><td>4</td><td>Reserved</td><td></td></tr>
+<tr><td>5</td><td>Reserved</td><td></td></tr>
+<tr><td>6</td><td>Reserved</td><td></td></tr>
+<tr><td>7</td><td>Reserved for low voltage range</td><td></td></tr>
+<tr><td>8</td><td>Reserved</td><td></td></tr>
+<tr><td>9</td><td>Reserved</td><td></td></tr>
+<tr><td>10</td><td>Reserved</td><td></td></tr>
+<tr><td>11</td><td>Reserved</td><td></td></tr>
+<tr><td>12</td><td>Reserved</td><td></td></tr>
+<tr><td>13</td><td>Reserved</td><td>Supported VDD33 voltage range, in volts</td></tr>
+<tr><td>14</td><td>Reserved</td><td></td></tr>
+<tr><td>15</td><td>2.7-2.8</td><td></td></tr>
+<tr><td>16</td><td>2.8-2.9</td><td></td></tr>
+<tr><td>17</td><td>2.9-3.0</td><td></td></tr>
+<tr><td>18</td><td>3.0-3.1</td><td></td></tr>
+<tr><td>19</td><td>3.1-3.2</td><td></td></tr>
+<tr><td>20</td><td>3.2-3.3</td><td></td></tr>
+<tr><td>21</td><td>3.3-3.4</td><td></td></tr>
+<tr><td>22</td><td>3.4-3.5</td><td></td></tr>
+<tr><td>23</td><td>3.5-3.6</td><td></td></tr>
+<tr><td>24</td><td>Accept switching to 1.8 V</td><td></td></tr>
+<tr><td>[25:26]</td><td>Reserved</td><td></td></tr>
+<tr><td>27</td><td>Over 2 TB support status bit</td><td></td></tr>
+<tr><td>28</td><td>Reserved</td><td></td></tr>
+<tr><td>29</td><td>UHS-II card status bit</td><td>When this bit is set, it indicates that this card supports the UHS-II interface</td></tr>
+<tr><td>30</td><td>Card capacity status (CCS)</td><td>When this bit is set, it indicates that the card capacity is greater than 2 GB</td></tr>
+<tr><td>31</td><td>Card power-up status bit (busy)</td><td>This bit is set after the card completes power-up. After power-up is complete, the other bits become meaningful</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.4.1.2-cid-register">24.4.1.2 CID Register</h4>
+<p>The CID stores some identification information.</p>
+
+<table class="data-table">
+<caption>Table 24-15: CID register field definitions</caption>
+<thead>
+<tr><th>Bit/Field name</th><th>Abbreviation</th><th>Width</th><th>Bit position</th></tr>
+</thead>
+<tbody>
+<tr><td>Manufacturer ID</td><td>MID</td><td>8</td><td>[127:120]</td></tr>
+<tr><td>Application ID</td><td>OID</td><td>16</td><td>[119:104]</td></tr>
+<tr><td>Product name</td><td>PNM</td><td>40</td><td>[103:64]</td></tr>
+<tr><td>Product revision</td><td>PRV</td><td>8</td><td>[63:56]</td></tr>
+<tr><td>Product serial number</td><td>PSN</td><td>32</td><td>[55:24]</td></tr>
+<tr><td>Reserved</td><td>None</td><td>4</td><td>[23:20]</td></tr>
+<tr><td>Manufacturing date</td><td>MDT</td><td>12</td><td>[19:8]</td></tr>
+<tr><td>CRC7</td><td>CRC</td><td>7</td><td>[7:1]</td></tr>
+<tr><td>Fixed bit, fixed at 1</td><td>None</td><td>1</td><td>[0]</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.4.1.3-csd-register">24.4.1.3 CSD Register</h4>
+<p>The CSD register stores the characteristic data of the SD card. Taking the most commonly used second-version CSD for SDHC and SDXC cards as an example, the field definitions are shown in the table below.</p>
+
+<table class="data-table">
+<caption>Table 24-16: CSD register field meanings</caption>
+<thead>
+<tr><th>Name</th><th>Abbreviation</th><th>Width</th><th>Value</th><th>Read/Write</th><th>Bit position</th></tr>
+</thead>
+<tbody>
+<tr><td>CSD version</td><td>CSD_STRUCTURE</td><td>2</td><td>01b</td><td>RO</td><td>[127:126]</td></tr>
+<tr><td>Reserved</td><td>None</td><td>6</td><td>00_0000b</td><td>RO</td><td>[125:120]</td></tr>
+<tr><td>Read access time</td><td>TAAC</td><td>8</td><td>0Eh</td><td>RO</td><td>[119:112]</td></tr>
+<tr><td>Read access time in clock cycles</td><td>NSAC</td><td>8</td><td>00h</td><td>RO</td><td>[111:104]</td></tr>
+<tr><td>Maximum data transfer speed</td><td>TRAN_SPEED</td><td>8</td><td>32h/5Ah/0Bh/2Bh</td><td>RO</td><td>[103:96]</td></tr>
+<tr><td>Card command classes</td><td>CCC</td><td>12</td><td>X1X1101101X1b</td><td>RO</td><td>[95:84]</td></tr>
+<tr><td>Maximum read data block length</td><td>READ_BL_LEN</td><td>4</td><td>9</td><td>RO</td><td>[83:80]</td></tr>
+<tr><td>Partial blocks read allowed</td><td>READ_BL_PARTIAL</td><td>1</td><td>0</td><td>RO</td><td>[79]</td></tr>
+<tr><td>Write block misalignment</td><td>WRITE_BLK_MISALIGN</td><td>1</td><td>0</td><td>RO</td><td>[78]</td></tr>
+<tr><td>Read block misalignment</td><td>READ_BLK_MISALIGN</td><td>1</td><td>0</td><td>RO</td><td>[77]</td></tr>
+<tr><td>DSR implemented</td><td>DSR_IMP</td><td>1</td><td>X</td><td>RO</td><td>[76]</td></tr>
+<tr><td>Reserved</td><td>None</td><td>6</td><td>00_0000b</td><td>RO</td><td>[75:70]</td></tr>
+<tr><td>Device size</td><td>C_SIZE</td><td>22</td><td>XXXXXXh</td><td>RO</td><td>[69:48]</td></tr>
+<tr><td>Reserved</td><td>None</td><td>1</td><td>0</td><td>RO</td><td>[47]</td></tr>
+<tr><td>Single block erase enabled</td><td>ERASE_BLK_EN</td><td>1</td><td>1</td><td>RO</td><td>[46]</td></tr>
+<tr><td>Erase sector size</td><td>SECTOR_SIZE</td><td>7</td><td>7Fh</td><td>RO</td><td>[45:39]</td></tr>
+<tr><td>Write protect group size</td><td>WP_GRP_SIZE</td><td>7</td><td>0000000b</td><td>RO</td><td>[38:32]</td></tr>
+<tr><td>Write protect group enable</td><td>WP_GRP_ENABLE</td><td>1</td><td>0</td><td>RO</td><td>[31]</td></tr>
+<tr><td>Reserved</td><td>None</td><td>2</td><td>00b</td><td>RO</td><td>[30:29]</td></tr>
+<tr><td>Write speed factor</td><td>R2W_FACTOR</td><td>3</td><td>010b</td><td>RO</td><td>[28:26]</td></tr>
+<tr><td>Maximum write data block length</td><td>WRITE_BL_LEN</td><td>4</td><td>9</td><td>RO</td><td>[25:22]</td></tr>
+<tr><td>Partial blocks write allowed</td><td>WRITE_BL_PARTIAL</td><td>1</td><td>0</td><td>RO</td><td>[21]</td></tr>
+<tr><td>Reserved</td><td>None</td><td>5</td><td>00000b</td><td>RO</td><td>[20:16]</td></tr>
+<tr><td>File format group</td><td>FILE_FORMAT_GRP</td><td>1</td><td>0</td><td>RO</td><td>[15]</td></tr>
+<tr><td>Copy flag</td><td>TMP_WRITE_PROTECT</td><td>1</td><td>X</td><td>RW OTP</td><td>[14]</td></tr>
+<tr><td>Permanent write protect</td><td>PERM_WRITE_PROTECT</td><td>1</td><td>X</td><td>RW OTP</td><td>[13]</td></tr>
+<tr><td>Temporary write protect</td><td>TMP_WRITE_PROTECT</td><td>1</td><td>X</td><td>RW</td><td>[12]</td></tr>
+<tr><td>File format</td><td>FILE_FOMAT</td><td>2</td><td>00b</td><td>RO</td><td>[11:10]</td></tr>
+<tr><td>Reserved</td><td>None</td><td>2</td><td>00b</td><td>RO</td><td>[9:8]</td></tr>
+<tr><td>CRC</td><td>CRC</td><td>7</td><td>0000000b</td><td>RW</td><td>[7:1]</td></tr>
+<tr><td>Unused, must be 1</td><td>None</td><td>1</td><td>1b</td><td>RO</td><td>[0]</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.4.1.4-rca-register">24.4.1.4 RCA Register</h4>
+<p>The Relative Card Address register stores the card address, is 16 bits, and the default value is 0.</p>
+
+<h3 id="24.4.2-voltage-switching">24.4.2 Voltage Switching</h3>
+<p>In the later stages of SD card initialization, an interface level switch is required to switch the IO level of the SD card's clock line, data line, and command line to the 1.8 V level. For devices with insufficient slew rate, using a lower level standard helps improve frequency. However, the SD power supply voltage does not necessarily change; only in newer versions of the protocol do SD cards with low-voltage power supply appear.</p>
+<p>The voltage switching steps are shown in the figure below.</p>
+
+<figure><img src="figures/fig_24_13.png"><figcaption>Figure 24-13: Voltage switching sequence</figcaption></figure>
+
+<h3 id="24.4.3-clock-switching">24.4.3 Clock Switching</h3>
+<p>During initialization, the SD card clock is only 400 kHz. After the voltage switch is complete, the clock can be raised to a higher level, for example, the first speed class of UHS-I mode for SDHC cards, where the bus clock can reach 80 MHz. Given the IO output capability of the microcontroller, the clock should be limited to within 50 MHz.</p>
+
+<h2 id="24.5-interrupts">24.5 Interrupts</h2>
+
+<h3 id="24.5.1-sdio-interrupt">24.5.1 SDIO Interrupt</h3>
+<p>The SDIO supports multiple interrupt sources. As shown in the interrupt enable register (R32_SDIO_IER), there are 24 conditions that can trigger interrupts. The user can enable them as needed.</p>
+
+<h3 id="24.5.2-sdio-device-interrupt">24.5.2 SDIO Device Interrupt</h3>
+<p>It should be noted that not only can the SDIO peripheral report interrupts to the CPU, but external SDIO cards and MMC cards can also report interrupts to the SDIO peripheral. In 4-bit bus mode, the interrupt line is D1; in 8-bit bus mode, the interrupt line is D7, both active low. If the SDIO detects D1 or D7 low in the idle state, it should read the SDIO device's status register or interrupt flag register to respond to the interrupt in a timely manner. The CPU can determine whether the SDIO host has received an interrupt through the SDIOIT bit of the R32_SDIO_STA register.</p>
+
+<h2 id="24.6-register-description">24.6 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 24-17: SDIO related register list</caption>
+<thead>
+<tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+</thead>
+<tbody>
+<tr><td>R32_SDIO_POWER</td><td>0x40018000</td><td>Power register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_CLKCR</td><td>0x40018004</td><td>Clock register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_ARG</td><td>0x40018008</td><td>Command argument register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_CMD</td><td>0x4001800C</td><td>Command register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_RESPCMD</td><td>0x40018010</td><td>Response register</td><td>0x00000000</td></tr>
+<tr><td>R128_SDIO_RESPX</td><td>0x40018014</td><td>Response parameter register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_DTIMER</td><td>0x40018024</td><td>Data timer register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_DLEN</td><td>0x40018028</td><td>Transfer length register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_DCTLR</td><td>0x4001802C</td><td>Data control register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_DCOUNT</td><td>0x40018030</td><td>Transfer count register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_STA</td><td>0x40018034</td><td>Status register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_ICR</td><td>0x40018038</td><td>Interrupt clear register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_MASK</td><td>0x4001803C</td><td>Interrupt enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_FIFOCNT</td><td>0x40018048</td><td>FIFO counter</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_DCTRL2</td><td>0x40018060</td><td>Data control register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_SDIO_FIFO</td><td>0x40018080</td><td>FIFO register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.1-power-register-r32_sdio_power">24.6.1 Power Register (R32_SDIO_POWER)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="14">Reserved</td><td colspan="2">PWRCTRL[1:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:2]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>PWRCTRL[1:0]</td><td>RW</td><td>Power control bits:<br>00: Power off, clock stopped;<br>01: Reserved;<br>10: Reserved power-up state;<br>11: Power-up state, card clock enabled.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.2-clock-register-r32_sdio_clkcr">24.6.2 Clock Register (R32_SDIO_CLKCR)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>HWFC_EN</td><td>NEGEDGE</td><td colspan="2">WIDBUS[1:0]</td><td>BYPASS</td><td>PWRSAV</td><td>CLKEN</td><td colspan="8">CLKDIV[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:15]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>HWFC_EN</td><td>RW</td><td>Hardware flow control enable bit. When this bit is set, the TXFIFOE and RXFIFOF signals take effect.<br>1: Enable hardware flow control;<br>0: Disable hardware flow control.</td><td>0</td></tr>
+<tr><td>13</td><td>NEGEDGE</td><td>RW</td><td>SDIO_CK phase selection bit:<br>1: Generate SDIO_CK on the falling edge of HCLK;<br>0: Generate SDIO_CK on the rising edge of HCLK.</td><td>0</td></tr>
+<tr><td>[12:11]</td><td>WIDBUS[1:0]</td><td>RW</td><td>Bus width configuration field:<br>00: 1-bit bus mode, uses SDIO_D0;<br>01: 4-bit bus mode, uses SDIO_D[3:0];<br>10: 8-bit bus mode, uses SDIO_D[7:0];<br>11: Not used.</td><td>0</td></tr>
+<tr><td>10</td><td>BYPASS</td><td>RW</td><td>Clock bypass enable bit:<br>1: SDIO_CK is directly connected to HCLK;<br>0: SDIO_CK is derived through the divider.<br>Note: When using this bit, the HWFC_EN bit must be enabled.</td><td>0</td></tr>
+<tr><td>9</td><td>PWRSAV</td><td>RW</td><td>Clock state configuration when idle. When this bit is set, SDIO_CK output is turned off when the bus is idle to save power.<br>1: SDIO_CK output only when needed;<br>0: SDIO_CK always outputs.</td><td>0</td></tr>
+<tr><td>8</td><td>CLKEN</td><td>RW</td><td>Clock enable bit:<br>1: SDIO_CK output enabled;<br>0: SDIO_CK output disabled.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>CLKDIV[7:0]</td><td>RW</td><td>Clock division factor field. This field represents the relationship between SDIO_CK and HCLK. SDIO_CK = HCLK / (CLKDIV + 2). Note that during the initialization phase, SDIO_CK should be below 400 kHz.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: (1) The clock configuration register is used to control parameters related to SDIO_CK. Note that this register must not be changed within 7 HCLK cycles during read/write data operations.<br>(2) In slave mode, there is no need to configure the clock register.</div>
+
+<h3 id="24.6.3-command-argument-register-r32_sdio_arg">24.6.3 Command Argument Register (R32_SDIO_ARG)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">CMDARG[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CMDARG[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>CMDARG</td><td>RW</td><td>Master mode: Command argument field. This field stores the parameters of the command, which are sent as part of the command onto the CMD line.<br>Slave mode: 32-bit response parameter register for slave reply.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.4-command-register-r32_sdio_cmd">24.6.4 Command Register (R32_SDIO_CMD)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>ATACMD</td><td>NIEN</td><td>ENCMDCompl</td><td>SDIOSuspend</td><td>CPSMEN</td><td>WAITPEND</td><td>WAITINT</td><td colspan="2">WAITRESP[1:0]</td><td colspan="6">CMDINDEX[5:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:15]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>14</td><td>ATACMD</td><td>RW</td><td>CE-ATA command. If this bit is set, CPSM will go to CMD61.</td><td>0</td></tr>
+<tr><td>13</td><td>NIEN</td><td>RW</td><td>CE-ATA interrupt not enable bit. If this bit is set, CE-ATA will not generate an interrupt.</td><td>0</td></tr>
+<tr><td>12</td><td>ENCMDCompl</td><td>RW</td><td>Enable CMD completion signal enable bit. If this bit is set, command completion will generate a signal.</td><td>0</td></tr>
+<tr><td>11</td><td>SDIOSuspend</td><td>RW</td><td>Suspend command send bit. If this bit is set, a suspend signal will be sent. Only applicable to SDIO cards.</td><td>0</td></tr>
+<tr><td>10</td><td>CPSMEN</td><td>RW</td><td>CPSM (Command Path State Machine) enable bit. If this bit is set, CPSM is enabled.</td><td>0</td></tr>
+<tr><td>9</td><td>WAITPEND</td><td>RW</td><td>Command wait control bit. If this bit is set, CPSM waits for data transfer to complete before sending the command.</td><td>0</td></tr>
+<tr><td>8</td><td>WAITINT</td><td>RW</td><td>Command wait interrupt control bit. If this bit is set, CPSM disables timeout control and waits for an interrupt to be generated.</td><td>0</td></tr>
+<tr><td>[7:6]</td><td>WAITRESP[1:0]</td><td>RW</td><td>Response type field. This field indicates the type of response expected by CPSM.<br>00: No response, wait for CMDSENT flag;<br>01: Short response, wait for CMDREND or CCRCFAIL flag;<br>10: No response, wait for CMDSENT flag;<br>11: Long response, wait for CMDREND or CCRCFAIL flag.</td><td>0</td></tr>
+<tr><td>[5:0]</td><td>CMDINDEX[5:0]</td><td>RW</td><td>Command index field. This field indicates the specific command value.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.5-response-register-r32_sdio_respcmd">24.6.5 Response Register (R32_SDIO_RESPCMD)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td colspan="6">RESPCMD[5:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[5:0]</td><td>RESPCMD[5:0]</td><td>RO</td><td>This field records the index value of the received response.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.6-response-parameter-register-r128_sdio_respx">24.6.6 Response Parameter Register (R128_SDIO_RESPX)</h3>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[127:0]</td><td>CARDSTATUSx</td><td>RO</td><td>Master mode: When the response is a long response, all 128 bits represent the card status; when the response is a short response, the lower 32 bits represent the card status. The SDIO peripheral receives the most significant bit of the card status first and stores it starting from the least significant bit of R128_SDIO_RESPX.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.6.6.1-response-parameter-register-high-32-bits-r128_sdio_resp1-127-96">24.6.6.1 Response Parameter Register High 32 Bits (R128_SDIO_RESP1[127:96])</h4>
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS1[127:112]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS1[111:96]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>CARDSTATUS1</td><td>RO</td><td>Master mode: Card status [127:96];<br>Slave mode: Received command parameters.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.6.6.2-response-parameter-register-second-high-32-bits-r128_sdio_resp2-95-64">24.6.6.2 Response Parameter Register Second-High 32 Bits (R128_SDIO_RESP2[95:64])</h4>
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS2[95:80]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS2[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>CARDSTATUS2</td><td>RO</td><td>Master mode: Card status [95:64];<br>Slave mode: Received command index.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.6.6.3-response-parameter-register-second-low-32-bits-r128_sdio_resp3-63-32">24.6.6.3 Response Parameter Register Second-Low 32 Bits (R128_SDIO_RESP3[63:32])</h4>
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS3[63:48]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS3[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>CARDSTATUS3</td><td>RO</td><td>Master mode: Card status [63:32].</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h4 id="24.6.6.4-response-parameter-register-low-32-bits-r128_sdio_resp4-31-0">24.6.6.4 Response Parameter Register Low 32 Bits (R128_SDIO_RESP4[31:0])</h4>
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS4[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CARDSTATUS4[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>CARDSTATUS4</td><td>RO</td><td>Master mode: Card status [31:0].</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.7-data-timer-register-r32_sdio_dtimer">24.6.7 Data Timer Register (R32_SDIO_DTIMER)</h3>
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">DATATIME[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DATATIME[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>DATATIME</td><td>RW</td><td>Data timeout duration. In units of SDIO_CK cycles.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.8-transfer-length-register-r32_sdio_dlen">24.6.8 Transfer Length Register (R32_SDIO_DLEN)</h3>
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td colspan="9">DATALENGTH[24:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DATALENGTH[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:25]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[24:0]</td><td>DATALENGTH[24:0]</td><td>RW</td><td>Transfer data length field. The value of this field is loaded into the transfer counter when the transfer is started. For block transfer, the value of this field must be an integer multiple of the block size. The block size is defined by the SDIO device and is stored in R32_SDIO_DCTLR[7:4]; a common value is 512 B, etc.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.9-data-control-register-r32_sdio_dctrl">24.6.9 Data Control Register (R32_SDIO_DCTRL)</h3>
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>SDIOEN</td><td>RWMOD</td><td>RWSTOP</td><td>RWSTART</td><td colspan="4">DBLOCKSIZE[3:0]</td><td>DMAEN</td><td>DTMODE</td><td>DTDIR</td><td>DTEN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>11</td><td>SDIOEN</td><td>RW</td><td>SDIO enable bit. When this bit is set, DPSM can perform some operations specific to SDIO cards.</td><td>0</td></tr>
+<tr><td>10</td><td>RWMOD</td><td>RW</td><td>Read wait mode:<br>1: Use SDIO_D2 to control read wait;<br>0: Stop SDIO_CK to control read wait.</td><td>0</td></tr>
+<tr><td>9</td><td>RWSTOP</td><td>RW</td><td>Read wait stop bit. If the RWSTART bit is set, the read wait will be stopped.</td><td>0</td></tr>
+<tr><td>8</td><td>RWSTART</td><td>RW</td><td>Read wait start bit. Setting this bit will execute a read wait operation.</td><td>0</td></tr>
+<tr><td>[7:4]</td><td>DBLOCKSIZE[3:0]</td><td>RW</td><td>Data block length field. This field stores the length of the data block. The block transfer length must be defined before block transfer. The value that can be written to this field is between 0 and 1110b, representing a block transfer length of 2<sup>BLKLEN</sup>, i.e., between 0 and 16384 bytes.</td><td>0</td></tr>
+<tr><td>3</td><td>DMAEN</td><td>RW</td><td>DMA enable bit:<br>1: Enable DMA;<br>0: Disable DMA.</td><td>0</td></tr>
+<tr><td>2</td><td>DTMODE</td><td>RW</td><td>Transfer mode setting bit. Setting this bit sets the transfer mode.<br>1: Stream transfer;<br>0: Block transfer.</td><td>0</td></tr>
+<tr><td>1</td><td>DTDIR</td><td>RW</td><td>Transfer direction setting bit. Setting this bit sets the transfer direction.<br>1: Card to controller;<br>0: Controller to card.</td><td>0</td></tr>
+<tr><td>0</td><td>DTEN</td><td>RW</td><td>Transfer enable bit. Setting this bit starts data transfer. The specific process is: after setting this bit, DPSM enters the Wait_S or Wait_R flow (depending on the transfer direction).</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.10-transfer-count-register-r32_sdio_dcount">24.6.10 Transfer Count Register (R32_SDIO_DCOUNT)</h3>
+<p><strong>Offset address:</strong> 0x30</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td colspan="9">DATACOUNT[24:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DATACOUNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:25]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[24:0]</td><td>DATACOUNT[24:0]</td><td>RO</td><td>Transfer data counter field. When the transfer is started, the value of the transfer length register is loaded into this counter and decremented during the transfer process.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.11-status-register-r32_sdio_sta">24.6.11 Status Register (R32_SDIO_STA)</h3>
+<p><strong>Offset address:</strong> 0x34</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td>CEATAEND</td><td>SDIOIT</td><td>RXDAVL</td><td>TXDAVL</td><td>RXFIFOE</td><td>TXFIFOE</td><td>RXFIFOF</td><td>TXFIFOF</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>RXFIFOHF</td><td>TXFIFOHE</td><td>RXACT</td><td>TXACT</td><td>CMDACT</td><td>DBCKEND</td><td>STBITERR</td><td>DATAEND</td><td>CMDSENT</td><td>CMDREND</td><td>RXOVERR</td><td>TXUNDERR</td><td>DTIMEOUT</td><td>CTIMEOUT</td><td>DCRCFAIL</td><td>CCRCFAIL</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>23</td><td>CEATAEND</td><td>RO</td><td>When this bit is set, CMD61 received CE-ATA completion signal.</td><td>0</td></tr>
+<tr><td>22</td><td>SDIOIT</td><td>RO</td><td>When this bit is set, SDIO received a device interrupt.</td><td>0</td></tr>
+<tr><td>21</td><td>RXDAVL</td><td>RO</td><td>When this bit is set, receive FIFO data available.</td><td>0</td></tr>
+<tr><td>20</td><td>TXDAVL</td><td>RO</td><td>When this bit is set, data available in transmit FIFO.</td><td>0</td></tr>
+<tr><td>19</td><td>RXFIFOE</td><td>RO</td><td>When this bit is set, receive FIFO empty.</td><td>0</td></tr>
+<tr><td>18</td><td>TXFIFOE</td><td>RO</td><td>When this bit is set, transmit FIFO empty.</td><td>0</td></tr>
+<tr><td>17</td><td>RXFIFOF</td><td>RO</td><td>When this bit is set, receive FIFO full.</td><td>0</td></tr>
+<tr><td>16</td><td>TXFIFOF</td><td>RO</td><td>When this bit is set, transmit FIFO full.</td><td>0</td></tr>
+<tr><td>15</td><td>RXFIFOHF</td><td>RO</td><td>When this bit is set, receive FIFO half full.</td><td>0</td></tr>
+<tr><td>14</td><td>TXFIFOHE</td><td>RO</td><td>When this bit is set, transmit FIFO half empty.</td><td>0</td></tr>
+<tr><td>13</td><td>RXACT</td><td>RO</td><td>When this bit is set, data is being received.</td><td>0</td></tr>
+<tr><td>12</td><td>TXACT</td><td>RO</td><td>When this bit is set, data is being transmitted.</td><td>0</td></tr>
+<tr><td>11</td><td>CMDACT</td><td>RO</td><td>When this bit is set, command is being transferred.</td><td>0</td></tr>
+<tr><td>10</td><td>DBCKEND</td><td>RO</td><td>When this bit is set, a data block has been sent or received and CRC check passed.</td><td>0</td></tr>
+<tr><td>9</td><td>STBITERR</td><td>RO</td><td>When this bit is set, in wide bus mode, no start signal was detected on any data line.</td><td>0</td></tr>
+<tr><td>8</td><td>DATAEND</td><td>RO</td><td>When this bit is set, data transfer ended (transfer counter is zero).</td><td>0</td></tr>
+<tr><td>7</td><td>CMDSENT</td><td>RO</td><td>When this bit is set, the command has been sent out.</td><td>0</td></tr>
+<tr><td>6</td><td>CMDREND</td><td>RO</td><td>When this bit is set, a response has been received and CRC check succeeded.</td><td>0</td></tr>
+<tr><td>5</td><td>RXOVERR</td><td>RO</td><td>When this bit is set, receive FIFO overrun.</td><td>0</td></tr>
+<tr><td>4</td><td>TXUNDERR</td><td>RO</td><td>When this bit is set, transmit FIFO underrun.</td><td>0</td></tr>
+<tr><td>3</td><td>DTIMEOUT</td><td>RO</td><td>When this bit is set, data timeout.</td><td>0</td></tr>
+<tr><td>2</td><td>CTIMEOUT</td><td>RO</td><td>When this bit is set, command timeout exceeded 64 SDIO_CK cycles.</td><td>0</td></tr>
+<tr><td>1</td><td>DCRCFAIL</td><td>RO</td><td>When this bit is set, a data block has been sent or received but CRC check failed.</td><td>0</td></tr>
+<tr><td>0</td><td>CCRCFAIL</td><td>RO</td><td>When this bit is set, a response has been received but CRC check failed.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.12-interrupt-clear-register-r32_sdio_icr">24.6.12 Interrupt Clear Register (R32_SDIO_ICR)</h3>
+<p><strong>Offset address:</strong> 0x38</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="9">Reserved</td><td>CEATAENDC</td><td>SDIOITC</td><td colspan="5">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>DBCKENDC</td><td>STBITERRC</td><td>DATAENDC</td><td>CMDSENTC</td><td>CMDRENDC</td><td>RXOVERRC</td><td>TXUNDERRC</td><td>DTIMEOUTC</td><td>CTIMEOUTC</td><td>DCRCFAILC</td><td>CCRCFAILC</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>23</td><td>CEATAENDC</td><td>RW</td><td>Setting this bit clears the CEATAEND bit in the status register.</td><td>0</td></tr>
+<tr><td>22</td><td>SDIOITC</td><td>RW</td><td>Setting this bit clears the SDIOIT bit in the status register.</td><td>0</td></tr>
+<tr><td>[21:11]</td><td>Reserved</td><td>RW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>10</td><td>DBCKENDC</td><td>RW</td><td>Setting this bit clears the DBCKEND bit in the status register.</td><td>0</td></tr>
+<tr><td>9</td><td>STBITERRC</td><td>RW</td><td>Setting this bit clears the STBITERR bit in the status register.</td><td>0</td></tr>
+<tr><td>8</td><td>DATAENDC</td><td>RW</td><td>Setting this bit clears the DATAEND bit in the status register.</td><td>0</td></tr>
+<tr><td>7</td><td>CMDSENTC</td><td>RW</td><td>Setting this bit clears the CMDSENT bit in the status register.</td><td>0</td></tr>
+<tr><td>6</td><td>CMDRENDC</td><td>RW</td><td>Setting this bit clears the CMDREND bit in the status register.</td><td>0</td></tr>
+<tr><td>5</td><td>RXOVERRC</td><td>RW</td><td>Setting this bit clears the RXOVERR bit in the status register.</td><td>0</td></tr>
+<tr><td>4</td><td>TXUNDERRC</td><td>RW</td><td>Setting this bit clears the TXUNDERR bit in the status register.</td><td>0</td></tr>
+<tr><td>3</td><td>DTIMEOUTC</td><td>RW</td><td>Setting this bit clears the DTIMEOUT bit in the status register.</td><td>0</td></tr>
+<tr><td>2</td><td>CTIMEOUTC</td><td>RW</td><td>Setting this bit clears the CTIMEOUT bit in the status register.</td><td>0</td></tr>
+<tr><td>1</td><td>DCRCFAILC</td><td>RW</td><td>Setting this bit clears the DCRCFAIL bit in the status register.</td><td>0</td></tr>
+<tr><td>0</td><td>CCRCFAILC</td><td>RW</td><td>Setting this bit clears the CCRCFAIL bit in the status register.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.13-interrupt-enable-register-r32_sdio_mask">24.6.13 Interrupt Enable Register (R32_SDIO_MASK)</h3>
+<p><strong>Offset address:</strong> 0x3C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="9">Reserved</td><td>CEATAENDIE</td><td>SDIOITIE</td><td>RXDAVLIE</td><td>TXDAVLIE</td><td>RXFIFOEIE</td><td>TXFIFOEIE</td><td>RXFIFOFIE</td><td>TXFIFOFIE</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>RXFIFOHFIE</td><td>TXFIFOHEIE</td><td>RXACTIE</td><td>TXACTIE</td><td>CMDACTIE</td><td>DBCKENDIE</td><td>STBITERRIE</td><td>DATAENDIE</td><td>CMDSENTIE</td><td>CMDRENDIE</td><td>RXOVERRIE</td><td>TXUNDERRIE</td><td>DTIMEOUTIE</td><td>CTIMEOUTIE</td><td>DCRCFAILIE</td><td>CCRCFAILIE</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>23</td><td>CEATAENDIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the CEATAEND bit is set in the status register.</td><td>0</td></tr>
+<tr><td>22</td><td>SDIOITIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the SDIOIT bit is set in the status register.</td><td>0</td></tr>
+<tr><td>21</td><td>RXDAVLIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the RXDAVL bit is set in the status register.</td><td>0</td></tr>
+<tr><td>20</td><td>TXDAVLIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the TXDAVL bit is set in the status register.</td><td>0</td></tr>
+<tr><td>19</td><td>RXFIFOEIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the RXFIFOE bit is set in the status register.</td><td>0</td></tr>
+<tr><td>18</td><td>TXFIFOEIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the TXFIFOE bit is set in the status register.</td><td>0</td></tr>
+<tr><td>17</td><td>RXFIFOFIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the RXFIFOF bit is set in the status register.</td><td>0</td></tr>
+<tr><td>16</td><td>TXFIFOFIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the TXFIFOF bit is set in the status register.</td><td>0</td></tr>
+<tr><td>15</td><td>RXFIFOHFIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the RXFIFOHF bit is set in the status register.</td><td>0</td></tr>
+<tr><td>14</td><td>TXFIFOHEIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the TXFIFOHE bit is set in the status register.</td><td>0</td></tr>
+<tr><td>13</td><td>RXACTIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the RXACT bit is set in the status register.</td><td>0</td></tr>
+<tr><td>12</td><td>TXACTIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the TXACT bit is set in the status register.</td><td>0</td></tr>
+<tr><td>11</td><td>CMDACTIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the CMDACT bit is set in the status register.</td><td>0</td></tr>
+<tr><td>10</td><td>DBCKENDIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the DBCKEND bit is set in the status register.</td><td>0</td></tr>
+<tr><td>9</td><td>STBITERRIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the STBITERR bit is set in the status register.</td><td>0</td></tr>
+<tr><td>8</td><td>DATAENDIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the DATAEND bit is set in the status register.</td><td>0</td></tr>
+<tr><td>7</td><td>CMDSENTIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the CMDSENT bit is set in the status register.</td><td>0</td></tr>
+<tr><td>6</td><td>CMDRENDIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the CMDREND bit is set in the status register.</td><td>0</td></tr>
+<tr><td>5</td><td>RXOVERRIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the RXOVERR bit is set in the status register.</td><td>0</td></tr>
+<tr><td>4</td><td>TXUNDERRIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the TXUNDERR bit is set in the status register.</td><td>0</td></tr>
+<tr><td>3</td><td>DTIMEOUTIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the DTIMEOUT bit is set in the status register.</td><td>0</td></tr>
+<tr><td>2</td><td>CTIMEOUTIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the CTIMEOUT bit is set in the status register.</td><td>0</td></tr>
+<tr><td>1</td><td>DCRCFAILIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the DCRCFAIL bit is set in the status register.</td><td>0</td></tr>
+<tr><td>0</td><td>CCRCFAILIE</td><td>RW</td><td>When this bit is set, an interrupt will be generated when the CCRCFAIL bit is set in the status register.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.14-fifo-count-register-r32_sdio_fifocnt">24.6.14 FIFO Count Register (R32_SDIO_FIFOCNT)</h3>
+<p><strong>Offset address:</strong> 0x48</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">FIFOCOUNT[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">FIFOCOUNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>FIFOCOUNT[31:0]</td><td>RO</td><td>The number of words (32-bit) that the FIFO contains that have not yet been written to the FIFO or have not yet been read from the FIFO. When setting R32_SDIO_DCTLR, if DPSM is idle, the FIFO counter will load the transfer length value from R32_SDIO_TLEN. If this value is not divisible by 4, the last 1 to 3 bytes will be treated as one word.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.15-data-control-register-2-r32_sdio_dctrl2">24.6.15 Data Control Register 2 (R32_SDIO_DCTRL2)</h3>
+<p><strong>Offset address:</strong> 0x60</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>SLV_CK_PHASE</td><td>SLV_FORCE_ERR</td><td>SLV_MODE</td><td colspan="7">Reserved</td><td>RANDOM_LEN_EN</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">DBLOCKSIZE2</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:27]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>26</td><td>SLV_CK_PHASE</td><td>RW</td><td>When SLV_MODE is 1, phase selection bit for DATA output in slave mode:<br>1: Output DATA on the falling edge of internal SDCK;<br>0: Output DATA on the rising edge of internal SDCK.<br>When SLV_MODE is 0:<br>1: Writing 0 to DTEN bit does not clear the FIFO;<br>0: Writing 0 to DTEN bit clears the FIFO.</td><td>0</td></tr>
+<tr><td>25</td><td>SLV_FORCE_ERR</td><td>RW</td><td>Software-forced data block CRC error in slave mode:<br>1: Software forces the data block CRC to an error value;<br>0: Use the hardware-correct CRC value.</td><td>0</td></tr>
+<tr><td>24</td><td>SLV_MODE</td><td>RW</td><td>Slave mode enable bit:<br>1: The controller CPSM and DPSM operate in slave mode;<br>0: The controller operates in master mode.</td><td>0</td></tr>
+<tr><td>[23:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>16</td><td>RANDOM_LEN_EN</td><td>RW</td><td>Data block arbitrary byte length enable bit:<br>1: The data block can be any length from 0 to 2048, with the length being DBLOCKSIZE2;<br>0: The data block can only be 2<sup>DBLOCKSIZE</sup> bytes.</td><td>0</td></tr>
+<tr><td>[15:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[11:0]</td><td>DBLOCKSIZE2</td><td>RW</td><td>Data block length field for arbitrary byte length mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="24.6.16-fifo-register-r32_sdio_fifo">24.6.16 FIFO Register (R32_SDIO_FIFO)</h3>
+<p><strong>Offset address:</strong> 0x80</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">FIFODATA[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">FIFODATA[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>FIFODATA[31:0]</td><td>RW</td><td>FIFO data field. This field is the FIFO data. Reading or writing this field reads out received data or writes data to be sent. The SDIO FIFO has a total of 32 words (one word is 32 bits).</td><td>0</td></tr>
+</tbody>
+</table>

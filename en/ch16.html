@@ -1,0 +1,374 @@
+<h1 id="chapter-16-basic-timer-bctm">Chapter 16: Basic Timer (BCTM)</h1>
+
+<p>The basic timer module contains two 16-bit auto-reload timers (TIM6 and TIM7), used for counting and generating interrupts or DMA requests on update events. TIM6 and TIM7 support a 16-bit programmable prescaler. They can provide a clock for the digital-to-analog converter (DAC) to trigger the DAC synchronization circuit. The basic timers are independent of each other and do not share any resources.</p>
+
+<h2 id="16.1-main-features">16.1 Main Features</h2>
+<p>The main features of the basic timer include:</p>
+<ul>
+<li>16-bit auto-reload counter, supports up-counting mode</li>
+<li>16-bit prescaler, with division factor dynamically adjustable from 1 to 65536</li>
+<li>Trigger DAC synchronization circuit</li>
+<li>Generate interrupt or DMA request on update event</li>
+</ul>
+
+<h2 id="16.2-principle-and-structure">16.2 Principle and Structure</h2>
+
+<figure><img src="figures/fig_16_1.png"><figcaption>Figure 16-1: Basic timer block diagram</figcaption></figure>
+
+<h3 id="16.2.1-overview">16.2.1 Overview</h3>
+
+<p>As shown in Figure 16-1, the structure of the basic timer can be roughly divided into two parts: the input clock section and the core counter section. The clock of the basic timer comes from the HB bus clock (CK_INT). These input clock signals undergo various configured filtering and division operations to become the CK_PSC clock, which is output to the core counter section. In addition, these complex clock sources can also be output as TRGO to the DAC peripheral.</p>
+
+<p>The core of the basic timer is a 16-bit counter (CNT). CK_PSC is divided by the prescaler (PSC) to become CK_CNT, which is finally fed to CNT. CNT supports up-counting mode and has an auto-reload register (ATRLR) that reloads the initialization value to CNT at the end of each counting cycle.</p>
+
+<h3 id="16.2.2-differences-between-basic-timer-and-general-purpose-timer">16.2.2 Differences Between Basic Timer and General-Purpose Timer</h3>
+
+<p>Compared with the general-purpose timer, the basic timer lacks the following functions:</p>
+<ol>
+<li>The basic timer lacks down-counting mode and up-down counting mode.</li>
+<li>The basic timer lacks four independent compare/capture channels.</li>
+<li>The basic timer does not support external signal control of the timer.</li>
+<li>The basic timer does not support incremental encoding, cascading and synchronization between timers.</li>
+</ol>
+
+<h3 id="16.2.3-clock-input">16.2.3 Clock Input</h3>
+
+<p>The clock of the basic timer is provided by the internal clock CK_INT.</p>
+
+<h3 id="16.2.4-counter-and-peripherals">16.2.4 Counter and Peripherals</h3>
+
+<p>CK_PSC is input to the prescaler (PSC) for division. PSC is 16-bit, and the actual division factor is equal to the value of R16_TIMx_PSC + 1. CK_PSC becomes CK_CNT after passing through PSC. Changing the value of R16_TIM1_PSC does not take effect immediately, but is updated to PSC after an update event. Update events include UG bit clearing and reset.</p>
+
+<h2 id="16.3-debug-mode">16.3 Debug Mode</h2>
+
+<p>When the system enters debug mode, the timer can be controlled to continue running or stop according to the DBG module settings.</p>
+
+<h2 id="16.4-register-description">16.4 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 16-1: TIM6 related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_TIM6_CTLR1</td><td>0x40001000</td><td>TIM6 control register 1</td><td>0x0000</td></tr>
+<tr><td>R16_TIM6_CTLR2</td><td>0x40001004</td><td>TIM6 control register 2</td><td>0x0000</td></tr>
+<tr><td>R16_TIM6_DMAINTENR</td><td>0x4000100C</td><td>TIM6 DMA/interrupt enable register</td><td>0x0000</td></tr>
+<tr><td>R16_TIM6_INTFR</td><td>0x40001010</td><td>TIM6 interrupt status register</td><td>0x0000</td></tr>
+<tr><td>R16_TIM6_SWEVGR</td><td>0x40001014</td><td>TIM6 event generation register</td><td>0x0000</td></tr>
+<tr><td>R16_TIM6_CNT</td><td>0x40001024</td><td>TIM6 counter</td><td>0x0000</td></tr>
+<tr><td>R16_TIM6_PSC</td><td>0x40001028</td><td>TIM6 counter clock prescaler</td><td>0x0000</td></tr>
+<tr><td>R16_TIM6_ATRLR</td><td>0x4000102C</td><td>TIM6 auto-reload register</td><td>0xFFFF</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 16-2: TIM7 related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_TIM7_CTLR1</td><td>0x40001400</td><td>TIM7 control register 1</td><td>0x0000</td></tr>
+<tr><td>R16_TIM7_CTLR2</td><td>0x40001404</td><td>TIM7 control register 2</td><td>0x0000</td></tr>
+<tr><td>R16_TIM7_DMAINTENR</td><td>0x4000140C</td><td>TIM7 DMA/interrupt enable register</td><td>0x0000</td></tr>
+<tr><td>R16_TIM7_INTFR</td><td>0x40001410</td><td>TIM7 interrupt status register</td><td>0x0000</td></tr>
+<tr><td>R16_TIM7_CNT</td><td>0x40001424</td><td>TIM7 counter</td><td>0x0000</td></tr>
+<tr><td>R16_TIM7_PSC</td><td>0x40001428</td><td>TIM7 counter clock prescaler</td><td>0x0000</td></tr>
+<tr><td>R16_TIM7_ATRLR</td><td>0x4000142C</td><td>TIM7 auto-reload register</td><td>0xFFFF</td></tr>
+</tbody>
+</table>
+
+<h3 id="16.4.1-control-register-1-timx_ctlr1-x-6-7">16.4.1 Control Register 1 (TIMx_CTLR1) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td>ARPE</td><td colspan="3">Reserved</td><td>OPM</td><td>URS</td><td>UDIS</td><td>CEN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>ARPE</td>
+<td>RW</td>
+<td>Auto-reload preload enable bit:<br>
+1: Enable auto-reload register (ATRLR);<br>
+0: Disable auto-reload register (ATRLR).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>OPM</td>
+<td>RW</td>
+<td>One-pulse mode.<br>
+1: The counter stops when the next update event occurs (clearing the CEN bit);<br>
+0: The counter does not stop when the next update event occurs.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>URS</td>
+<td>RW</td>
+<td>Update request source. Software uses this bit to select the source of UEV events.<br>
+1: If update interrupt or DMA request is enabled, only counter overflow/underflow generates update interrupt or DMA request;<br>
+0: If update interrupt or DMA request is enabled, any of the following events generates update interrupt or DMA request.<br>
+- Counter overflow/underflow<br>
+- Setting the UG bit<br>
+- Update generated by the slave mode controller.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>UDIS</td>
+<td>RW</td>
+<td>Update disable. Software uses this bit to allow/disable the generation of UEV events.<br>
+1: Disable UEV. No update event is generated, and registers (ATRLR, PSC, CHCTLRx) keep their values. If the UG bit is set or the slave mode controller sends a hardware reset, the counter and prescaler are reinitialized.<br>
+0: Enable UEV. Update (UEV) events are generated by any of the following events:<br>
+- Counter overflow/underflow<br>
+- Setting the UG bit<br>
+- Update generated by the slave mode controller. Buffered registers are loaded with their preload values.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>CEN</td>
+<td>RW</td>
+<td>Counter enable:<br>
+1: Enable counter;<br>
+0: Disable counter.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="16.4.2-control-register-2-timx_ctlr2-x-6-7">16.4.2 Control Register 2 (TIMx_CTLR2) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="9">Reserved</td><td colspan="3">MMS[2:0]</td><td colspan="4">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:4]</td>
+<td>MMS[2:0]</td>
+<td>RW</td>
+<td>Master mode selection. These 3 bits are used to select the synchronization information (TRGO) sent to the slave timer in master mode. Possible combinations are:<br>
+000: Reset – The UG bit is used as the trigger output (TRGO). If the reset is generated by a trigger input (slave mode controller in reset mode), the signal on TRGO will have a delay relative to the actual reset;<br>
+001: Enable – The counter enable signal CNT_EN is used as the trigger output (TRGO). Sometimes multiple timers need to be started at the same time or the slave timer needs to be enabled for a period of time. The counter enable signal is generated by a logical OR of the CEN control bit and the trigger input signal in gated mode. When the counter enable signal is controlled by the trigger input, there will be a delay on TRGO, unless master/slave mode is selected (see the description of the MSM bit in the TIMx_SMCFGR register);<br>
+010: Update event is selected as the trigger output (TRGO). For example, the clock of a master timer can be used as the prescaler of a slave timer.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="16.4.3-dma-interrupt-enable-register-timx_dmaintenr-x-6-7">16.4.3 DMA/Interrupt Enable Register (TIMx_DMAINTENR) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>UDE</td><td colspan="7">Reserved</td><td>UIE</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:9]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>UDE</td>
+<td>RW</td>
+<td>Update DMA request enable bit:<br>
+1: Enable update DMA request;<br>
+0: Disable update DMA request.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:1]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>UIE</td>
+<td>RW</td>
+<td>Update interrupt enable bit:<br>
+1: Enable update interrupt;<br>
+0: Disable update interrupt.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="16.4.4-interrupt-status-register-r16_timx_intfr-x-6-7">16.4.4 Interrupt Status Register (R16_TIMx_INTFR) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>UIF</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:1]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>UIF</td>
+<td>RW0</td>
+<td>Update interrupt flag. This bit is set by hardware when an update event occurs and cleared by software.<br>
+1: Update interrupt generated;<br>
+The following situations generate an update event:<br>
+If UDIS=0, when the repetition counter value overflows or underflows;<br>
+If URS=0, UDIS=0, when the UG bit is set, or when the core counter is reinitialized by software;<br>
+0: No update event generated.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="16.4.5-event-generation-register-timx_swevgr-x-6-7">16.4.5 Event Generation Register (TIMx_SWEVGR) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>UG</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:1]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>UG</td>
+<td>WO</td>
+<td>Update event generation bit. Generates an update event. This bit is set by software and automatically cleared by hardware.<br>
+1: Initialize the counter and generate an update event;<br>
+0: No action.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: The counter of the prescaler is also cleared, but the prescaler division factor remains unchanged. In up-counting mode, the core counter is cleared.</div>
+
+<h3 id="16.4.6-general-purpose-timer-counter-timx_cnt-x-6-7">16.4.6 General-Purpose Timer Counter (TIMx_CNT) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>CNT[15:0]</td>
+<td>RW</td>
+<td>Real-time value of the timer counter.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="16.4.7-counter-clock-prescaler-timx_psc-x-6-7">16.4.7 Counter Clock Prescaler (TIMx_PSC) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PSC[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>PSC[15:0]</td>
+<td>RW</td>
+<td>Division factor of the timer prescaler. The counter clock frequency is equal to the prescaler input frequency / (PSC+1).</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="16.4.8-auto-reload-register-timx_atrlr-x-6-7">16.4.8 Auto-Reload Register (TIMx_ATRLR) (x=6/7)</h3>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">ARR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>ARR[15:0]</td>
+<td>RW</td>
+<td>The value of ATRLR[15:0] will be loaded into the counter. For when ATRLR takes effect and updates, refer to Section 16.2.4. When ATRLR is empty, the counter stops.</td>
+<td>0xFFFF</td>
+</tr>
+</tbody>
+</table>

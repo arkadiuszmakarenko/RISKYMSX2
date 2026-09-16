@@ -1,8 +1,8 @@
 /********************************** (C) COPYRIGHT  *******************************
 * File Name          : ch32v4x7_ltdc.h
 * Author             : WCH
-* Version            : V1.0.0
-* Date               : 2025/12/01
+* Version            : V1.0.1
+* Date               : 2026/06/30
 * Description        : This file contains all the functions prototypes for the
 *                      LTDC firmware library.
 *********************************************************************************
@@ -225,6 +225,7 @@ FlagStatus LTDC_GetFlagStatus(uint32_t LTDC_FLAG);
 void LTDC_ClearFlag(uint32_t LTDC_FLAG);
 ITStatus LTDC_GetITStatus(uint32_t LTDC_IT);
 void LTDC_ClearITPendingBit(uint32_t LTDC_IT);
+void LTDC_DMA_Cmd(FunctionalState NewState);
 
 #ifdef __cplusplus
 }

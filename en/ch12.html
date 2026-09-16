@@ -1,0 +1,1541 @@
+<h1 id="chapter-12-analog-to-digital-conversion-adc">Chapter 12: Analog-to-Digital Conversion (ADC)</h1>
+
+<p>The ADC module contains two 12-bit successive approximation analog-to-digital converters with a maximum input clock of 30 MHz. It supports 16 external channels and 2 internal signal sources as sampling sources. It can perform single conversion, continuous conversion, automatic scan mode between channels, discontinuous mode, external trigger mode, and other functions on channels. The analog watchdog function can be used to monitor whether the channel voltage is within the threshold range.</p>
+
+<h2 id="12.1-main-features">12.1 Main Features</h2>
+<ul>
+<li>12-bit resolution</li>
+<li>Supports 16 external channels and 2 internal signal source sampling</li>
+<li>Multiple sampling conversion methods for multi-channel: single, continuous, scan, trigger, discontinuous, etc.</li>
+<li>Data alignment modes: left-aligned, right-aligned</li>
+<li>Sampling time is individually programmable per channel</li>
+<li>Both regular conversion and injected conversion support external trigger</li>
+<li>Analog watchdog monitors channel voltage</li>
+<li>ADC channel input range: 0 ≤ V<sub>IN</sub> ≤ V<sub>DDA</sub></li>
+<li>Adjustable input gain for small signal amplification sampling</li>
+</ul>
+
+<h2 id="12.2-functional-description">12.2 Functional Description</h2>
+
+<h3 id="12.2.1-module-structure">12.2.1 Module Structure</h3>
+
+<figure><img src="figures/fig_12_1.png"><figcaption>Figure 12-1: ADC module block diagram</figcaption></figure>
+
+<h3 id="12.2.2-adc-configuration">12.2.2 ADC Configuration</h3>
+
+<p><strong>1) Module power-up</strong><br>
+The ADON bit in the ADCx_CTLR2 register is set to 1 to power up the ADC module. When the ADC module transitions from power-down mode (ADON=0) to power-up state (ADON=1), a delay of t<sub>STAB</sub> is required for module stabilization. After that, writing ADON to 1 again serves as the software start signal to initiate ADC conversion. Clearing the ADON bit to 0 terminates the current conversion and puts the ADC module into power-down mode, in which state the ADC consumes almost no power.</p>
+
+<p><strong>2) Sampling clock</strong><br>
+The register operations of the module are based on the PCLK2 (PB2 bus) clock. Its conversion unit clock reference ADCCLK is synchronized with PCLK2 and is configured by the ADCPRE[1:0] field in the RCC_CFGR0 register, with a maximum of 30 MHz.</p>
+
+<p><strong>3) Channel configuration</strong><br>
+The ADC module provides 18 channel sampling sources, including 16 external channels and 2 internal channels. They can be configured into two conversion groups: the regular group and the injected group. This enables group conversions consisting of a series of conversions on any number of channels in any order.</p>
+
+<p>Conversion groups:</p>
+<ul>
+<li><strong>Regular group:</strong> Consists of up to 16 conversions. The regular channels and their conversion order are set in the ADCx_RSQRx registers. The total number of conversions in the regular group is written to L[3:0] in the ADCx_RSQR1 register.</li>
+<li><strong>Injected group:</strong> Consists of up to 4 conversions. The injected channels and their conversion order are set in the ADCx_ISQR register. The total number of conversions in the injected group is written to JL[1:0] in the ADCx_ISQR register.</li>
+</ul>
+
+<div class="note">Note: If the ADCx_RSQRx or ADCx_ISQR register is modified during a conversion, the current conversion is terminated and a new start signal is sent to the ADC to convert the newly selected group.</div>
+
+<p>The 2 internal channels:</p>
+<ul>
+<li><strong>Temperature sensor:</strong> Connected to the ADC_IN16 channel, used to measure the internal chip temperature.</li>
+<li><strong>VREFINT internal reference voltage:</strong> Connected to the ADC_IN17 channel.</li>
+</ul>
+
+<p><strong>4) Calibration</strong><br>
+Writing the RSTCAL bit in the ADCx_CTLR2 register to 1 initializes the calibration registers; wait for RSTCAL to be hardware-cleared to 0, indicating initialization is complete. Set the CAL bit to start the calibration function; once calibration is complete, the hardware automatically clears the CAL bit. Offset calibration is performed. After that, normal conversion functions can begin, with the offset value added after each ADC conversion. It is recommended to perform an ADC calibration once when the ADC module is powered up.</p>
+
+<div class="note">Note: Before starting calibration, the ADC module must be in the power-up state (ADON=1) for at least two ADC clock cycles.</div>
+
+<p><strong>5) Programmable sampling time</strong><br>
+The ADC uses a number of ADCCLK cycles to sample the input voltage. The number of sampling cycles for a channel can be changed via the SMPx[2:0] bits in the ADCx_SAMPTR1 and ADCx_SAMPTR2 registers. Each channel can be sampled using a different time individually.</p>
+
+<p>The total conversion time is calculated as follows:</p>
+<p>T<sub>CONV</sub> = Sampling time + 12.5 × T<sub>ADCCLK</sub></p>
+<p>The sampling time is determined by SMPx[2:0].</p>
+
+<p>The ADC regular channel conversion supports the DMA function. The regular channel conversion value is stored in a single data register, ADCx_RDATAR. To prevent the data in the ADCx_RDATAR register from not being read in time during continuous conversion of multiple regular channels, the ADC DMA function can be enabled. The hardware generates a DMA request at the end of the regular channel conversion (EOC set) and transfers the converted data from the ADCx_RDATAR register to the user-specified destination address.</p>
+
+<p>After configuring the channel of the DMA controller module, write the DMA bit in the ADCx_CTLR2 register to 1 to enable the ADC DMA function.</p>
+
+<div class="note">Note: The injected group conversion does not support the DMA function.</div>
+
+<p><strong>6) Data alignment</strong><br>
+The ALIGN bit in the ADCx_CTLR2 register selects the storage alignment mode of the ADC converted data. The 12-bit data supports left-aligned and right-aligned modes.</p>
+
+<p>The data register of the regular group channel, ADCx_RDATAR, stores the actual converted 12-bit digital value; while the data register of the injected group channel, ADCx_IDATARx, stores the value written after subtracting the offset defined in the ADCx_IOFRx register from the actual converted data. Since positive and negative values can occur, there is a sign bit (SIGNB).</p>
+
+<figure><img src="figures/fig_12_2.png"><figcaption>Figure 12-2: Data left alignment</figcaption></figure>
+
+<p>Regular group data register: D11 D10 D9 D8 D7 D6 D5 D4 D3 D2 D1 D0 0 0 0 0</p>
+<p>Injected group data register: SIGNB D11 D10 D9 D8 D7 D6 D5 D4 D3 D2 D1 D0 0 0 0</p>
+
+<figure><img src="figures/fig_12_3.png"><figcaption>Figure 12-3: Data right alignment</figcaption></figure>
+
+<p>Regular group data register: 0 0 0 0 D11 D10 D9 D8 D7 D6 D5 D4 D3 D2 D1 D0</p>
+<p>Injected group data register: SIGNB SIGNB SIGNB SIGNB D11 D10 D9 D8 D7 D6 D5 D4 D3 D2 D1 D0</p>
+
+<h3 id="12.2.3-external-trigger-sources">12.2.3 External Trigger Sources</h3>
+
+<p>The start event of an ADC conversion can be triggered by external events. If the EXTTRIG or JEXTTRIG bit in the ADCx_CTLR2 register is set, the conversion of the regular group or injected group channel can be triggered by an external event, respectively. In this case, the EXTSEL[2:0] and JEXTSEL[2:0] bit configurations determine the external event sources for the regular group and injected group.</p>
+
+<table class="data-table">
+<caption>Table 12-1: External trigger sources for regular group channels</caption>
+<thead><tr><th>EXTSEL[2:0]</th><th>Trigger source</th><th>Type</th></tr></thead>
+<tbody>
+<tr><td>000</td><td>Timer 1 CC1 event</td><td rowspan="6">Internal signal from on-chip timer</td></tr>
+<tr><td>001</td><td>Timer 1 CC2 event</td></tr>
+<tr><td>010</td><td>Timer 1 CC3 event</td></tr>
+<tr><td>011</td><td>Timer 2 CC2 event</td></tr>
+<tr><td>100</td><td>Timer 3 TRGO event</td></tr>
+<tr><td>101</td><td>Timer 4 CC4 event</td></tr>
+<tr><td>110</td><td>EXTI line 11 / TIM8_TRGO</td><td>External pin / internal timer signal</td></tr>
+<tr><td>111</td><td>SWSTART bit set to 1 software trigger</td><td>Software control bit</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 12-2: External trigger sources for injected group channels</caption>
+<thead><tr><th>JEXTSEL[2:0]</th><th>Trigger source</th><th>Type</th></tr></thead>
+<tbody>
+<tr><td>000</td><td>Timer 1 TRGO event</td><td rowspan="6">Internal signal from on-chip timer</td></tr>
+<tr><td>001</td><td>Timer 1 CC4 event</td></tr>
+<tr><td>010</td><td>Timer 2 TRGO event</td></tr>
+<tr><td>011</td><td>Timer 2 CC1 event</td></tr>
+<tr><td>100</td><td>Timer 3 CC4 event</td></tr>
+<tr><td>101</td><td>Timer 4 TRGO event</td></tr>
+<tr><td>110</td><td>EXTI line 15 / TIM8_CC4</td><td>External pin / internal timer signal</td></tr>
+<tr><td>111</td><td>JSWSTART bit set to 1 software trigger</td><td>Software control bit</td></tr>
+</tbody>
+</table>
+
+<h3 id="12.2.4-conversion-modes">12.2.4 Conversion Modes</h3>
+
+<table class="data-table">
+<caption>Table 12-3: Conversion mode combinations</caption>
+<thead><tr><th>CONT</th><th>SCAN</th><th>DISCEN/JDISCEN</th><th>IAUTO</th><th>Start event</th><th>ADC conversion mode</th></tr></thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>ADON bit set to 1</td>
+<td>Single single-channel mode: A single conversion is performed on one regular channel.</td>
+</tr>
+<tr>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>External trigger</td>
+<td>Single single-channel mode: A single conversion is performed on one channel of a regular channel or injected channel.</td>
+</tr>
+<tr>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>ADON bit set to 1 or external trigger</td>
+<td>Single scan mode: All selected regular group channels (ADCx_RSQRx) or all injected group channels (ADCx_ISQR) are sequentially converted one by one in a single pass.</td>
+</tr>
+<tr>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>ADON bit set to 1 or external trigger</td>
+<td>Single scan mode: All selected regular group channels (ADCx_RSQRx) or all injected group channels (ADCx_ISQR) are sequentially converted one by one in a single pass.<br>Auto-injection mode: After the regular group channel conversion is complete, the injected group channels are automatically converted.<br>Note: External trigger signals for injected channels are not allowed during conversion.</td>
+</tr>
+<tr>
+<td>0</td>
+<td>0</td>
+<td>1 (DISCEN and JDISCEN cannot both be 1)</td>
+<td>0</td>
+<td>External trigger</td>
+<td>Single discontinuous mode: Each start event executes a short sequence (number defined by DISCNUM[2:0]) of channel conversions, until all selected channels are converted, then it restarts from the beginning.<br>Note: The control bits for selecting this mode for the regular group and injected group are DISCEN and JDISCEN, respectively. Discontinuous mode cannot be configured for both the regular group and the injected group at the same time; discontinuous mode can only be used for one group of conversions.</td>
+</tr>
+<tr>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>-</td>
+<td>-</td>
+<td>This mode is disabled.</td>
+</tr>
+<tr>
+<td>1</td>
+<td>1</td>
+<td>X</td>
+<td>-</td>
+<td>-</td>
+<td>No such mode.</td>
+</tr>
+<tr>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>ADON bit set to 1 or external trigger</td>
+<td>Continuous single-channel/scan mode: After each round completes, a new round of conversion repeats until CONT is cleared to 0 to terminate.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: The external trigger events for the regular group and injected group are different, and the ADON bit can only start regular group channel conversion. Therefore, the start events for regular group and injected group channel conversions are independent.</div>
+
+<p><strong>1) Single single-channel conversion mode</strong><br>
+In this mode, only one conversion is performed on the current channel. This mode performs a conversion on the channel ranked first in the regular group or injected group. It can be started by setting the ADON bit in the ADCx_CTLR2 register to 1 (only applicable to regular channels) or by an external trigger (applicable to regular or injected channels). Once the selected channel conversion is complete:</p>
+
+<p>If a regular group channel is converted, the conversion data is stored in the 16-bit ADCx_RDATAR register, the EOC flag is set, and if the EOCIE bit is set, an ADC interrupt is triggered.</p>
+
+<p>If an injected group channel is converted, the conversion data is stored in the 16-bit ADCx_IDATAR1 register, both EOC and JEOC flags are set, and if the JEOCIE or EOCIE bit is set, an ADC interrupt is triggered.</p>
+
+<p><strong>2) Single scan mode conversion</strong><br>
+The ADC scan mode is entered by setting the SCAN bit in the ADCx_CTLR1 register to 1. This mode is used to scan a group of analog channels, performing a single conversion on each of all channels selected by the ADCx_RSQRx register (for regular channels) or ADCx_ISQR (for injected channels). When the current channel conversion ends, the next channel in the same group is automatically converted.</p>
+
+<p>In scan mode, depending on the state of the IAUTO bit, it is further divided into triggered injection mode and auto-injection mode.</p>
+
+<p><strong>Triggered injection</strong><br>
+When IAUTO is 0, if a trigger event for the injected group channel conversion occurs during the scanning of regular group channels, the current conversion is reset and the injected channel sequence is executed in a single scan mode. After all selected injected group channels have been scanned and converted, the interrupted regular group channel conversion resumes.</p>
+
+<p>If a regular channel start event occurs while scanning the injected group channel sequence, the injected group conversion is not interrupted; instead, the regular sequence conversion is executed after the injected sequence conversion is complete.</p>
+
+<div class="note">Note: When using triggered injection conversion, the interval between trigger events must be longer than the injected sequence. For example, if completing the injected sequence conversion requires a total time of 28 ADCCLK cycles, the minimum interval between trigger events for the injected channel is 29 ADCCLK cycles.</div>
+
+<p><strong>Auto-injection</strong><br>
+When IAUTO is 1, after scanning all selected regular group channels, the selected injected group channels are automatically converted. This method can be used to convert a sequence of up to 20 conversions in the ADCx_RSQRx and ADCx_ISQR registers.</p>
+
+<p>In this mode, the external trigger of the injected channel must be disabled (JEXTTRIG=0).</p>
+
+<div class="note">Note: For ADC clock prescaler coefficients (ADCPRE[1:0]) of 4 to 8, when switching from regular conversion to injected sequence or from injected conversion to regular sequence, 1 ADCCLK interval is automatically inserted; when the ADC clock prescaler coefficient is 2, there is a delay of 2 ADCCLK intervals.</div>
+
+<p><strong>3) Single discontinuous mode conversion</strong><br>
+The discontinuous mode for the regular group or injected group is entered by setting the DISCEN or JDISCEN bit in the ADCx_CTLR1 register to 1. This mode differs from scan mode in that instead of scanning a complete group of channels, it divides a group of channels into multiple short sequences. Each external trigger event executes a short sequence of scan conversions.</p>
+
+<p>The length n (n ≤ 8) of the short sequence is defined in DISCNUM[2:0] in the ADCx_CTLR1 register. When DISCEN is 1, it is the discontinuous mode for the regular group, and the total length to be converted is defined in L[3:0] in the ADCx_RSQR1 register; when JDISCEN is 1, it is the discontinuous mode for the injected group, and the total length to be converted is defined in JL[1:0] in the ADCx_ISQR register. The regular group and injected group cannot be set to discontinuous mode at the same time.</p>
+
+<p>Example of regular group discontinuous mode:<br>
+DISCEN=1, DISCNUM[2:0]=3, L[3:0]=8, channels to be converted = 1, 3, 2, 5, 8, 4, 7, 6</p>
+<ul>
+<li>1st external trigger: conversion sequence: 1, 3, 2</li>
+<li>2nd external trigger: conversion sequence: 5, 8, 4</li>
+<li>3rd external trigger: conversion sequence: 7, 6, and EOC event is generated</li>
+<li>4th external trigger: conversion sequence: 1, 3, 2</li>
+</ul>
+
+<p>Example of injected group discontinuous mode:<br>
+JDISCEN=1, DISCNUM[2:0]=1, JL[1:0]=3, channels to be converted = 1, 3, 2</p>
+<ul>
+<li>1st external trigger: conversion sequence: 1</li>
+<li>2nd external trigger: conversion sequence: 3</li>
+<li>3rd external trigger: conversion sequence: 2, and EOC and JEOC events are generated</li>
+<li>4th external trigger: conversion sequence: 1</li>
+</ul>
+
+<div class="note">Note:<br>
+1. When converting a regular group or injected group in discontinuous mode, the conversion sequence does not automatically restart from the beginning after it ends. When all sub-groups have been converted, the next trigger event starts the conversion of the first sub-group.<br>
+2. Auto-injection (IAUTO=1) and discontinuous mode cannot be used simultaneously.<br>
+3. Discontinuous mode cannot be set for both the regular group and the injected group at the same time; discontinuous mode can only be used for one group of conversions.<br>
+4. In the discontinuous mode of the injected group, the number of injected channels to be converted after an external trigger is 1.</div>
+
+<p><strong>4) Continuous conversion</strong><br>
+In continuous conversion mode, as soon as the previous ADC conversion ends, another conversion is started immediately. The conversion does not stop on the last channel of the selected group but continues from the first channel of the selected group again. The start events for this mode include external trigger events and setting the ADON bit to 1. After starting, the CONT bit must be set to 1.</p>
+
+<p>If a regular channel is converted, the conversion data is stored in the ADCx_RDATAR register, the EOC end-of-conversion flag is set, and if EOCIE is set, an interrupt is generated.</p>
+
+<p>If an injected channel is converted, the conversion data is stored in the ADCx_IDATARx register, the JEOC injected end-of-conversion flag is set, and if JEOCIE is set, an interrupt is generated.</p>
+
+<h3 id="12.2.5-analog-watchdog">12.2.5 Analog Watchdog</h3>
+
+<p>If the analog voltage converted by the ADC is below the low threshold or above the high threshold, the AWD analog watchdog status bit is set. The threshold settings are located in the lowest 12 significant bits of the ADCx_WDHTR and ADCx_WDLTR registers. Setting the AWDIE bit in the ADCx_CTLR1 register allows the corresponding interrupt to be generated. Setting the AWDRST_EN bit in the ADCx_CFG register enables the analog watchdog reset.</p>
+
+<figure><img src="figures/fig_12_4.png"><figcaption>Figure 12-4: Analog watchdog threshold region</figcaption></figure>
+
+<p>Configure the AWDSGL, AWDEN, JAWDEN, and AWDCH[4:0] bits in the ADCx_CTLR1 register to select the channel(s) guarded by the analog watchdog. The specific relationships are shown in the table below:</p>
+
+<table class="data-table">
+<caption>Table 12-4: Analog watchdog channel selection</caption>
+<thead><tr><th>Analog watchdog guarded channel</th><th>AWDSGL</th><th>AWDEN</th><th>JAWDEN</th><th>AWDCH[4:0]</th></tr></thead>
+<tbody>
+<tr><td>No guarding</td><td>X</td><td>0</td><td>0</td><td>X</td></tr>
+<tr><td>All injected channels</td><td>0</td><td>0</td><td>1</td><td>X</td></tr>
+<tr><td>All regular channels</td><td>0</td><td>1</td><td>0</td><td>X</td></tr>
+<tr><td>All injected and regular channels</td><td>0</td><td>1</td><td>1</td><td>X</td></tr>
+<tr><td>Single injected channel</td><td>1</td><td>0</td><td>1</td><td>Determines channel number</td></tr>
+<tr><td>Single regular channel</td><td>1</td><td>1</td><td>0</td><td>Determines channel number</td></tr>
+<tr><td>Single injected and regular channel</td><td>1</td><td>1</td><td>1</td><td>Determines channel number</td></tr>
+</tbody>
+</table>
+
+<h3 id="12.2.6-temperature-sensor">12.2.6 Temperature Sensor</h3>
+
+<p>The chip has a built-in temperature sensor connected to the ADC_INT16 channel. The ADC converts the sensor output voltage to a digital value to reflect the internal chip temperature. The recommended sampling time setting is 17.1 μs. The voltage output by the temperature sensor varies linearly with temperature. Due to manufacturing dispersion, the slope and offset of the linear variation curve differ; therefore, the internal temperature sensor is more suitable for detecting temperature changes rather than measuring absolute temperature. If precise temperature measurement is required, an external temperature sensor should be used.</p>
+
+<p>Setting the TSVREFE bit in the ADCx_CTLR2 register to 1 wakes up the ADC internal sampling channel. Software start or external trigger starts the ADC temperature sensor channel conversion, and the data result (mV) is read. The conversion formula between the digital value and temperature (°C) is as follows:</p>
+
+<p>Temperature (°C) = ((V<sub>SENSE</sub> − V<sub>25</sub>) / Avg_Slope) + 25</p>
+
+<ul>
+<li>V<sub>25</sub>: Voltage value of the temperature sensor at 25 °C</li>
+<li>Avg_Slope: Average slope of the temperature vs. V<sub>SENSE</sub> curve (mV/°C)</li>
+</ul>
+
+<p>Refer to the electrical characteristics section of the datasheet for the actual values of V<sub>25</sub> and Avg_Slope.</p>
+
+<div class="note">Note: The internal temperature sensor power-up (TSVREFE bit changed from 0 to 1) requires a settling time, and the ADC module power-up (ADON bit changed from 0 to 1) also requires a settling time. To shorten the wait time, the ADON and TSVREFE bits can be set simultaneously.</div>
+
+<h3 id="12.2.7-dual-adc-mode">12.2.7 Dual ADC Mode</h3>
+
+<p>In products with two ADC modules, the two ADCs can be used together to realize dual ADC mode. In dual ADC mode, ADC1 is the master ADC and ADC2 is the slave ADC. By configuring DUALMODE[3:0] in ADC1_CTLR1, the mode is selected to achieve alternating or synchronous trigger conversion of ADC1 and ADC2.</p>
+
+<div class="note">Note: In dual ADC mode, when selecting external trigger events for triggering, the user must enable the external trigger of both the master and slave ADCs, and set the master ADC to the corresponding trigger and the slave ADC to software trigger, to prevent unnecessary triggers from causing the slave ADC to perform conversions.</div>
+
+<p>The following modes can be configured:</p>
+<ul>
+<li>Independent mode</li>
+<li>Synchronous injection mode</li>
+<li>Synchronous regular mode</li>
+<li>Fast alternate mode</li>
+<li>Slow alternate mode</li>
+<li>Alternating trigger mode</li>
+<li>Synchronous regular mode + synchronous injection mode</li>
+<li>Synchronous regular mode + alternating trigger mode</li>
+<li>Synchronous injection mode + fast alternate mode</li>
+<li>Synchronous injection mode + slow alternate mode</li>
+</ul>
+
+<div class="note">Note: In dual ADC mode, to read the slave ADC conversion data from the master data register, the DMA bit must be enabled.</div>
+
+<figure><img src="figures/fig_12_5.png"><figcaption>Figure 12-5: Dual ADC block diagram</figcaption></figure>
+
+<p><strong>1) Independent mode</strong><br>
+In this mode, the dual ADCs do not operate synchronously; each works independently.</p>
+
+<p><strong>2) Synchronous injection mode</strong><br>
+This mode is used to convert an injected channel group. Set JEXTSEL[2:0] in ADC1_CTLR2 to select the trigger source, which is also used to synchronously trigger ADC2. When the conversion is complete, the converted data is stored in ADCx_IDATARx of each ADC, and if any ADC interrupt is enabled, a JEOC interrupt is generated after the conversion ends.</p>
+
+<figure><img src="figures/fig_12_6.png"><figcaption>Figure 12-6: 4-channel synchronous injection conversion</figcaption></figure>
+
+<div class="note">Note:<br>
+1. The conversion channels of ADC1 and ADC2 should not overlap at the same time.<br>
+2. In synchronous mode, ADC1 and ADC2 should have conversion sequences of the same time length, or the time length of the longer conversion sequence should be less than the trigger time interval, to ensure that both sequences can complete conversion on each trigger.</div>
+
+<p><strong>3) Synchronous regular mode</strong><br>
+This mode is used to convert a regular channel sequence. Set EXTSEL[2:0] in ADC1_CTLR2 to select the trigger source, which is also used to synchronously trigger ADC2. When the conversion is complete, a 32-bit DMA transfer request is generated to transfer the contents of the data register ADC1_RDATAR to SRAM. The upper 16 bits contain the ADC2 conversion data, and the lower 16 bits contain the ADC1 conversion data. If any ADC interrupt is enabled, an EOC interrupt is generated.</p>
+
+<figure><img src="figures/fig_12_7.png"><figcaption>Figure 12-7: 16-channel synchronous regular conversion</figcaption></figure>
+
+<div class="note">Note:<br>
+1. The conversion channels of ADC1 and ADC2 should not overlap at the same time.<br>
+2. In synchronous mode, ADC1 and ADC2 should have conversion sequences of the same time length, or the time length of the longer conversion sequence should be less than the trigger time interval, to ensure that both sequences can complete conversion on each trigger.</div>
+
+<p><strong>4) Fast alternate mode</strong><br>
+This mode is only applicable to regular channels (typically only one channel). Set EXTSEL[2:0] in ADC1_CTLR2 to select the trigger source. When a trigger is generated, ADC2 starts conversion immediately, and ADC1 starts conversion after a delay of 7 ADC clock cycles. If continuous mode is enabled for both (CONT set), the two ADCs will continuously alternate conversion on the regular channel. If interrupts are enabled, ADC1 generates an EOC interrupt. If DMA is also enabled, a 32-bit DMA transfer request is generated to transfer the contents of the data register ADC1_RDATAR to SRAM. The upper 16 bits contain the ADC2 conversion data, and the lower 16 bits contain the ADC1 conversion data.</p>
+
+<figure><img src="figures/fig_12_8.png"><figcaption>Figure 12-8: Single-channel fast alternate continuous conversion</figcaption></figure>
+
+<div class="note">Note: The sampling time should be less than 7 ADC clock cycles to avoid overlap of sampling periods when ADC1 and ADC2 sample the same channel.</div>
+
+<p><strong>5) Slow alternate mode</strong><br>
+This mode is only applicable to regular channels and only one channel. Set EXTSEL[2:0] in ADC1_CTLR2 to select the trigger source. When a trigger is generated, ADC2 starts conversion immediately, and ADC1 starts conversion after a delay of 14 ADC clock cycles. After another delay of 14 ADC clock cycles, ADC2 starts again, and so on in a cycle. If interrupts are enabled, ADC1 generates an EOC interrupt. If DMA is also enabled, a 32-bit DMA transfer request is generated to transfer the contents of the data register ADC1_RDATAR to SRAM. The upper 16 bits contain the ADC2 conversion data, and the lower 16 bits contain the ADC1 conversion data.</p>
+
+<figure><img src="figures/fig_12_9.png"><figcaption>Figure 12-9: Single-channel slow alternate conversion</figcaption></figure>
+
+<div class="note">Note:<br>
+1. The sampling time should be less than 14 ADC clock cycles to avoid overlap with the next sampling period.<br>
+2. A new ADC2 conversion is automatically started after 28 ADC clock cycles.<br>
+3. The CONT bit does not need to be set.</div>
+
+<p><strong>6) Alternating trigger mode</strong><br>
+This mode is only applicable to injected channel groups. Set JEXTSEL[2:0] in ADC1_CTLR2 to select the trigger source. When the first trigger event occurs, all injected channels on ADC1 are converted. When the second trigger event occurs, all injected channels on ADC2 are converted. This alternates in a cycle. If interrupts are enabled, a JEOC interrupt is generated when all injected channels of ADC1 have completed conversion, and a JEOC interrupt is generated when all injected channels of ADC2 have completed conversion.</p>
+
+<figure><img src="figures/fig_12_10.png"><figcaption>Figure 12-10: Alternating trigger conversion of each ADC injected channel group</figcaption></figure>
+
+<p>If injected discontinuous mode is used simultaneously, when the first trigger event occurs, the first injected channel on ADC1 is converted. When the second trigger event occurs, the first injected channel on ADC2 is converted. This alternates in a cycle. If interrupts are enabled, a JEOC interrupt is generated when all injected channels of ADC1 have completed conversion, and a JEOC interrupt is generated when all injected channels of ADC2 have completed conversion.</p>
+
+<figure><img src="figures/fig_12_11.png"><figcaption>Figure 12-11: Alternating trigger conversion of each ADC injected channel in discontinuous mode</figcaption></figure>
+
+<p><strong>7) Synchronous regular mode + synchronous injection mode</strong><br>
+In this mode, the synchronous conversion of the regular group can be interrupted to start the synchronous conversion of the injected group. This mode requires that the conversions have sequences of the same time length, or that the trigger time interval is longer than the time of the longer sequence of the two.</p>
+
+<p><strong>8) Synchronous regular mode + alternating trigger mode</strong><br>
+In this mode, the synchronous conversion of the regular group can be interrupted to start the alternating trigger conversion of the injected group. When an injection event occurs, the alternating trigger conversion starts immediately. If synchronous regular conversion is in progress, the regular conversion of all ADCs is stopped and synchronously resumes after the injected conversion ends.</p>
+
+<figure><img src="figures/fig_12_12.png"><figcaption>Figure 12-12: Alternating trigger injected channel conversion under synchronous regular mode</figcaption></figure>
+
+<div class="note">Note: This mode requires that the conversions have sequences of the same time length, or that the trigger time interval is longer than the time of the longer sequence of the two.</div>
+
+<p>If an injected trigger event occurs during an injected conversion that has already interrupted a regular conversion, the trigger event is ignored, as shown in the figure below for the 2nd trigger.</p>
+
+<figure><img src="figures/fig_12_13.png"><figcaption>Figure 12-13: Trigger event occurring during injected conversion</figcaption></figure>
+
+<p><strong>9) Synchronous injection mode + alternate mode</strong><br>
+In this mode, the injected conversion can interrupt the alternate conversion. When an injection event occurs, the alternate conversion is interrupted and the injected conversion starts. After the injected conversion ends, the alternate conversion is resumed.</p>
+
+<figure><img src="figures/fig_12_14.png"><figcaption>Figure 12-14: Triggering injected group conversion during alternate conversion</figcaption></figure>
+
+<div class="note">Note: When the ADC prescaler coefficient is 4, after the alternate conversion is resumed, the sampling interval is no longer a uniform 7 ADC clocks; it alternates between 8 and 6 clock cycles.</div>
+
+<h2 id="12.3-register-description">12.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 12-5: ADC1 related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_ADC1_STATR</td><td>0x40012400</td><td>ADC1 status register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_CTLR1</td><td>0x40012404</td><td>ADC1 control register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_CTLR2</td><td>0x40012408</td><td>ADC1 control register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_SAMPTR1</td><td>0x4001240C</td><td>ADC1 sampling time configuration register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_SAMPTR2</td><td>0x40012410</td><td>ADC1 sampling time configuration register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IOFR1</td><td>0x40012414</td><td>ADC1 injected channel data offset register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IOFR2</td><td>0x40012418</td><td>ADC1 injected channel data offset register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IOFR3</td><td>0x4001241C</td><td>ADC1 injected channel data offset register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IOFR4</td><td>0x40012420</td><td>ADC1 injected channel data offset register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_WDHTR</td><td>0x40012424</td><td>ADC1 watchdog high threshold register</td><td>0x00000FFF</td></tr>
+<tr><td>R32_ADC1_WDLTR</td><td>0x40012428</td><td>ADC1 watchdog low threshold register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_RSQR1</td><td>0x4001242C</td><td>ADC1 regular channel sequence register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_RSQR2</td><td>0x40012430</td><td>ADC1 regular channel sequence register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_RSQR3</td><td>0x40012434</td><td>ADC1 regular channel sequence register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_ISQR</td><td>0x40012438</td><td>ADC1 injected channel sequence register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IDATAR1</td><td>0x4001243C</td><td>ADC1 injected data register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IDATAR2</td><td>0x40012440</td><td>ADC1 injected data register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IDATAR3</td><td>0x40012444</td><td>ADC1 injected data register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_IDATAR4</td><td>0x40012448</td><td>ADC1 injected data register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_RDATAR</td><td>0x4001244C</td><td>ADC1 regular data register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC1_AUX</td><td>0x40012454</td><td>ADC1 sampling time register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 12-6: ADC2 related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_ADC2_STATR</td><td>0x40012800</td><td>ADC2 status register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_CTLR1</td><td>0x40012804</td><td>ADC2 control register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_CTLR2</td><td>0x40012808</td><td>ADC2 control register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_SAMPTR1</td><td>0x4001280C</td><td>ADC2 sampling time configuration register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_SAMPTR2</td><td>0x40012810</td><td>ADC2 sampling time configuration register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IOFR1</td><td>0x40012814</td><td>ADC2 injected channel data offset register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IOFR2</td><td>0x40012818</td><td>ADC2 injected channel data offset register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IOFR3</td><td>0x4001281C</td><td>ADC2 injected channel data offset register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IOFR4</td><td>0x40012820</td><td>ADC2 injected channel data offset register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_WDHTR</td><td>0x40012824</td><td>ADC2 watchdog high threshold register</td><td>0x00000FFF</td></tr>
+<tr><td>R32_ADC2_WDLTR</td><td>0x40012828</td><td>ADC2 watchdog low threshold register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_RSQR1</td><td>0x4001282C</td><td>ADC2 regular channel sequence register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_RSQR2</td><td>0x40012830</td><td>ADC2 regular channel sequence register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_RSQR3</td><td>0x40012834</td><td>ADC2 regular channel sequence register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_ISQR</td><td>0x40012838</td><td>ADC2 injected channel sequence register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IDATAR1</td><td>0x4001283C</td><td>ADC2 injected data register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IDATAR2</td><td>0x40012840</td><td>ADC2 injected data register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IDATAR3</td><td>0x40012844</td><td>ADC2 injected data register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_IDATAR4</td><td>0x40012848</td><td>ADC2 injected data register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_RDATAR</td><td>0x4001284C</td><td>ADC2 regular data register</td><td>0x00000000</td></tr>
+<tr><td>R32_ADC2_AUX</td><td>0x40012854</td><td>ADC2 sampling time register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="12.3.1-adcx-status-register-adcx_statr-x-1-2">12.3.1 ADCx Status Register (ADCx_STATR) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td>RSTN</td><td colspan="15">Reserved</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="5">Reserved</td><td>STRT</td><td>JSTRT</td><td>JEOC</td><td>EOC</td><td>AWD</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>RSTN</td>
+<td>RO</td>
+<td>ADC module reset flag:<br>
+1: ADC module is in reset released state;<br>
+0: ADC module is in reset state.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[30:5]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>STRT</td>
+<td>RW0</td>
+<td>Regular channel conversion start status:<br>
+1: Regular channel conversion has started;<br>
+0: Regular channel conversion has not started.<br>
+This bit is set to 1 by hardware and cleared to 0 by software (writing 1 has no effect).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>JSTRT</td>
+<td>RW0</td>
+<td>Injected channel conversion start status:<br>
+1: Injected channel conversion has started;<br>
+0: Injected channel conversion has not started.<br>
+This bit is set to 1 by hardware and cleared to 0 by software (writing 1 has no effect).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>JEOC</td>
+<td>RW0</td>
+<td>Injected channel group conversion end status:<br>
+1: Conversion complete;<br>
+0: Conversion not complete.<br>
+This bit is set to 1 by hardware (when all injected channels have been converted) and cleared to 0 by software (writing 1 has no effect).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>EOC</td>
+<td>RW0</td>
+<td>Conversion end status:<br>
+1: Conversion complete;<br>
+0: Conversion not complete.<br>
+This bit is set to 1 by hardware (when regular or injected channel group conversion ends) and cleared to 0 by software (writing 1 has no effect) or by reading ADCx_RDATAR.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>AWD</td>
+<td>RW0</td>
+<td>Analog watchdog flag bit:<br>
+1: Analog watchdog event occurred;<br>
+0: No analog watchdog event occurred.<br>
+This bit is set to 1 by hardware (when the converted value exceeds the range of the ADCx_WDHTR and ADCx_WDLTR registers) and cleared to 0 by software (writing 1 has no effect).</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.2-adcx-control-register-1-adcx_ctlr1-x-1-2">12.3.2 ADCx Control Register 1 (ADCx_CTLR1) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td>SW_PRE</td><td>ANA_RST</td><td colspan="5">Reserved</td><td>AWDEN</td><td>JAWDEN</td><td colspan="2">Reserved</td><td colspan="4">DUALMOD[3:0]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="3">DISCNUM[2:0]</td><td>JDISCEN</td><td>DISCEN</td><td>JAUTO</td><td>AWDSGL</td><td>SCAN</td><td>JEOCIE</td><td>AWDIE</td><td>EOCIE</td><td colspan="5">AWDCH[4:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>SW_PRE</td>
+<td>RW</td>
+<td>Channel pre-switching off:<br>
+1: Channel pre-switching off;<br>
+0: Channel pre-switching on.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>ANA_RST</td>
+<td>RW</td>
+<td>Analog module reset enable:<br>
+1: Enable;<br>
+0: Disable.<br>
+Note: Resetting the ADC analog circuit during ADC conversion will corrupt the conversion results. This bit can be used together with RCC's ADCxRST.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:24]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>23</td>
+<td>AWDEN</td>
+<td>RW</td>
+<td>Analog watchdog enable on regular channels:<br>
+1: Enable analog watchdog on regular channels;<br>
+0: Disable analog watchdog on regular channels.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>22</td>
+<td>JAWDEN</td>
+<td>RW</td>
+<td>Analog watchdog enable on injected channels:<br>
+1: Enable analog watchdog on injected channels;<br>
+0: Disable analog watchdog on injected channels.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[21:20]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:16]</td>
+<td>DUALMOD[3:0]</td>
+<td>RW</td>
+<td>Dual mode selection.<br>
+0000: Independent mode<br>
+0001: Synchronous regular + synchronous injection mode<br>
+0010: Synchronous regular + alternating trigger mode<br>
+0011: Synchronous injection + fast alternate mode<br>
+0100: Synchronous injection + slow alternate mode<br>
+0101: Synchronous injection mode<br>
+0110: Synchronous regular mode<br>
+0111: Fast alternate mode<br>
+1000: Slow alternate mode<br>
+1001: Alternating trigger mode<br>
+Note: These bits are reserved in ADC2. Any configuration bit modifications should be performed while dual mode is disabled.</td>
+<td>0000b</td>
+</tr>
+<tr>
+<td>[15:13]</td>
+<td>DISCNUM[2:0]</td>
+<td>RW</td>
+<td>Number of regular channels to be converted after an external trigger in discontinuous mode:<br>
+000: 1 channel;<br>
+...<br>
+111: 8 channels.</td>
+<td>000b</td>
+</tr>
+<tr>
+<td>12</td>
+<td>JDISCEN</td>
+<td>RW</td>
+<td>Discontinuous mode enable on injected channels:<br>
+1: Enable discontinuous mode on injected channels;<br>
+0: Disable discontinuous mode on injected channels.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>DISCEN</td>
+<td>RW</td>
+<td>Discontinuous mode enable on regular channels:<br>
+1: Enable discontinuous mode on regular channels;<br>
+0: Disable discontinuous mode on regular channels.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>JAUTO</td>
+<td>RW</td>
+<td>Automatic injected channel group conversion enable after regular channel conversion completes:<br>
+1: Enable automatic injected channel group conversion;<br>
+0: Disable automatic injected channel group conversion.<br>
+Note: This mode requires disabling the external trigger function of injected channels.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>AWDSGL</td>
+<td>RW</td>
+<td>Analog watchdog enable on a single channel in scan mode:<br>
+1: Use analog watchdog on a single channel (selected by AWDCH[4:0]);<br>
+0: Use analog watchdog on all channels.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>SCAN</td>
+<td>RW</td>
+<td>Scan mode enable:<br>
+1: Enable scan mode (continuously convert all channels selected by ADCx_IOFRx and ADCx_RSQRx);<br>
+0: Disable scan mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>JEOCIE</td>
+<td>RW</td>
+<td>Injected channel group conversion end interrupt enable:<br>
+1: Enable injected channel group conversion complete interrupt (JEOC flag);<br>
+0: Disable injected channel group conversion complete interrupt.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>AWDIE</td>
+<td>RW</td>
+<td>Analog watchdog interrupt enable:<br>
+1: Enable analog watchdog interrupt;<br>
+0: Disable analog watchdog interrupt.<br>
+Note: In scan mode, if this interrupt occurs, the scan will be aborted.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>EOCIE</td>
+<td>RW</td>
+<td>Conversion end (regular or injected channel group) interrupt enable:<br>
+1: Enable conversion end interrupt (EOC flag);<br>
+0: Disable conversion end interrupt.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>AWDCH[4:0]</td>
+<td>RW</td>
+<td>Analog watchdog channel selection:<br>
+00000: Analog input channel 0;<br>
+00001: Analog input channel 1;<br>
+...<br>
+10000: Analog input channel 16;<br>
+10001: Analog input channel 17;<br>
+Others: Reserved.</td>
+<td>00000b</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.3-adcx-control-register-2-adcx_ctlr2-x-1-2">12.3.3 ADCx Control Register 2 (ADCx_CTLR2) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="8">Reserved</td><td>TSVREFE</td><td>RSWSTART</td><td>JSWSTART</td><td>EXTTRIG</td><td colspan="3">EXTSEL[2:0]</td><td>Reserved</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>JEXTTRIG</td><td colspan="3">JEXTSEL[2:0]</td><td>ALIGN</td><td colspan="2">Reserved</td><td>DMA</td><td colspan="3">Reserved</td><td>RSTCAL</td><td>CAL</td><td>CONT</td><td>ADON</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>23</td>
+<td>TSVREFE</td>
+<td>RW</td>
+<td>Temperature sensor and internal voltage (VREFINT) channel enable:<br>
+1: Enable temperature sensor and VREFINT channels;<br>
+0: Disable temperature sensor and VREFINT channels.<br>
+Note: This bit is only applicable to ADC1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>22</td>
+<td>RSWSTART</td>
+<td>RW</td>
+<td>Start a regular channel conversion, requires setting the software trigger:<br>
+1: Start regular channel conversion;<br>
+0: Reset state.<br>
+This bit is set by software and cleared by hardware after conversion starts.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>21</td>
+<td>JSWSTART</td>
+<td>RW</td>
+<td>Start an injected channel conversion, requires setting the software trigger:<br>
+1: Start injected channel conversion;<br>
+0: Reset state.<br>
+This bit is set by software and cleared by hardware after conversion starts or by software.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>20</td>
+<td>EXTTRIG</td>
+<td>RW</td>
+<td>External trigger conversion mode enable for regular channels:<br>
+1: Use external event to start conversion;<br>
+0: Disable external event start function.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:17]</td>
+<td>EXTSEL[2:0]</td>
+<td>RW</td>
+<td>External trigger event selection for starting regular channel conversion:<br>
+000: Timer 1 CC1 event;<br>
+001: Timer 1 CC2 event;<br>
+010: Timer 1 CC3 event;<br>
+011: Timer 2 CC2 event;<br>
+100: Timer 3 TRGO event;<br>
+101: Timer 4 CC4 event;<br>
+110: EXTI line 11 / Timer 8 TRGO event;<br>
+111: SWSTART software trigger.</td>
+<td>000b</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>JEXTTRIG</td>
+<td>RW</td>
+<td>External trigger conversion mode enable for injected channels:<br>
+1: Use external event to start conversion;<br>
+0: Disable external event start function.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:12]</td>
+<td>JEXTSEL[2:0]</td>
+<td>RW</td>
+<td>External trigger event selection for starting injected channel conversion:<br>
+000: Timer 1 TRGO event;<br>
+001: Timer 1 CC4 event;<br>
+010: Timer 2 TRGO event;<br>
+011: Timer 2 CC1 event;<br>
+100: Timer 3 CC4 event;<br>
+101: Timer 4 TRGO event;<br>
+110: EXTI line 15 / Timer 8 CC4 event;<br>
+111: JSWSTART software trigger.</td>
+<td>000b</td>
+</tr>
+<tr>
+<td>11</td>
+<td>ALIGN</td>
+<td>RW</td>
+<td>Data alignment:<br>
+1: Left-aligned; &nbsp; 0: Right-aligned.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[10:9]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>DMA</td>
+<td>RW</td>
+<td>Direct memory access (DMA) mode enable:<br>
+1: Enable DMA mode;<br>
+0: Disable DMA mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>RSTCAL</td>
+<td>RW</td>
+<td>Reset calibration. This bit is set by software and cleared by hardware when reset is complete:<br>
+1: Initialize calibration registers;<br>
+0: Calibration registers initialized.<br>
+Note: If RSTCAL is set while a conversion is in progress, additional cycles are required to clear the calibration registers.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>CAL</td>
+<td>RW</td>
+<td>A/D calibration. This bit is set by software and cleared by hardware when calibration ends.<br>
+1: Start calibration;<br>
+0: Calibration complete.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>CONT</td>
+<td>RW</td>
+<td>Continuous conversion enable:<br>
+1: Continuous conversion mode;<br>
+0: Single conversion mode.<br>
+If this bit is set, conversion will continue until this bit is cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>ADON</td>
+<td>RW</td>
+<td>On/off A/D converter.<br>
+When this bit is 0, writing 1 wakes up the ADC from power-down mode;<br>
+When this bit is 1, writing 1 starts conversion. If any other bits change, no new conversion is started.<br>
+1: Turn on ADC and start conversion;<br>
+0: Turn off ADC conversion/calibration and enter power-down mode.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.4-adcx-sampling-time-configuration-register-1-adcx_samptr1-x-1-2">12.3.4 ADCx Sampling Time Configuration Register 1 (ADCx_SAMPTR1) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="5">Reserved</td><td colspan="3">SMP18[2:0]</td><td colspan="3">SMP17[2:0]</td><td colspan="3">SMP16[2:0]</td><td colspan="2">SMP15[2:1]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>SMP15[0]</td><td colspan="3">SMP14[2:0]</td><td colspan="3">SMP13[2:0]</td><td colspan="3">SMP12[2:0]</td><td colspan="3">SMP11[2:0]</td><td colspan="3">SMP10[2:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:27]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[26:0]</td>
+<td>SMPx[2:0]</td>
+<td>RW</td>
+<td>SMPx[2:0]: Sampling time configuration for channel x:<br>
+000: 1.5 cycles; &nbsp; 001: 7.5 cycles;<br>
+010: 13.5 cycles; &nbsp; 011: 28.5 cycles;<br>
+100: 41.5 cycles; &nbsp; 101: 55.5 cycles;<br>
+110: 71.5 cycles; &nbsp; 111: 239.5 cycles;<br><br>
+SMPx[2:0]: Sampling time configuration for channel x when ADC_SMP_SELx bit is set:<br>
+000: 1.5 cycles; &nbsp; 001: 7.5 cycles;<br>
+010: 13.5 cycles; &nbsp; 011: 28.5 cycles;<br>
+100: 2.5 cycles; &nbsp; 101: 3.5 cycles;<br>
+110: 4.5 cycles; &nbsp; 111: 5.5 cycles;<br>
+These bits are used to independently select the sampling time for each channel. The channel configuration value must remain unchanged during the sampling period.</td>
+<td>000b</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.5-adcx-sampling-time-configuration-register-2-adcx_samptr2-x-1-2">12.3.5 ADCx Sampling Time Configuration Register 2 (ADCx_SAMPTR2) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="2">Reserved</td><td colspan="3">SMP9[2:0]</td><td colspan="3">SMP8[2:0]</td><td colspan="3">SMP7[2:0]</td><td colspan="3">SMP6[2:0]</td><td colspan="2">SMP5[2:1]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>SMP5[0]</td><td colspan="3">SMP4[2:0]</td><td colspan="3">SMP3[2:0]</td><td colspan="3">SMP2[2:0]</td><td colspan="3">SMP1[2:0]</td><td colspan="3">SMP0[2:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:30]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:0]</td>
+<td>SMPx[2:0]</td>
+<td>RW</td>
+<td>SMPx[2:0]: Sampling time configuration for channel x:<br>
+000: 1.5 cycles; &nbsp; 001: 7.5 cycles;<br>
+010: 13.5 cycles; &nbsp; 011: 28.5 cycles;<br>
+100: 41.5 cycles; &nbsp; 101: 55.5 cycles;<br>
+110: 71.5 cycles; &nbsp; 111: 239.5 cycles;<br><br>
+SMPx[2:0]: Sampling time configuration for channel x when ADC_SMP_SELx bit is set:<br>
+000: 1.5 cycles; &nbsp; 001: 7.5 cycles;<br>
+010: 13.5 cycles; &nbsp; 011: 28.5 cycles;<br>
+100: 2.5 cycles; &nbsp; 101: 3.5 cycles;<br>
+110: 4.5 cycles; &nbsp; 111: 5.5 cycles;<br>
+These bits are used to independently select the sampling time for each channel. The channel configuration value must remain unchanged during the sampling period.</td>
+<td>000b</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.6-adcy-injected-channel-data-offset-register-x-adcy_iofrx-x-1-2-3-4-y-1-2">12.3.6 ADCy Injected Channel Data Offset Register x (ADCy_IOFRx) (x=1/2/3/4, y=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x14 + (x−1) × 4</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="16">Reserved</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="4">Reserved</td><td colspan="12">JOFFSETx[11:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>JOFFSETx[11:0]</td>
+<td>RW</td>
+<td>Data offset value for injected channel x.<br>
+When converting an injected channel, this value defines the value to be subtracted from the raw conversion data. The conversion result can be read from the ADCx_IDATARx register.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.7-adcx-watchdog-high-threshold-register-adcx_wdhtr-x-1-2">12.3.7 ADCx Watchdog High Threshold Register (ADCx_WDHTR) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="16">Reserved</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="4">Reserved</td><td colspan="12">HT[11:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>HT[11:0]</td>
+<td>RW</td>
+<td>Analog watchdog high threshold setting value.</td>
+<td>0xFFF</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: The values of WDHTR and LTR can be changed during conversion, but they will take effect at the next conversion.</div>
+
+<h3 id="12.3.8-adcx-watchdog-low-threshold-register-adcx_wdltr-x-1-2">12.3.8 ADCx Watchdog Low Threshold Register (ADCx_WDLTR) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="16">Reserved</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="4">Reserved</td><td colspan="12">LT[11:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>LT[11:0]</td>
+<td>RW</td>
+<td>Analog watchdog low threshold setting value.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: The values of WDHTR and LTR can be changed during conversion, but they will take effect at the next conversion.</div>
+
+<h3 id="12.3.9-adcx-regular-channel-sequence-register-1-adcx_rsqr1-x-1-2">12.3.9 ADCx Regular Channel Sequence Register 1 (ADCx_RSQR1) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="8">Reserved</td><td colspan="4">L[3:0]</td><td colspan="4">SQ16[4:1]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>SQ16[0]</td><td colspan="5">SQ15[4:0]</td><td colspan="5">SQ14[4:0]</td><td colspan="5">SQ13[4:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:20]</td>
+<td>L[3:0]</td>
+<td>RW</td>
+<td>Number of channels to be converted in the regular channel conversion sequence:<br>
+0000–1111: 1–16 conversions.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:15]</td>
+<td>SQ16[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 16th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:10]</td>
+<td>SQ15[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 15th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:5]</td>
+<td>SQ14[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 14th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>SQ13[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 13th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.10-adcx-regular-channel-sequence-register-2-adcx_rsqr2-x-1-2">12.3.10 ADCx Regular Channel Sequence Register 2 (ADCx_RSQR2) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x30</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="2">Reserved</td><td colspan="5">SQ12[4:0]</td><td colspan="5">SQ11[4:0]</td><td colspan="4">SQ10[4:1]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>SQ10[0]</td><td colspan="5">SQ9[4:0]</td><td colspan="5">SQ8[4:0]</td><td colspan="5">SQ7[4:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:30]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:25]</td>
+<td>SQ12[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 12th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[24:20]</td>
+<td>SQ11[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 11th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:15]</td>
+<td>SQ10[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 10th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:10]</td>
+<td>SQ9[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 9th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:5]</td>
+<td>SQ8[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 8th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>SQ7[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 7th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.11-adcx-regular-channel-sequence-register-3-adcx_rsqr3-x-1-2">12.3.11 ADCx Regular Channel Sequence Register 3 (ADCx_RSQR3) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x34</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="2">Reserved</td><td colspan="5">SQ6[4:0]</td><td colspan="5">SQ5[4:0]</td><td colspan="4">SQ4[4:1]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>SQ4[0]</td><td colspan="5">SQ3[4:0]</td><td colspan="5">SQ2[4:0]</td><td colspan="5">SQ1[4:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:30]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:25]</td>
+<td>SQ6[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 6th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[24:20]</td>
+<td>SQ5[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 5th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:15]</td>
+<td>SQ4[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 4th conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:10]</td>
+<td>SQ3[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 3rd conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:5]</td>
+<td>SQ2[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 2nd conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>SQ1[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 1st conversion in the regular sequence.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.12-adcx-injected-channel-sequence-register-adcx_isqr-x-1-2">12.3.12 ADCx Injected Channel Sequence Register (ADCx_ISQR) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x38</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="10">Reserved</td><td colspan="2">JL[1:0]</td><td colspan="4">JSQ4[4:1]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>JSQ4[0]</td><td colspan="5">JSQ3[4:0]</td><td colspan="5">JSQ2[4:0]</td><td colspan="5">JSQ1[4:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:22]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[21:20]</td>
+<td>JL[1:0]</td>
+<td>RW</td>
+<td>Number of channels to be converted in the injected channel conversion sequence:<br>
+00–11: 1–4 conversions.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:15]</td>
+<td>JSQ4[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 4th conversion in the injected sequence.<br>
+Note: Written by software to assign channel number (0–17) as the 4th in the sequence to be converted.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:10]</td>
+<td>JSQ3[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 3rd conversion in the injected sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:5]</td>
+<td>JSQ2[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 2nd conversion in the injected sequence.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>JSQ1[4:0]</td>
+<td>RW</td>
+<td>Channel number (0–17) for the 1st conversion in the injected sequence.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: Unlike the regular conversion sequence, if the length of JL[1:0] is less than 4, the conversion sequence order starts from (4−JL). For example, when JL[1:0]=3 (4 injected conversions in the sequencer), the ADC converts channels in the following order: JSQ1[4:0], JSQ2[4:0], JSQ3[4:0], and JSQ4[4:0]; when JL[1:0]=2 (3 injected conversions in the sequencer), the ADC converts channels in the following order: JSQ2[4:0], JSQ3[4:0], and JSQ4[4:0]; when JL[1:0]=1 (2 injected conversions in the sequencer), the ADC converts channels in the order: JSQ3[4:0] first, then JSQ4[4:0]; when JL[1:0]=0 (1 injected conversion in the sequencer), the ADC converts only the JSQ4[4:0] channel. If ADCx_ISQR[21:0]=10 00111 00011 00111 00010, the ADC converts channels in the following order: JSQ2[4:0], JSQ3[4:0], and JSQ4[4:0], meaning the scan conversion proceeds in the channel order: 7, 3, 7.</div>
+
+<h3 id="12.3.13-adcy-injected-data-register-x-adcy_idatarx-x-1-2-3-4-y-1-2">12.3.13 ADCy Injected Data Register x (ADCy_IDATARx) (x=1/2/3/4, y=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x3C + (x−1) × 4</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="16">Reserved</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="16">JDATA[15:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>JDATA[15:0]</td>
+<td>RO</td>
+<td>Injected channel conversion data (data left-aligned or right-aligned).</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.14-adcx-regular-data-register-adcx_rdatar-x-1-2">12.3.14 ADCx Regular Data Register (ADCx_RDATAR) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x4C</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="16">ADC2DATA[15:0]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="16">DATA[15:0]</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>ADC2DATA[15:0]</td>
+<td>RO</td>
+<td>ADC2 converted data:<br>
+In ADC1: In dual mode, these bits contain the regular channel data converted by ADC2.<br>
+In ADC2: These bits are not used.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>DATA[15:0]</td>
+<td>RO</td>
+<td>Regular channel conversion data (data left-aligned or right-aligned).</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12.3.15-adcx-sampling-time-register-adcx_aux-x-1-2">12.3.15 ADCx Sampling Time Register (ADCx_AUX) (x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x54</p>
+
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="14">Reserved</td><td>ADC_SMP_SEL17</td><td>ADC_SMP_SEL16</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td>ADC_SMP_SEL15</td><td>ADC_SMP_SEL14</td><td>ADC_SMP_SEL13</td><td>ADC_SMP_SEL12</td><td>ADC_SMP_SEL11</td><td>ADC_SMP_SEL10</td><td>ADC_SMP_SEL9</td><td>ADC_SMP_SEL8</td><td>ADC_SMP_SEL7</td><td>ADC_SMP_SEL6</td><td>ADC_SMP_SEL5</td><td>ADC_SMP_SEL4</td><td>ADC_SMP_SEL3</td><td>ADC_SMP_SEL2</td><td>ADC_SMP_SEL1</td><td>ADC_SMP_SEL0</td>
+</tr>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:18]</td>
+<td>Reserved</td>
+<td>R0</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[17:0]</td>
+<td>ADC_SMP_SELx</td>
+<td>RW</td>
+<td>x=0–17, sampling time optional enable bit for channel x (only when SMPx is 100–111):<br>
+1: SMPx=100: sampling time 2.5 cycles;<br>
+SMPx=101: sampling time 3.5 cycles;<br>
+SMPx=110: sampling time 4.5 cycles;<br>
+SMPx=111: sampling time 5.5 cycles;<br>
+0: Sampling time is the period corresponding to the SMPx configuration.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

@@ -1,0 +1,121 @@
+<h1 id="chapter-21-operational-amplifier-opa">Chapter 21: Operational Amplifier (OPA)</h1>
+
+<p>The Operational Amplifier module (OPA) contains one independently configurable operational amplifier. Both the input and output of the operational amplifier are connected to I/O ports with selectable pins. The operational amplifier (OPA or PGA) supports gain selection.</p>
+
+<h2 id="21.1-main-features">21.1 Main Features</h2>
+<ul>
+<li>Selectable input pins</li>
+<li>Selectable output pins</li>
+<li>Supports PGA gain selection</li>
+</ul>
+
+<h2 id="21.2-functional-description">21.2 Functional Description</h2>
+
+<p>In the R32_OPA_CTLR register: setting EN1 enables the corresponding OPA1; configuring MODE1 selects the output channel of OPA1; configuring PSEL1 selects the positive input pin of OPA1; configuring NSEL1 selects the negative input channel of OPA1, or the gain when used as a PGA; setting FB_EN1 enables the PGA mode of OPA1; setting PGADIF1 enables the differential input PGA mode; setting HS1 enables the high-speed mode of OPA1.</p>
+
+<figure><img src="figures/fig_21_1.png"><figcaption>Figure 21-1: OPA block diagram</figcaption></figure>
+
+<h2 id="21.3-register-description">21.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 21-1: OPA related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_OPA_CTLR</td><td>0x40023804</td><td>OPA configuration register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="21.3.1-opa-configuration-register-opa_ctlr">21.3.1 OPA Configuration Register (OPA_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>HS1</td><td>FB_EN1</td><td>PGADIF1</td><td>PSEL1</td><td colspan="3">NSEL1[2:0]</td><td>MODE1</td><td>EN1</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:9]</td>
+<td>Reserved</td>
+<td>R0</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>HS1</td>
+<td>RW</td>
+<td>OPA1 high-speed mode enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>FB_EN1</td>
+<td>RW</td>
+<td>OPA1 PGA mode feedback enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>PGADIF1</td>
+<td>RW</td>
+<td>OPA1 works as a PGA with NSEL, and the N terminal is connected to OPA1_CHN1 (PA5):<br>
+1: Enable differential input PGA mode;<br>
+0: Disable differential input PGA mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>PSEL1</td>
+<td>RW</td>
+<td>OPA1 positive terminal channel selection:<br>
+1: OPA1_CHP1 (PA6);<br>
+0: OPA1_CHP0 (PB12).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:2]</td>
+<td>NSEL1[2:0]</td>
+<td>RW</td>
+<td>OPA1 negative terminal channel selection and PGA gain selection:<br>
+000: OPA1_CHN0 (PB13);<br>
+001: OPA1_CHN1 (PA5);<br>
+010: PGA mode, no negative input channel, internal gain is 4;<br>
+011: PGA mode, no negative input channel, internal gain is 8;<br>
+100: PGA mode, no negative input channel, internal gain is 16;<br>
+101: PGA mode, no negative input channel, internal gain is 32;<br>
+Others: Shutdown.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>MODE1</td>
+<td>RW</td>
+<td>OPA1 output channel selection:<br>
+1: Output signal through PA7;<br>
+0: Output signal through PB1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>EN1</td>
+<td>RW</td>
+<td>OPA1 enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

@@ -1,0 +1,156 @@
+<!-- Chapter 5: Cyclic Redundancy Check (CRC) -->
+<h1 id="chapter-5-cyclic-redundancy-check-crc">Chapter 5: Cyclic Redundancy Check (CRC)</h1>
+
+<p>
+  The Cyclic Redundancy Check (CRC) computation unit produces a CRC calculation result for any
+  32-bit data based on a fixed generator polynomial. It is generally used in data storage and
+  data communication fields to verify data integrity. The hardware CRC computation unit
+  provided by the system can greatly save CPU and RAM resources and improve efficiency.
+</p>
+
+<figure>
+  <img src="figures/fig_5_1.png" alt="CRC Block Diagram">
+  <figcaption>Figure 5-1: CRC Block Diagram</figcaption>
+</figure>
+
+<h2 id="5.1-main-features">5.1 Main Features</h2>
+<ul>
+  <li>Uses the CRC32 polynomial (0x4C11DB7): X<sup>32</sup>+X<sup>26</sup>+X<sup>23</sup>+X<sup>22</sup>+X<sup>16</sup>+X<sup>12</sup>+X<sup>11</sup>+X<sup>10</sup>+X<sup>8</sup>+X<sup>7</sup>+X<sup>5</sup>+X<sup>4</sup>+X<sup>2</sup>+X+1</li>
+  <li>The same 32-bit register serves as both data input and CRC32 calculation output</li>
+  <li>Single conversion time: 4 HB clock cycles (HCLK)</li>
+</ul>
+
+<h2 id="5.2-function-description">5.2 Function Description</h2>
+
+<h3 id="crc-unit-reset">CRC Unit Reset</h3>
+<p>
+  To start a CRC calculation for a new set of data, the CRC computation unit must be reset.
+  Writing 1 to the RST bit of the control register CRC_CTLR will cause the hardware to reset
+  the data register, restoring the initial value 0xFFFFFFFF.
+</p>
+
+<h3 id="crc-calculation">CRC Calculation</h3>
+<p>
+  The CRC unit's calculation result is the CRC of the previous CRC calculation result combined
+  with the newly participating data. For the CRC_DATAR data register, a write operation feeds
+  new data into the hardware computation unit, while a read operation returns the latest CRC
+  calculation value. During hardware computation, write operations to the system are
+  stalled, so new values can be written continuously.
+</p>
+<div class="note">Note: The CRC unit computes on the entire 32-bit data, not byte-by-byte.</div>
+
+<h3 id="independent-data-buffer">Independent Data Buffer</h3>
+<p>
+  The CRC unit provides an 8-bit independent data register CRC_IDATAR for application code to
+  temporarily store 1 byte of data, which is not affected by CRC unit reset.
+</p>
+
+<h2 id="5.3-register-description">5.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 5-1: CRC-related register list</caption>
+<thead>
+<tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+</thead>
+<tbody>
+<tr><td>R32_CRC_DATAR</td><td>0x40023000</td><td>Data register</td><td>0xFFFFFFFF</td></tr>
+<tr><td>R8_CRC_IDATAR</td><td>0x40023004</td><td>Independent data buffer</td><td>0x00</td></tr>
+<tr><td>R32_CRC_CTLR</td><td>0x40023008</td><td>Control register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="5.3.1-data-register-crc_datar">5.3.1 Data Register (CRC_DATAR)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="16">DR[31:16]</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="16">DR[15:0]</td>
+</tr>
+</table>
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>DR[31:0]</td>
+<td>RW</td>
+<td>Write raw data; read the calculation result.</td>
+<td>0xFFFFFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="5.3.2-independent-data-buffer-crc_idatar">5.3.2 Independent Data Buffer (CRC_IDATAR)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+<table class="reg-bits">
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="8">Reserved</td>
+<td colspan="8">IDR[7:0]</td>
+</tr>
+</table>
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>[7:0]</td>
+<td>IDR[7:0]</td>
+<td>RW</td>
+<td>8-bit general-purpose register that can be used as a data buffer. This register is not affected by the RST bit of the control register.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="5.3.3-control-register-crc_ctlr">5.3.3 Control Register (CRC_CTLR)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+<table class="reg-bits">
+<tr>
+<td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td>
+</tr>
+<tr>
+<td colspan="16">Reserved</td>
+</tr>
+<tr>
+<td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td>
+</tr>
+<tr>
+<td colspan="15">Reserved</td>
+<td>RST</td>
+</tr>
+</table>
+<table class="reg-fields">
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>[31:1]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>RST</td>
+<td>WO</td>
+<td>CRC computation unit reset control. Writing 1 triggers the reset; the hardware automatically clears this bit. After execution, the data register becomes 0xFFFFFFFF.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

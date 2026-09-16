@@ -1,0 +1,190 @@
+<h1 id="chapter-35-debug-support-dbg">Chapter 35: Debug Support (DBG)</h1>
+
+<h2 id="35.1-main-features">35.1 Main Features</h2>
+
+<p>This register allows configuring the MCU in debug state. It includes:</p>
+<ul>
+<li>Support for Independent Watchdog (IWDG) counter</li>
+<li>Support for Window Watchdog (WWDG) counter</li>
+<li>Support for timer counters</li>
+<li>Support for I2C SMBus timeout control</li>
+<li>Support for CAN communication</li>
+</ul>
+
+<h2 id="35.2-register-description">35.2 Register Description</h2>
+
+<h3 id="35.2.1-debug-mcu-configuration-register-dbgmcu_cr">35.2.1 Debug MCU Configuration Register (DBGMCU_CR)</h3>
+
+<p><strong>Address:</strong> 0x7C0 (CSR)</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="11">Reserved</td><td>CAN1_STOP</td><td>TIM8_STOP</td><td>TIM7_STOP</td><td>TIM6_STOP</td><td>TIM5_STOP</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>TIM4_STOP</td><td>TIM3_STOP</td><td>TIM2_STOP</td><td>TIM1_STOP</td><td>Reserved</td><td>I2C_SMBUS_TIMEOUT</td><td>WWDG_STOP</td><td>IWDG_STOP</td><td colspan="5">Reserved</td><td>STANDBY</td><td>STOP</td><td>SLEEP</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:21]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>20</td>
+<td>CAN1_STOP</td>
+<td>RW</td>
+<td>CAN debug stop bit. When the core enters debug state, CAN1 stops running.<br>
+1: The CAN receive register does not continue to receive data;<br>
+0: CAN still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>19</td>
+<td>TIM8_STOP</td>
+<td>RW</td>
+<td>Timer 8 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 8 counter stops working;<br>
+0: Timer 8 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>18</td>
+<td>TIM7_STOP</td>
+<td>RW</td>
+<td>Timer 7 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 7 counter stops working;<br>
+0: Timer 7 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>TIM6_STOP</td>
+<td>RW</td>
+<td>Timer 6 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 6 counter stops working;<br>
+0: Timer 6 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>TIM5_STOP</td>
+<td>RW</td>
+<td>Timer 5 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 5 counter stops working;<br>
+0: Timer 5 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>TIM4_STOP</td>
+<td>RW</td>
+<td>Timer 4 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 4 counter stops working;<br>
+0: Timer 4 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>TIM3_STOP</td>
+<td>RW</td>
+<td>Timer 3 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 3 counter stops working;<br>
+0: Timer 3 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>TIM2_STOP</td>
+<td>RW</td>
+<td>Timer 2 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 2 counter stops working;<br>
+0: Timer 2 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>TIM1_STOP</td>
+<td>RW</td>
+<td>Timer 1 debug stop bit. When the core enters debug state, the counter stops working.<br>
+1: Timer 1 counter stops working;<br>
+0: Timer 1 counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>I2C_SMBUS_TIMEOUT</td>
+<td>RW</td>
+<td>SMBUS timeout mode debug stop bit. When the core enters debug state, the SMBUS timeout mode is stopped.<br>
+1: Freezes the SMBUS timeout control;<br>
+0: Operates the same as normal mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>WWDG_STOP</td>
+<td>RW</td>
+<td>Window watchdog debug stop bit. When the core enters debug state, the debug window watchdog stops working.<br>
+1: Window watchdog counter stops working;<br>
+0: Window watchdog counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>IWDG_STOP</td>
+<td>RW</td>
+<td>Independent watchdog debug stop bit. When the core enters debug state, the watchdog stops working.<br>
+1: Watchdog counter stops working;<br>
+0: Watchdog counter still operates normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:3]</td>
+<td>Reserved</td>
+<td>RW</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>STANDBY</td>
+<td>RW</td>
+<td>Debug standby mode bit.<br>
+1: (FCLK on, HCLK on) The digital circuit section is not powered down, and FCLK and HCLK clocks are provided by the internal RC oscillator. In addition, the microcontroller exits STANDBY mode by generating a system reset, which is the same as a reset;<br>
+0: (FCLK off, HCLK off) The entire digital circuit section is powered down. From the software point of view, exiting STANDBY mode is the same as a reset (except that some status bits indicate that the microcontroller has just exited from the STANDBY state).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>STOP</td>
+<td>RW</td>
+<td>Debug stop mode bit.<br>
+1: (FCLK on, HCLK on) In stop mode, FCLK and HCLK clocks are provided by the internal RC oscillator. When exiting stop mode, the software must reconfigure the clock system to start the PLL, crystal oscillator, etc. (same as when this bit is set to 0);<br>
+0: (FCLK off, HCLK off) In stop mode, the clock controller disables all clocks (including HCLK and FCLK). When exiting STOP mode, the clock configuration is the same as after a reset (the microcontroller is clocked by the 20MHz internal RC oscillator (HSI)). Therefore, the software must reconfigure the clock control system to start the PLL, crystal oscillator, etc.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>SLEEP</td>
+<td>RW</td>
+<td>Debug sleep mode bit.<br>
+1: (FCLK on, HCLK on) In sleep mode, both FCLK and HCLK clocks are provided by the previously configured system clock;<br>
+0: (FCLK on, HCLK off) In sleep mode, FCLK is provided by the previously configured system clock, while HCLK is turned off. Since sleep mode does not reset the configured clock system, the software does not need to reconfigure the clock system when exiting sleep mode.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

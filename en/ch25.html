@@ -1,0 +1,1990 @@
+<h1 id="chapter-25-controller-area-network-can">Chapter 25: Controller Area Network (CAN)</h1>
+
+<p>The Controller Area Network is a high-performance communication protocol for serial data communication. The CAN controller provides a complete implementation of the CAN protocol, supporting CAN protocol 2.0A and 2.0B. The CAN controller can be used to build powerful local networks to achieve safe distributed real-time control, handling a large amount of data messages with a small CPU load, and is widely used in industrial and automotive fields.</p>
+
+<h2 id="25.1-main-features">25.1 Main Features</h2>
+<ul>
+<li>Compatible with CAN specification 2.0A and 2.0B</li>
+<li>Programmable transmission rate, up to 1 Mbit/s</li>
+<li>Supports time-triggered communication function to avoid low-priority message blocking</li>
+<li>Supports three transmit mailboxes; transmit message priority can be determined by the message identifier or the order of transmit requests, and can record the timestamp of the transmit message SOF moment</li>
+<li>Supports two receive FIFOs with three-level mailbox depth, 14 configurable message filter banks; each filter bank can be configured in 32-bit or 16-bit mode, mask or identifier list mode, minimizing software intervention in message filtering; flexible FIFO overflow handling, and can record the timestamp of the received message SOF moment</li>
+<li>Occupies 4 interrupt vectors; each interrupt source can be independently configured</li>
+</ul>
+
+<h2 id="25.2-can-controller-operating-modes">25.2 CAN Controller Operating Modes</h2>
+
+<p>The CAN controller can switch between three operating modes — initialization mode, sleep mode, and normal mode — by operating the SLEEP or INRQ bits in the CAN1_CTLR register.</p>
+
+<h3 id="25.2.1-initialization-mode">25.2.1 Initialization Mode</h3>
+
+<p>After reset, the CAN defaults to sleep mode to reduce power consumption; message reception and transmission are disabled, the internal pull-up resistor of the TX pin is enabled, and the TX pin outputs a recessive bit. Setting the INRQ bit in the CAN1_CTLR register to 1 requests the CAN controller to enter initialization mode; when the INAK bit in the CAN1_STATR register is automatically set to 1, initialization mode is successfully entered. Similarly, clearing the INRQ bit in the CAN1_CTLR register to 0 requests the CAN controller to exit initialization mode; when the INAK bit in the CAN1_STATR register is automatically cleared to 0, initialization mode is successfully exited.</p>
+
+<p>Initialization of the filter banks can be performed in non-initialization mode, but the FINIT bit in the CAN1_FCTLR register must be set to 1, at which point reception of messages is disabled.</p>
+
+<h3 id="25.2.2-sleep-mode">25.2.2 Sleep Mode</h3>
+
+<p>Setting the SLEEP bit in the CAN1_CTLR register to 1 requests the CAN controller to enter sleep mode; when the SNAK bit in the CAN1_STATR register is automatically set to 1, the CAN has successfully entered sleep mode. At this time, the CAN controller clock stops, but the mailbox registers remain accessible.</p>
+
+<p>To enter initialization mode from sleep mode, the SLEEP bit in CAN1_CTLR must be cleared to 0 and the INRQ bit set to 1; when the INAK bit in the CAN1_STATR register is automatically set to 1, the switch to initialization mode is complete.</p>
+
+<p>To enter normal mode from sleep mode, the SLEEP bit in CAN1_CTLR must be cleared to 0; when the SNAK bit in the CAN1_STATR register is automatically cleared to 0, normal mode is entered.</p>
+
+<figure><img src="figures/fig_25_1.png"><figcaption>Figure 25-1: CAN operating mode switching</figcaption></figure>
+
+<h2 id="25.3-can-controller-test-modes">25.3 CAN Controller Test Modes</h2>
+
+<p>In initialization mode, by operating the SILM and LBKM bits in the CAN1_BTIMR register, a test mode can be selected. Then by clearing the INRQ bit in the CAN1_CTLR register, initialization mode is exited and the test mode is entered. The test modes are divided into three types: silent mode, loopback mode, and silent loopback mode.</p>
+
+<h3 id="25.3.1-silent-mode">25.3.1 Silent Mode</h3>
+
+<p>Setting the SILM bit in the CAN1_BTIMR register to 1 selects silent mode. In this mode, the CAN controller can receive but cannot transmit messages externally; it always presents a recessive bit externally, avoiding influence on the bus, but messages can be received by the local node's controller. Silent mode is typically used for CAN bus state analysis.</p>
+
+<h3 id="25.3.2-loopback-mode">25.3.2 Loopback Mode</h3>
+
+<p>Setting the LBKM bit in the CAN1_BTIMR register to 1 selects loopback mode. In this mode, the CAN controller can transmit messages externally but cannot receive external messages; however, transmitted messages can be received by the local node's controller, and the receive filtering mechanism is effective. Loopback mode is typically used for CAN controller transceiver testing.</p>
+
+<h3 id="25.3.3-silent-loopback-mode">25.3.3 Silent Loopback Mode</h3>
+
+<p>Setting both the SILM and LBKM bits in the CAN1_BTIMR register to 1 selects silent loopback mode. This mode is typically used for closed self-testing of the CAN controller. In this mode, there is no effect on the CAN bus; the RX pin is disconnected from the bus, and the TX pin is set to a recessive bit.</p>
+
+<figure><img src="figures/fig_25_2.png"><figcaption>Figure 25-2: Three test modes of the CAN bus</figcaption></figure>
+
+<h2 id="25.4-can-controller-operating-state-when-mcu-is-in-debug-mode">25.4 CAN Controller Operating State When MCU is in Debug Mode</h2>
+
+<p>When the MCU enters debug mode, the core is in a halted state, but configuration bits in the debug module can be used to determine whether the CAN controller continues to operate normally or stops.</p>
+
+<h2 id="25.5-can-controller-functional-description">25.5 CAN Controller Functional Description</h2>
+
+<h3 id="25.5.1-transmit-processing-flow">25.5.1 Transmit Processing Flow</h3>
+
+<p>The transmit processing flow is as follows: if there is an idle mailbox among the three transmit mailboxes, the application layer software has write access only to the idle mailbox registers. By operating the registers CAN1_TXMIyR, CAN1_TXMDTyR, CAN1_TXMDLyR, and CAN1_TXMDHyR, the message identifier, message length, timestamp, and message data can be set. After the data is ready, set the TXRQ bit in the CAN1_TXMIyR register to 1 to request transmission; the mailbox enters the pending state and is prioritized in the queue. Once it becomes the highest-priority mailbox, it transitions to the scheduled transmit state, waiting for the CAN bus to become idle. When the CAN bus is idle, the scheduled transmit mailbox message immediately enters the transmit state. After the message transmission is complete, the mailbox becomes idle again, and the RQCP and TXOK bits in the CAN1_TSTATR register are set to 1 to indicate successful transmission. If arbitration fails during transmission, the ALST bit in the CAN1_TSTATR register is set to 1; if a transmission error occurs, the TERR bit is set to 1.</p>
+
+<h3 id="25.5.2-transmit-priority">25.5.2 Transmit Priority</h3>
+
+<p>The transmit priority can be determined by the identifier or the order of transmit requests. When the TXFP bit in the CAN1_CTLR register is set to 1, transmission follows the order of transmit requests; transmit-by-request-order is mainly used for segmented transmission. When the TXFP bit is cleared to 0, the transmit order is determined by identifier priority — the smaller the identifier, the higher the priority; for identical identifiers, the lower-numbered mailbox has higher priority.</p>
+
+<h3 id="25.5.3-transmit-abort-handling">25.5.3 Transmit Abort Handling</h3>
+
+<p>Setting the ABRQ bit in the CAN1_TSTATR register to 1 can abort a transmit request. When the mailbox is in the pending or scheduled transmit state, the transmit request is directly aborted; when the mailbox is in the transmitting state, the abort request may succeed (transmission stopped) or fail (transmission completed). The result can be queried via the TXOK bit in the CAN1_TSTATR register.</p>
+
+<h3 id="25.5.4-time-triggered-mode">25.5.4 Time-Triggered Mode</h3>
+
+<p>In traditional CAN communication, when the bus is busy, low-priority messages can be blocked for a long time, and may even fail to meet their deadline requirements. To solve this bottleneck, time-triggered mode protocols have been introduced. Such protocols have a certain scale of application in industry. The time-triggered mode function is designed to support the application of such protocols.</p>
+
+<p>In time-triggered mode, there are two modes available for selection. Using this mode requires disabling the automatic retransmission function. The default mode and enhanced mode are selected by configuring the MODE bit in the CAN1_TTCTLR register. Setting the TTCM and NART bits in the CAN1_CTLR register to 1 enables time-triggered mode and disables automatic retransmission. The MODE bit in the CAN1_TTCTLR register defaults to 0, meaning it operates in default mode; the internal timer is activated to generate timestamps for transmit and receive mailboxes. The timer accumulates in CAN bit time, and the internal timer is sampled at the sampling point of the start-of-frame bit of receive and transmit frames to produce a timestamp. To use enhanced mode, set the MODE bit in the CAN1_TTCTLR register to 1 to enable enhanced mode. In this mode, there must be three or more nodes in the entire CAN network; one node transmits a time reference, and other nodes, after receiving the reference node's timestamp, write 1 to the TIMRST bit in the CAN1_TTCTLR register to reset the internal counter and synchronize the internal counter. In this way, all CAN nodes except the one transmitting the time reference achieve time synchronization. Afterward, the data to be transmitted is written to the transmit mailbox, and the time-triggered count value (TIMCNT in the CAN1_TTCNT register) and the internal counter terminal value (TIMCMV in the CAN1_TTCTLR register) are configured for each node. The time-triggered count value and internal counter terminal value are determined by the number of CAN nodes, the CAN communication rate, and the number of bits per frame. After configuration is complete, each node waits for the internal counter to count to the time-triggered count value, which then triggers the transmit action.</p>
+
+<h3 id="25.5.5-receive-processing-flow">25.5.5 Receive Processing Flow</h3>
+
+<p>Reception of CAN bus messages is completed by the controller hardware without MCU intervention, reducing the MCU processing load. Received messages are stored, according to the settings of the CAN1_FAFIFOR register, into two FIFOs each with 3-level mailbox depth. The application layer can only read valid received messages through the receive FIFO mailbox.</p>
+
+<p>Initially, the receive FIFO is empty, and the FMR[1:0] value of the receive FIFO register CAN1_RFIFOx is binary 00b. After receiving a valid received message, it transitions to pending-1 state, and the controller automatically sets the FMR[1:0] value of the receive FIFO register CAN1_RFIFOx to binary 01b. If the mailbox data registers CAN1_RXMDLyR and CAN1_RXMDHyR are read at this time, setting the RFOM bit in the receive FIFO register CAN1_RFIFOx to 1 releases the mailbox, and the receive FIFO state returns to empty. If the mailbox is not released in the pending-1 state, the next valid received message causes the receive FIFO state to switch to pending-2 state, at which point the FMR[1:0] value of the receive FIFO register CAN1_RFIFOx is automatically set to binary 10b. If the mailbox data registers are read and the mailbox is released, the state returns to pending-1. If the mailbox is not released in the pending-2 state, the receive FIFO enters pending-3 state. Similarly, reading the message and releasing the mailbox in the pending-3 state returns the state to pending-2. If the mailbox is not released in the pending-3 state, receiving the next valid message will inevitably result in message loss.</p>
+
+<figure><img src="figures/fig_25_3.png"><figcaption>Figure 25-3: Receive FIFO state transition diagram</figcaption></figure>
+
+<p>The message loss situation described above means the receive FIFO is full and message overflow causes message loss. The FOVR bit in the receive FIFO register CAN1_RFIFOx is automatically set to 1 by hardware for overflow query. Setting the RFLM bit in the CAN1_CTLR register to 1 enables the receive FIFO locking function, and the discarded message is the newly received message. Clearing the RFLM bit in the CAN1_CTLR register to 0 disables the receive FIFO locking function; among the three original messages in the receive FIFO, the last received message will be overwritten by the new message.</p>
+
+<p>When the relevant bits in the CAN1_INTENR register are set, an interrupt can be generated when the receive FIFO state transitions, enabling more efficient processing of received messages. See Section 25.6 CAN Interrupts for details.</p>
+
+<h3 id="25.5.6-received-message-identifier-filtering">25.5.6 Received Message Identifier Filtering</h3>
+
+<p>The module has up to 14 filter banks. By configuring the filter banks, each CAN node can receive messages that match the filter rules; messages that do not match the filter rules are discarded by hardware without software intervention.</p>
+
+<p>Each filter bank consists of two 32-bit registers, CAN1_FxR0 and CAN1_FxR1. The bit width of each filter bank can be independently configured as one 32-bit filter or two 16-bit filters by setting the respective bits in the CAN1_FSCFGR register. Each filter bank can be configured in mask or identifier list mode by setting the respective bits in the CAN1_FMCFGR register. Each filter bank can be enabled or disabled by setting the respective bits in the CAN1_FWR register. Setting the respective bits in the CAN1_FAFIFOR register selects which receive FIFO stores the messages that pass the filter.</p>
+
+<p>As shown in Table 25-1 below, in mask mode, the two registers are the identifier register and the mask register, which must be used together. Each bit of the identifier register indicates whether the corresponding bit is expected to be dominant or recessive, and each bit of the mask register indicates whether the corresponding bit must match the expected value of the identifier register bit.</p>
+
+<table class="data-table">
+<caption>Table 25-1: 32-bit mask mode</caption>
+<thead><tr><th></th><th>CAN1_FxR1[31:24]</th><th>CAN1_FxR1[23:16]</th><th>CAN1_FxR1[15:8]</th><th>CAN1_FxR1[7:0]</th></tr></thead>
+<tbody>
+<tr><td>Identifier register</td><td colspan="4"></td></tr>
+<tr><td>Mask register</td><td>CAN1_FxR2[31:24]</td><td>CAN1_FxR2[23:16]</td><td>CAN1_FxR2[15:8]</td><td>CAN1_FxR2[7:0]</td></tr>
+<tr><td>Mapping</td><td>STID[10:3]</td><td>STID[2:0] EXID[17:13]</td><td>EXID[12:5]</td><td>EXID[4:0] IDE RTR 0</td></tr>
+</tbody>
+</table>
+
+<p>In identifier list mode, both registers are used as identifier registers. The received message identifier must match one of the registers to pass the filtering.</p>
+
+<table class="data-table">
+<caption>Table 25-2: 32-bit identifier list mode</caption>
+<thead><tr><th></th><th>CAN1_FxR1[31:24]</th><th>CAN1_FxR1[23:16]</th><th>CAN1_FxR1[15:8]</th><th>CAN1_FxR1[7:0]</th></tr></thead>
+<tbody>
+<tr><td>Identifier register</td><td colspan="4"></td></tr>
+<tr><td>Mask register</td><td>CAN1_FxR2[31:24]</td><td>CAN1_FxR2[23:16]</td><td>CAN1_FxR2[15:8]</td><td>CAN1_FxR2[7:0]</td></tr>
+<tr><td>Mapping</td><td>STID[10:3]</td><td>STID[2:0] EXID[17:13]</td><td>EXID[12:5]</td><td>EXID[4:0] IDE RTR 0</td></tr>
+</tbody>
+</table>
+
+<p>In 16-bit mode, the register bank is split into four registers. In mask mode, each filter group's mask mode can have 2 filters, each containing one 16-bit identifier register and one 16-bit mask register. In identifier list mode, all four registers are used as identifier registers.</p>
+
+<table class="data-table">
+<caption>Table 25-3: 16-bit mask mode</caption>
+<thead><tr><th></th><th>CAN1_FxR1[15:8]</th><th>CAN1_FxR1[7:0]</th></tr></thead>
+<tbody>
+<tr><td>Identifier register n</td><td colspan="2"></td></tr>
+<tr><td>Mask register n</td><td>CAN1_FxR1[31:24]</td><td>CAN1_FxR1[23:16]</td></tr>
+<tr><td>Identifier register n+1</td><td>CAN1_FxR2[15:8]</td><td>CAN1_FxR2[7:0]</td></tr>
+<tr><td>Mask register n+1</td><td>CAN1_FxR2[31:24]</td><td>CAN1_FxR2[23:16]</td></tr>
+<tr><td>Mapping</td><td>STID[10:3]</td><td>STID[2:0] RTR IDE EXID[17:15]</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 25-4: 16-bit identifier list mode</caption>
+<thead><tr><th></th><th>CAN1_FxR1[15:8]</th><th>CAN1_FxR1[7:0]</th></tr></thead>
+<tbody>
+<tr><td>Identifier register n</td><td colspan="2"></td></tr>
+<tr><td>Mask register n</td><td>CAN1_FxR1[31:24]</td><td>CAN1_FxR1[23:16]</td></tr>
+<tr><td>Identifier register n+1</td><td>CAN1_FxR2[15:8]</td><td>CAN1_FxR2[7:0]</td></tr>
+<tr><td>Mask register n+1</td><td>CAN1_FxR2[31:24]</td><td>CAN1_FxR2[23:16]</td></tr>
+<tr><td>Mapping</td><td>STID[10:3]</td><td>STID[2:0] RTR IDE EXID[17:15]</td></tr>
+</tbody>
+</table>
+
+<p>When a message enters the FIFO mailbox, it is read and stored by the application. Typically, the application distinguishes message data by the message identifier. The CAN controller provides a filter number for messages filtered through different filter banks in the receive FIFO. The number is stored in the FMI[7:0] field of the CAN1_RXMDTyR register, and the numbering does not consider whether the filter bank is enabled. The numbering rules are detailed in the example in Figure 25-4.</p>
+
+<p>When a message passes through multiple filters, the filter number stored in the receive mailbox is determined by the filter priority rules, which are as follows:</p>
+<ul>
+<li>All 32-bit filters have higher priority than 16-bit filters</li>
+<li>For filters of the same width, identifier list filters have higher priority than mask mode filters</li>
+<li>For filters with the same width and mode, the lower-numbered filter has higher priority</li>
+</ul>
+
+<p>As shown in Figure 25-5: when receiving a message, the identifier is first matched against 32-bit identifier list mode filters; if no match, it is matched against 32-bit mask mode filters; if no match, it continues to be matched against 16-bit identifier list mode filters; if no match, it is finally matched against 16-bit mask mode filters. If there is still no match, the message is discarded. If a match is found, the message is stored in the receive FIFO mailbox, and the identifier number is stored in the FMI field of the CAN1_RXMDTyR register.</p>
+
+<figure><img src="figures/fig_25_4.png"><figcaption>Figure 25-4: Example of filter numbering</figcaption></figure>
+
+<figure><img src="figures/fig_25_5.png"><figcaption>Figure 25-5: Filter filtering example</figcaption></figure>
+
+<h3 id="25.5.7-error-handling">25.5.7 Error Handling</h3>
+
+<p>The CAN controller relies on the error status register CAN1_ERRSR for bus error management. The TEC and REC fields in the error status register CAN1_ERRSR represent the transmit and receive error count values, respectively. They increase with more transceiver errors and decrease with successful transceiver operations; their values can be used to judge the stability of the CAN bus.</p>
+
+<p>When the TEC and REC in the error status register CAN1_ERRSR are less than 128, the current CAN node is in the error-active state, can normally participate in bus communication, and issues an active error flag when an error is detected.</p>
+
+<p>When the TEC and REC in the error status register CAN1_ERRSR are greater than 127, the current CAN node is in the error-passive state and is not allowed to issue an active error flag when an error is detected; it can only issue a passive error flag.</p>
+
+<p>When the TEC in the error status register CAN1_ERRSR is greater than 255, the current CAN node enters the bus-off state.</p>
+
+<p>When the bus detects 128 occurrences of 11 consecutive recessive bits, it recovers to the error-active state. This recovery method is affected by the ABOM bit in the main control register CAN1_CTLR. If ABOM is set to 1, the hardware automatically exits the bus-off state. If ABOM is 0, software must operate the INRQ bit to enter initialization mode and then exit initialization mode to exit the bus-off state.</p>
+
+<figure><img src="figures/fig_25_6.png"><figcaption>Figure 25-6: CAN error state transition diagram</figcaption></figure>
+
+<h3 id="25.5.8-bit-timing">25.5.8 Bit Timing</h3>
+
+<p>According to the CAN bus standard, each bit time is divided into four segments: the synchronization segment, the propagation time segment, the phase buffer segment 1, and the phase buffer segment 2. These segments are composed of the minimum time unit Tq. The CAN controller monitors CAN bus changes through sampling and synchronizes via the edge of the frame start bit.</p>
+
+<p>The CAN controller regroups the above four segments into three segments:</p>
+<ul>
+<li><strong>Synchronization segment (SS):</strong> This is the synchronization segment in the CAN standard, fixed at 1 minimum time unit. Under normal conditions, the expected bit transition occurs within this time segment.</li>
+<li><strong>Time segment 1 (BS1):</strong> Includes the propagation time segment and phase buffer segment 1 in the CAN standard. It can be set to include 1 to 16 minimum time units and can be automatically extended to compensate for positive phase drift caused by frequency accuracy errors of different nodes on the CAN bus. The end of this time segment is the sampling point position.</li>
+<li><strong>Time segment 2 (BS2):</strong> This is the phase buffer segment 2 in the CAN standard. It can be set to 1 to 8 minimum time units and can be automatically shortened to compensate for negative phase drift caused by frequency accuracy errors of different nodes on the CAN bus.</li>
+</ul>
+
+<p>The resynchronization jump width (SJW) is the upper limit of the number of minimum time units that can be extended or shortened per bit, and the range can be set from 1 to 4 minimum time units.</p>
+
+<p>All the above parameters can be configured in the CAN bus timing register CAN1_BTIMR.</p>
+
+<figure><img src="figures/fig_25_7.png"><figcaption>Figure 25-7: Transition occurring within BS1</figcaption></figure>
+
+<p>As shown in Figure 25-7, with SJW = 2, when the bus level transition is detected in time segment 1, the length of time segment 1 needs to be extended by a maximum of SJW, thereby delaying the sampling point position.</p>
+
+<figure><img src="figures/fig_25_8.png"><figcaption>Figure 25-8: Transition occurring within BS2</figcaption></figure>
+
+<p>As shown in Figure 25-8, with SJW = 2, when the bus level transition is detected in time segment 2, the length of time segment 2 needs to be shortened by a maximum of SJW, thereby advancing the sampling point position.</p>
+
+<h2 id="25.6-can-interrupts">25.6 CAN Interrupts</h2>
+
+<p>The CAN controller has four interrupt vectors: transmit interrupt, FIFO_0 interrupt, FIFO_1 interrupt, and error and status change interrupt.</p>
+
+<p>Setting the CAN interrupt enable register CAN1_INTENR can enable or disable each interrupt source.</p>
+
+<p>The transmit interrupt is generated by the transmit mailbox becoming empty event. After the interrupt is generated, query the RQCP0, RQCP1, and RQCP2 bits in the CAN1_TSTATR register to determine which mailbox empty event generated the interrupt.</p>
+
+<p>The FIFO0 interrupt is generated by receive new message, receive mailbox full, and overflow events. After the interrupt is generated, query the FMP0, FULL0, and FOVER0 bits in the CAN1_RFIFO0 register to determine which mailbox event generated the interrupt.</p>
+
+<p>The FIFO1 interrupt is generated by receive new message, receive mailbox full, and overflow events. After the interrupt is generated, query the FMP1, FULL1, and FOVER1 bits in the CAN1_RFIFO1 register to determine which mailbox event generated the interrupt.</p>
+
+<p>The error and status change interrupt is generated by error, wakeup, and sleep events.</p>
+
+<figure><img src="figures/fig_25_9.png"><figcaption>Figure 25-9: CAN interrupt logic diagram</figcaption></figure>
+
+<h2 id="25.8-register-description">25.8 Register Description</h2>
+
+<p>The registers related to the CAN controller must be operated in 32-bit word mode, and the CAN peripheral clock must be enabled during operation. To avoid the current node's influence on the entire CAN bus, application software can only modify the bit timing register CAN1_BTIMR in initialization mode.</p>
+
+<table class="reg-list">
+<caption>Table 25-5: CAN related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_CAN1_CTLR</td><td>0x40006400</td><td>CAN1 main control register</td><td>0x00010002</td></tr>
+<tr><td>R32_CAN1_STATR</td><td>0x40006404</td><td>CAN1 main status register</td><td>0x00000x02</td></tr>
+<tr><td>R32_CAN1_TSTATR</td><td>0x40006408</td><td>CAN1 transmit status register</td><td>0x1C000000</td></tr>
+<tr><td>R32_CAN1_RFIFO0</td><td>0x4000640C</td><td>CAN1 receive FIFO0 control and status register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_RFIFO1</td><td>0x40006410</td><td>CAN1 receive FIFO1 control and status register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_INTENR</td><td>0x40006414</td><td>CAN1 interrupt enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_ERRSR</td><td>0x40006418</td><td>CAN1 error status register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_BTIMR</td><td>0x4000641C</td><td>CAN1 bit timing register</td><td>0x01230000</td></tr>
+<tr><td>R32_CAN1_TTCTLR</td><td>0x40006420</td><td>CAN1 time-triggered control register</td><td>0x0000FFFF</td></tr>
+<tr><td>R32_CAN1_TTCNT</td><td>0x40006424</td><td>CAN1 time-triggered count value register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_TERR_CNT</td><td>0x40006428</td><td>CAN1 bus-off recovery error counter</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 25-6: CAN mailbox related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_CAN1_TXMI0R</td><td>0x40006580</td><td>CAN1 transmit mailbox 0 identifier register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDT0R</td><td>0x40006584</td><td>CAN1 transmit mailbox 0 data length and timestamp register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDL0R</td><td>0x40006588</td><td>CAN1 transmit mailbox 0 low byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDH0R</td><td>0x4000658C</td><td>CAN1 transmit mailbox 0 high byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMI1R</td><td>0x40006590</td><td>CAN1 transmit mailbox 1 identifier register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDT1R</td><td>0x40006594</td><td>CAN1 transmit mailbox 1 data length and timestamp register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDL1R</td><td>0x40006598</td><td>CAN1 transmit mailbox 1 low byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDH1R</td><td>0x4000659C</td><td>CAN1 transmit mailbox 1 high byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMI2R</td><td>0x400065A0</td><td>CAN1 transmit mailbox 2 identifier register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDT2R</td><td>0x400065A4</td><td>CAN1 transmit mailbox 2 data length and timestamp register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDL2R</td><td>0x400065A8</td><td>CAN1 transmit mailbox 2 low byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_TXMDH2R</td><td>0x400065AC</td><td>CAN1 transmit mailbox 2 high byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMI0R</td><td>0x400065B0</td><td>CAN1 receive FIFO0 mailbox identifier register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMDT0R</td><td>0x400065B4</td><td>CAN1 receive FIFO0 mailbox data length and timestamp register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMDL0R</td><td>0x400065B8</td><td>CAN1 receive FIFO0 mailbox low byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMDH0R</td><td>0x400065BC</td><td>CAN1 receive FIFO0 mailbox high byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMI1R</td><td>0x400065C0</td><td>CAN1 receive FIFO1 mailbox identifier register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMDT1R</td><td>0x400065C4</td><td>CAN1 receive FIFO1 mailbox data length and timestamp register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMDL1R</td><td>0x400065C8</td><td>CAN1 receive FIFO1 mailbox low byte data register</td><td>X</td></tr>
+<tr><td>R32_CAN1_RXMDH1R</td><td>0x400065CC</td><td>CAN1 receive FIFO1 mailbox high byte data register</td><td>X</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 25-7: CAN filter related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_CAN1_FCTLR</td><td>0x40006600</td><td>CAN1 filter master control register</td><td>0x2A1C0E01</td></tr>
+<tr><td>R32_CAN1_FMCFGR</td><td>0x40006604</td><td>CAN1 filter mode register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_FSCFGR</td><td>0x4000660C</td><td>CAN1 filter bit width register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_FAFIFOR</td><td>0x40006614</td><td>CAN1 filter FIFO association register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_FWR</td><td>0x4000661C</td><td>CAN1 filter activation register</td><td>0x00000000</td></tr>
+<tr><td>R32_CAN1_F0R1</td><td>0x40006640</td><td>CAN1 filter bank 0 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F0R2</td><td>0x40006644</td><td>CAN1 filter bank 0 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F1R1</td><td>0x40006648</td><td>CAN1 filter bank 1 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F1R2</td><td>0x4000664C</td><td>CAN1 filter bank 1 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F2R1</td><td>0x40006650</td><td>CAN1 filter bank 2 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F2R2</td><td>0x40006654</td><td>CAN1 filter bank 2 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F3R1</td><td>0x40006658</td><td>CAN1 filter bank 3 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F3R2</td><td>0x4000665C</td><td>CAN1 filter bank 3 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F4R1</td><td>0x40006660</td><td>CAN1 filter bank 4 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F4R2</td><td>0x40006664</td><td>CAN1 filter bank 4 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F5R1</td><td>0x40006668</td><td>CAN1 filter bank 5 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F5R2</td><td>0x4000666C</td><td>CAN1 filter bank 5 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F6R1</td><td>0x40006670</td><td>CAN1 filter bank 6 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F6R2</td><td>0x40006674</td><td>CAN1 filter bank 6 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F7R1</td><td>0x40006678</td><td>CAN1 filter bank 7 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F7R2</td><td>0x4000667C</td><td>CAN1 filter bank 7 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F8R1</td><td>0x40006680</td><td>CAN1 filter bank 8 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F8R2</td><td>0x40006684</td><td>CAN1 filter bank 8 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F9R1</td><td>0x40006688</td><td>CAN1 filter bank 9 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F9R2</td><td>0x4000668C</td><td>CAN1 filter bank 9 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F10R1</td><td>0x40006690</td><td>CAN1 filter bank 10 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F10R2</td><td>0x40006694</td><td>CAN1 filter bank 10 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F11R1</td><td>0x40006698</td><td>CAN1 filter bank 11 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F11R2</td><td>0x4000669C</td><td>CAN1 filter bank 11 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F12R1</td><td>0x400066A0</td><td>CAN1 filter bank 12 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F12R2</td><td>0x400066A4</td><td>CAN1 filter bank 12 register 2</td><td>X</td></tr>
+<tr><td>R32_CAN1_F13R1</td><td>0x400066A8</td><td>CAN1 filter bank 13 register 1</td><td>X</td></tr>
+<tr><td>R32_CAN1_F13R2</td><td>0x400066AC</td><td>CAN1 filter bank 13 register 2</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="25.8.1-can1-main-control-register-can1_ctlr">25.8.1 CAN1 Main Control Register (CAN1_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>DBF</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>TTCM</td><td>ABOM</td><td>AWUM</td><td>NART</td><td>RFLM</td><td>TXFP</td><td>SLEEP</td><td>INRQ</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:17]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>DBF</td>
+<td>RW</td>
+<td>Whether debugging disables CAN bus operation.<br>
+1: During debugging, CAN transmission and reception are disabled, but the control and read/write operations of the receive FIFO work normally;<br>
+0: During debugging, the CAN controller operates normally.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>15</td>
+<td>RST</td>
+<td>RW1</td>
+<td>CAN controller software reset request. Writing 0 has no effect.<br>
+1: Resets the CAN controller; after reset, the controller enters sleep mode, and then hardware automatically clears this bit;<br>
+0: CAN controller normal state.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>TTCM</td>
+<td>RW</td>
+<td>Time-triggered mode enable:<br>
+1: Enable time-triggered mode;<br>
+0: Disable time-triggered mode.<br>
+Time-triggered mode is mainly used in conjunction with the TTCAN protocol.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>ABOM</td>
+<td>RW</td>
+<td>Bus-off automatic recovery control:<br>
+1: When hardware detects 128 occurrences of 11 consecutive recessive bits, it automatically exits the bus-off state;<br>
+0: Software must set the INRQ bit in the CAN1_CTLR register to 1 and then clear it to 0; after detecting 128 occurrences of 11 consecutive recessive bits, the bus-off state is exited.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>AWUM</td>
+<td>RW</td>
+<td>CAN controller automatic wakeup enable:<br>
+1: When a message is detected, hardware automatically wakes up; the SLEEP and SLAK bits in the CAN1_STATR register are automatically cleared;<br>
+0: Software must clear the SLEEP bit in the CAN1_CTLR register to wake up the CAN controller.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>NART</td>
+<td>RW</td>
+<td>Message automatic retransmission disable:<br>
+1: The message is transmitted only once, regardless of whether transmission succeeds;<br>
+0: The CAN controller keeps retransmitting until transmission succeeds.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>RFLM</td>
+<td>RW</td>
+<td>Receive FIFO message lock mode enable:<br>
+1: When the receive FIFO overflows and received mailbox messages have not been read (mailbox not released), newly received messages are discarded;<br>
+0: When the receive FIFO overflows and received mailbox messages have not been read (mailbox not released), newly received messages overwrite the original messages.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TXFP</td>
+<td>RW</td>
+<td>Transmit mailbox priority selection:<br>
+1: Priority determined by the order of transmit requests;<br>
+0: Priority determined by the message identifier.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>SLEEP</td>
+<td>RW</td>
+<td>Sleep mode request bit:<br>
+1: Set to 1 to request the CAN controller to enter sleep mode; the controller enters sleep mode after the current activity completes; if AWUM is set to 1, the controller clears the SLEEP bit upon receiving a message;<br>
+0: After software clears it, the controller exits sleep mode.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>0</td>
+<td>INRQ</td>
+<td>RW</td>
+<td>Initialization mode request bit:<br>
+1: Set to 1 to request the CAN controller to enter initialization mode; the controller enters initialization mode after the current activity completes, and hardware sets the INAK bit in the CAN1_STATR register;<br>
+0: Set to 0 to request the CAN controller to exit initialization mode and enter normal mode; hardware clears the INAK bit in the CAN1_STATR register.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.2-can1-main-status-register-can1_statr">25.8.2 CAN1 Main Status Register (CAN1_STATR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td>RX</td><td>SAMP</td><td>RXM</td><td>TXM</td><td colspan="3">Reserved</td><td>SLAKI</td><td>WKUI</td><td>ERRI</td><td>SLAK</td><td>INAK</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>RX</td>
+<td>RO</td>
+<td>Current actual logic level of the CAN controller RX receive pin.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>10</td>
+<td>SAMP</td>
+<td>RO</td>
+<td>Logic level of the last received bit on the CAN controller RX receive pin.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>9</td>
+<td>RXM</td>
+<td>RO</td>
+<td>Receive mode query bit.<br>
+1: The CAN controller is currently in receive mode;<br>
+0: The CAN controller is not in receive mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>TXM</td>
+<td>RO</td>
+<td>Transmit mode query bit.<br>
+1: The CAN controller is currently in transmit mode;<br>
+0: The CAN controller is not in transmit mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:5]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>SLAKI</td>
+<td>RW1</td>
+<td>When sleep interrupt is enabled (i.e., SLKIE bit in CAN1_INTENR is set to 1), this is the interrupt generation flag bit. Writing 1 clears it; writing 0 has no effect.<br>
+1: An interrupt is generated when entering sleep mode; hardware sets this bit;<br>
+0: Hardware clears this bit when exiting sleep mode; software can also clear it.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>WKUI</td>
+<td>RW1</td>
+<td>Wakeup interrupt flag bit. When the WKUIE bit in the CAN1_INTENR register is set to 1, if the CAN controller is in sleep mode and a SOF bit is detected, hardware sets this bit. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>ERRI</td>
+<td>RW1</td>
+<td>Error interrupt status flag bit. When the ERRIE bit in the CAN1_INTENR register is set to 1, an error and status change interrupt is generated. Software writing 1 clears this bit; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>SLAK</td>
+<td>RO</td>
+<td>Sleep mode indication bit.<br>
+1: The CAN controller is in sleep mode;<br>
+0: The CAN controller is not in sleep mode.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>0</td>
+<td>INAK</td>
+<td>RO</td>
+<td>Initialization mode indication bit.<br>
+1: The CAN controller is in initialization mode;<br>
+0: The CAN controller is operating in non-initialization mode.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.3-can1-transmit-status-register-can1_tstatr">25.8.3 CAN1 Transmit Status Register (CAN1_TSTATR)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>LOW2</td><td>LOW1</td><td>LOW0</td><td>TME2</td><td>TME1</td><td>TME0</td><td colspan="2">CODE[1:0]</td><td>ABRQ2</td><td colspan="3">Reserved</td><td>TERR2</td><td>ALST2</td><td>TXOK2</td><td>RQCP2</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>ABRQ1</td><td colspan="2">Reserved</td><td>TERR1</td><td>ALST1</td><td>TXOK1</td><td>RQCP1</td><td>ABRQ0</td><td colspan="3">Reserved</td><td>TERR0</td><td>ALST0</td><td>TXOK0</td><td>RQCP0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>LOW2</td>
+<td>RO</td>
+<td>Lowest priority flag bit for transmit mailbox 2.<br>
+1: Transmit mailbox 2 has the lowest priority;<br>
+0: Transmit mailbox 2 does not have the lowest priority.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>LOW1</td>
+<td>RO</td>
+<td>Lowest priority flag bit for transmit mailbox 1.<br>
+1: Transmit mailbox 1 has the lowest priority;<br>
+0: Transmit mailbox 1 does not have the lowest priority.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>29</td>
+<td>LOW0</td>
+<td>RO</td>
+<td>Lowest priority flag bit for transmit mailbox 0.<br>
+1: Transmit mailbox 0 has the lowest priority;<br>
+0: Transmit mailbox 0 does not have the lowest priority.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>28</td>
+<td>TME2</td>
+<td>RO</td>
+<td>Empty flag bit for transmit mailbox 2.<br>
+1: Transmit mailbox 2 has no message waiting to be sent;<br>
+0: Transmit mailbox 2 has a message waiting to be sent.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>27</td>
+<td>TME1</td>
+<td>RO</td>
+<td>Empty flag bit for transmit mailbox 1.<br>
+1: Transmit mailbox 1 has no message waiting to be sent;<br>
+0: Transmit mailbox 1 has a message waiting to be sent.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>26</td>
+<td>TME0</td>
+<td>RO</td>
+<td>Empty flag bit for transmit mailbox 0.<br>
+1: Transmit mailbox 0 has no message waiting to be sent;<br>
+0: Transmit mailbox 0 has a message waiting to be sent.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>[25:24]</td>
+<td>CODE[1:0]</td>
+<td>RO</td>
+<td>Mailbox number.<br>
+When more than one mailbox is empty, it indicates the next empty mailbox number; when all mailboxes are empty, it indicates the lowest-priority mailbox number.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>23</td>
+<td>ABRQ2</td>
+<td>RW1</td>
+<td>Transmit abort request for transmit mailbox 2. Software setting to 1 can abort the transmit request of mailbox 2; hardware clears it when the transmit message is cleared. If mailbox 2 is empty, software setting to 1 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[22:20]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>19</td>
+<td>TERR2</td>
+<td>RW1</td>
+<td>Transmit failure flag bit for transmit mailbox 2. When transmit mailbox 2 fails to transmit, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>18</td>
+<td>ALST2</td>
+<td>RW1</td>
+<td>Arbitration failure flag bit for transmit mailbox 2. When transmit mailbox 2 fails to transmit due to low arbitration priority, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>TXOK2</td>
+<td>RW1</td>
+<td>Transmit success flag bit for transmit mailbox 2.<br>
+1: Last transmission succeeded;<br>
+0: Last transmission failed.<br>
+Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>RQCP2</td>
+<td>RW1</td>
+<td>Request complete flag bit for transmit mailbox 2. When the transmit or abort request of transmit mailbox 2 completes, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>ABRQ1</td>
+<td>RW1</td>
+<td>Transmit abort request for transmit mailbox 1. Software setting to 1 can abort the transmit request of mailbox 1; hardware clears it when the transmit message is cleared. Writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>TERR1</td>
+<td>RW1</td>
+<td>Transmit failure flag bit for transmit mailbox 1. When transmit mailbox 1 fails to transmit, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>ALST1</td>
+<td>RW1</td>
+<td>Arbitration failure flag bit for transmit mailbox 1. When transmit mailbox 1 fails to transmit due to low arbitration priority, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>TXOK1</td>
+<td>RW1</td>
+<td>Transmit success flag bit for transmit mailbox 1.<br>
+1: Last transmission succeeded;<br>
+0: Last transmission failed.<br>
+Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>RQCP1</td>
+<td>RW1</td>
+<td>Request complete flag bit for transmit mailbox 1. When the transmit or abort request of transmit mailbox 1 completes, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>ABRQ0</td>
+<td>RW1</td>
+<td>Transmit abort request for transmit mailbox 0. Software setting to 1 can abort the transmit request of mailbox 0; hardware clears it when the transmit message is cleared. Writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>TERR0</td>
+<td>RW1</td>
+<td>Transmit failure flag bit for transmit mailbox 0. When transmit mailbox 0 fails to transmit, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>ALST0</td>
+<td>RW1</td>
+<td>Arbitration failure flag bit for transmit mailbox 0. When transmit mailbox 0 fails to transmit due to low arbitration priority, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TXOK0</td>
+<td>RW1</td>
+<td>Transmit success flag bit for transmit mailbox 0.<br>
+1: Last transmission succeeded;<br>
+0: Last transmission failed.<br>
+Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>RQCP0</td>
+<td>RW1</td>
+<td>Request complete flag bit for transmit mailbox 0. When the transmit or abort request of transmit mailbox 0 completes, this bit is automatically set. Software writing 1 clears it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.4-can1-receive-fifo-0-status-register-can1_rfifo0">25.8.4 CAN1 Receive FIFO 0 Status Register (CAN1_RFIFO0)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>RFOM0</td><td>FOVR0</td><td>FULL0</td><td colspan="1">Reserved</td><td colspan="2">FMP0[1:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:6]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>RFOM0</td>
+<td>RW1</td>
+<td>Software setting this bit to 1 releases the current mailbox message of receive FIFO_0. It is automatically cleared after release; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>FOVR0</td>
+<td>RW1</td>
+<td>Receive FIFO_0 overflow flag bit. When there are three messages in FIFO_0 and a new message is received, hardware sets this bit. Software must write 1 to clear it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>FULL0</td>
+<td>RW1</td>
+<td>Receive FIFO_0 full flag bit. When there are three messages in FIFO_0, hardware sets this bit. Software must write 1 to clear it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[1:0]</td>
+<td>FMP0[1:0]</td>
+<td>RO</td>
+<td>Number of messages in receive FIFO_0.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.5-can1-receive-fifo-1-status-register-can1_rfifo1">25.8.5 CAN1 Receive FIFO 1 Status Register (CAN1_RFIFO1)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>RFOM1</td><td>FOVR1</td><td>FULL1</td><td colspan="1">Reserved</td><td colspan="2">FMP1[1:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:6]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>RFOM1</td>
+<td>RW1</td>
+<td>Software setting this bit to 1 releases the current mailbox message of receive FIFO_1. It is automatically cleared after release; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>FOVR1</td>
+<td>RW1</td>
+<td>Receive FIFO_1 overflow flag bit. When there are three messages in FIFO_1 and a new message is received, hardware sets this bit. Software must write 1 to clear it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>FULL1</td>
+<td>RW1</td>
+<td>Receive FIFO_1 full flag bit. When there are three messages in FIFO_1, hardware sets this bit. Software must write 1 to clear it; writing 0 has no effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Reserved</td>
+<td>RF</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[1:0]</td>
+<td>FMP1[1:0]</td>
+<td>RO</td>
+<td>Number of messages in receive FIFO_1.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.6-can1-interrupt-enable-register-can1_intenr">25.8.6 CAN1 Interrupt Enable Register (CAN1_INTENR)</h3>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="14">Reserved</td><td>SLKIE</td><td>WKUIE</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>ERRIE</td><td colspan="2">Reserved</td><td>LECIE</td><td>BOFIE</td><td>EPVIE</td><td>EWGIE</td><td colspan="1">Reserved</td><td>FOVIE1</td><td>FFIE1</td><td>FMPIE1</td><td>FOVIE0</td><td>FFIE0</td><td>FMPIE0</td><td>TMEIE</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:18]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>SLKIE</td>
+<td>RW</td>
+<td>Sleep interrupt enable bit.<br>
+1: An interrupt is generated when entering sleep state;<br>
+0: No interrupt is generated when entering sleep state.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>WKUIE</td>
+<td>RW</td>
+<td>Wakeup interrupt enable bit.<br>
+1: An interrupt is generated when the CAN controller is woken up;<br>
+0: No interrupt is generated when the CAN controller is woken up.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>ERRIE</td>
+<td>RW</td>
+<td>Error interrupt enable bit; CAN error interrupt global enable bit.<br>
+1: An interrupt is generated when the CAN controller produces an error;<br>
+0: No interrupt is generated when the CAN controller produces an error.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:12]</td>
+<td>Reserved</td>
+<td>RF</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>LECIE</td>
+<td>RW</td>
+<td>Last error code interrupt enable bit.<br>
+1: When an error is detected, hardware updates LEC[2:0], sets ERRI to 1, and triggers an error interrupt;<br>
+0: When an error is detected, hardware updates LEC[2:0] but does not update ERRI, and does not trigger an error interrupt.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>BOFIE</td>
+<td>RW</td>
+<td>Bus-off interrupt enable bit.<br>
+1: When entering bus-off state, ERRI is set to 1 and an error interrupt is triggered;<br>
+0: When entering bus-off state, ERRI is not updated and no error interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>EPVIE</td>
+<td>RW</td>
+<td>Error passive interrupt enable bit.<br>
+1: When entering error passive state, ERRI is set to 1 and an error interrupt is triggered;<br>
+0: When entering error passive state, ERRI is not updated and no error interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>EWGIE</td>
+<td>RW</td>
+<td>Error warning interrupt enable bit.<br>
+1: When the error count reaches the warning threshold, ERRI is set to 1 and an error interrupt is triggered;<br>
+0: When the error count reaches the warning threshold, ERRI is not updated and no error interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Reserved</td>
+<td>RF</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>FOVIE1</td>
+<td>RW</td>
+<td>Receive FIFO_1 overflow interrupt enable bit.<br>
+1: When FIFO_1 overflows, a FIFO_1 interrupt is triggered;<br>
+0: When FIFO_1 overflows, no FIFO_1 interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>FFIE1</td>
+<td>RW</td>
+<td>Receive FIFO_1 full interrupt enable bit.<br>
+1: When FIFO_1 is full, a FIFO_1 interrupt is triggered;<br>
+0: When FIFO_1 is full, no FIFO_1 interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>FMPIE1</td>
+<td>RW</td>
+<td>Receive FIFO_1 message pending interrupt enable bit.<br>
+1: When FIFO_1 updates FMP and it is non-zero, a FIFO_1 interrupt is triggered;<br>
+0: When FIFO_1 updates FMP and it is non-zero, no FIFO_1 interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>FOVIE0</td>
+<td>RW</td>
+<td>Receive FIFO_0 overflow interrupt enable bit.<br>
+1: When FIFO_0 overflows, a FIFO_0 interrupt is triggered;<br>
+0: When FIFO_0 overflows, no FIFO_0 interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>FFIE0</td>
+<td>RW</td>
+<td>Receive FIFO_0 full interrupt enable bit.<br>
+1: When FIFO_0 is full, a FIFO_0 interrupt is triggered;<br>
+0: When FIFO_0 is full, no FIFO_0 interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>FMPIE0</td>
+<td>RW</td>
+<td>Receive FIFO_0 message pending interrupt enable bit.<br>
+1: When FIFO_0 updates FMP and it is non-zero, a FIFO_0 interrupt is triggered;<br>
+0: When FIFO_0 updates FMP and it is non-zero, no FIFO_0 interrupt is triggered.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>TMEIE</td>
+<td>RW</td>
+<td>Transmit mailbox empty interrupt.<br>
+1: An interrupt is generated when the transmit mailbox is empty;<br>
+0: No interrupt is generated when the transmit mailbox is empty.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.7-can1-error-status-register-can1_errsr">25.8.7 CAN1 Error Status Register (CAN1_ERRSR)</h3>
+
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">REC[7:0]</td><td colspan="8">TEC[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="3">LEC[2:0]</td><td>Reserved</td><td>BOFF</td><td>EPVF</td><td>EWGF</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>REC[7:0]</td>
+<td>RO</td>
+<td>Receive error counter.<br>
+When a CAN receive error occurs, this counter is incremented by 1 or 8 depending on the error condition; after a successful receive, the counter is decremented by 1 or set to 120 (when the error count is greater than 127). When the counter value exceeds 127, the CAN enters the error-passive state.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>TEC[7:0]</td>
+<td>RO</td>
+<td>Transmit error counter.<br>
+When a CAN transmit error occurs, this counter is incremented by 1 or 8 depending on the error condition; after a successful transmit, the counter is decremented by 1 or set to 120 (when the error count is greater than 127). When the counter value exceeds 127, the CAN enters the error-passive state.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:4]</td>
+<td>LEC[2:0]</td>
+<td>RW</td>
+<td>Last error code.<br>
+When a CAN bus transmission error is detected, the controller sets this according to the error condition; when messages are correctly received and transmitted, it is set to 000b.<br>
+000: No error;<br>
+001: Bit stuffing error;<br>
+010: Form format error;<br>
+011: ACK acknowledgment error;<br>
+100: Recessive bit error;<br>
+101: Dominant bit error;<br>
+110: CRC error;<br>
+111: Set by software.<br>
+Typically, when application software reads an error, it sets the code to 111b to detect the code update.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>BOFF</td>
+<td>RO</td>
+<td>Bus-off status flag bit. When the CAN controller enters the bus-off state, hardware automatically sets this bit; when exiting the bus-off state, hardware automatically clears it.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>EPVF</td>
+<td>RO</td>
+<td>Error passive flag bit. When the transmit/receive error counter reaches the error-passive threshold, i.e., greater than 127, hardware sets this bit.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>EWGF</td>
+<td>RO</td>
+<td>Error warning flag bit. When the transmit/receive error counter reaches the warning threshold, i.e., greater than or equal to 96, hardware sets this bit.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.8-can1-bit-timing-register-can1_btimr">25.8.8 CAN1 Bit Timing Register (CAN1_BTIMR)</h3>
+
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>SILM</td><td>LBKM</td><td colspan="2">Reserved</td><td colspan="4">SJW[3:0]</td><td colspan="4">TS2[3:0]</td><td colspan="4">TS1[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">BTR_TS1_T</td><td colspan="2">Reserved</td><td colspan="10">BRP[9:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>SILM</td>
+<td>RW</td>
+<td>Silent mode setting bit.<br>
+1: Enter silent mode;<br>
+0: Exit silent mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>LBKM</td>
+<td>RW</td>
+<td>Loopback mode setting bit.<br>
+1: Enter loopback mode;<br>
+0: Exit loopback mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:28]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[27:24]</td>
+<td>SJW[3:0]</td>
+<td>RW</td>
+<td>Defines the resynchronization jump width setting value. The upper limit of the number of minimum time units that can be extended or shortened per bit during resynchronization. The actual value is (SJW[1:0]+1), with a range of 1 to 4 minimum time units.</td>
+<td>0001b</td>
+</tr>
+<tr>
+<td>[23:20]</td>
+<td>TS2[3:0]</td>
+<td>RW</td>
+<td>Time segment 2 setting value. Defines how many minimum time units time segment 2 occupies; the actual value is (TS2[1:0]+1).</td>
+<td>0010b</td>
+</tr>
+<tr>
+<td>[19:16]</td>
+<td>TS1[3:0]</td>
+<td>RW</td>
+<td>Time segment 1 setting value. Defines how many minimum time units time segment 1 occupies; the actual value is (TS1[1:0]+1).</td>
+<td>0011b</td>
+</tr>
+<tr>
+<td>[15:12]</td>
+<td>BTR_TS1_T</td>
+<td>RW</td>
+<td>For traditional CAN, when CLAS_LONG_TS1=0, TS1 is TS[3:0] (4-bit); when CLAS_LONG_TS1=1, TS1 is TS[1:0]+BTR_TS1_T[15:12] (6-bit).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:0]</td>
+<td>BRP[9:0]</td>
+<td>RW</td>
+<td>Minimum time unit length setting value:<br>
+Tq = (BRP[9:0]+1) × tPCLK</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.9-can1-time-triggered-control-register-can1_ttctlr">25.8.9 CAN1 Time-Triggered Control Register (CAN1_TTCTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="14">Reserved</td><td>MODE</td><td>TIMRST</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TIMCMV[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:18]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>MODE</td>
+<td>RW</td>
+<td>Time-triggered mode selection bit.<br>
+1: Enhanced mode;<br>
+0: Default mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>TIMRST</td>
+<td>WZ</td>
+<td>Internal counter reset control bit. Writing 1 resets the internal counter; hardware automatically clears it.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>TIMCMV[15:0]</td>
+<td>RW</td>
+<td>Internal counter terminal value.</td>
+<td>ffffh</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.10-can1-time-triggered-count-value-register-can1_ttcnt">25.8.10 CAN1 Time-Triggered Count Value Register (CAN1_TTCNT)</h3>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TIMCNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>TIMCNT[15:0]</td>
+<td>RW</td>
+<td>Time-triggered count value.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.11-can1-bus-off-recovery-error-counter-can1_terr_cnt">25.8.11 CAN1 Bus-Off Recovery Error Counter (CAN1_TERR_CNT)</h3>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td colspan="9">TX_ERR_CNT</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:9]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[8:0]</td>
+<td>TX_ERR_CNT</td>
+<td>RW</td>
+<td>Current bus-off recovery error count value. Modifying this count value allows immediate recovery from bus-off.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.12-can1-transmit-mailbox-identifier-register-can1_txmiyr-y-0-1-2">25.8.12 CAN1 Transmit Mailbox Identifier Register (CAN1_TXMIyR) (y=0/1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x180, 0x190, 0x1A0</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="11">STID[10:0]/EXID[28:18]</td><td colspan="5">EXID[17:13]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="13">EXID[12:0]</td><td>IDE</td><td>RTR</td><td>TXRQ</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:21]</td>
+<td>STID[10:0]/EXID[28:18]</td>
+<td>RW</td>
+<td>Standard identifier or the upper 11 bits of the extended identifier.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[20:3]</td>
+<td>EXID[17:0]</td>
+<td>RW</td>
+<td>Lower 18 bits of the extended identifier.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>2</td>
+<td>IDE</td>
+<td>RW</td>
+<td>Identifier selection flag bit.<br>
+1: Extended identifier selected;<br>
+0: Standard identifier selected.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>1</td>
+<td>RTR</td>
+<td>RW</td>
+<td>Remote frame (also called remote control frame) selection flag bit.<br>
+1: Current frame is a remote frame;<br>
+0: Current frame is a data frame.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>0</td>
+<td>TXRQ</td>
+<td>RW</td>
+<td>Data transmit request flag bit. When software sets it to 1, it requests to transmit the data in the mailbox; when transmission is complete and the mailbox is empty, hardware clears it.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.13-can1-transmit-mailbox-data-length-and-timestamp-register-can1_txmdtyr-y-0-1-2">25.8.13 CAN1 Transmit Mailbox Data Length and Timestamp Register (CAN1_TXMDTyR) (y=0/1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x184, 0x194, 0x1A4</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TIME[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>TGT</td><td colspan="4">Reserved</td><td colspan="4">DLC[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>TIME[15:0]</td>
+<td>RW</td>
+<td>16-bit timer value for the transmit message SOF moment.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[15:9]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>TGT</td>
+<td>RW</td>
+<td>Message timestamp transmit selection flag bit. This bit is valid when TTCM is set to 1 and the message length is 8.<br>
+1: Transmit timestamp, the value is the instant value of TIME[15:0], replacing the last two bytes of the 8-byte message;<br>
+0: Do not transmit timestamp.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[7:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>DLC[3:0]</td>
+<td>RW</td>
+<td>Data length of the data frame or requested data length of the remote frame. The data length can be set in the range of 0 to 64.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.14-can1-transmit-mailbox-low-byte-data-register-can1_txmdlyr-y-0-1-2">25.8.14 CAN1 Transmit Mailbox Low Byte Data Register (CAN1_TXMDLyR) (y=0/1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x188, 0x198, 0x1A8</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">DATA3[7:0]</td><td colspan="8">DATA2[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">DATA1[7:0]</td><td colspan="8">DATA0[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>DATA3[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 3.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>DATA2[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 2.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>DATA1[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 1.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>DATA0[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 0.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.15-can1-transmit-mailbox-high-byte-data-register-can1_txmdhyr-y-0-1-2">25.8.15 CAN1 Transmit Mailbox High Byte Data Register (CAN1_TXMDHyR) (y=0/1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x18C, 0x19C, 0x1AC</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">DATA7[7:0]</td><td colspan="8">DATA6[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">DATA5[7:0]</td><td colspan="8">DATA4[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>DATA7[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 7.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>DATA6[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 6.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>DATA5[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 5.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>DATA4[7:0]</td>
+<td>RW</td>
+<td>Content of transmit data byte 4.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.16-can1-receive-mailbox-identifier-register-can1_rxmiyr-y-0-1">25.8.16 CAN1 Receive Mailbox Identifier Register (CAN1_RXMIyR) (y=0/1)</h3>
+
+<p><strong>Offset address:</strong> 0x1B0, 0x1C0</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="11">STID[10:0]/EXID[28:18]</td><td colspan="5">EXID[17:13]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="13">EXID[12:0]</td><td>IDE</td><td>RTR</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:21]</td>
+<td>STID[10:0]/EXIDH[28:18]</td>
+<td>RO</td>
+<td>Standard identifier or the upper 11 bits of the extended identifier.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[20:3]</td>
+<td>EXIDL[17:0]</td>
+<td>RO</td>
+<td>Lower 18 bits of the extended identifier.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>2</td>
+<td>IDE</td>
+<td>RO</td>
+<td>Identifier selection flag bit.<br>
+1: Extended identifier selected;<br>
+0: Standard identifier selected.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>1</td>
+<td>RTR</td>
+<td>RO</td>
+<td>Remote frame (also called remote control frame) selection flag bit.<br>
+1: Current frame is a remote frame;<br>
+0: Current frame is a data frame.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>0</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.17-can1-receive-mailbox-data-length-and-timestamp-register-can1_rxmdtyr-y-0-1">25.8.17 CAN1 Receive Mailbox Data Length and Timestamp Register (CAN1_RXMDTyR) (y=0/1)</h3>
+
+<p><strong>Offset address:</strong> 0x1B4, 0x1C4</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TIME[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">FMI[7:0]</td><td>Reserved</td><td>RES</td><td>ESI</td><td>BRS</td><td colspan="4">DLC[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>TIME[15:0]</td>
+<td>RO</td>
+<td>16-bit timer value for the received message SOF moment.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>FMI[7:0]</td>
+<td>RO</td>
+<td>Filter number matched by the message.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>RES</td>
+<td>RO</td>
+<td>RES bit of the currently received frame.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>ESI</td>
+<td>RO</td>
+<td>ESI bit of the currently received frame.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>BRS</td>
+<td>RO</td>
+<td>BRS bit of the currently received frame.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>DLC[3:0]</td>
+<td>RO</td>
+<td>Received message data length. DLC=0-8: same for standard CAN and CANFD, indicating data frame length 0 to 8; remote frame is 0.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.18-can1-receive-mailbox-low-byte-data-register-can1_rxmdlyr-y-0-1">25.8.18 CAN1 Receive Mailbox Low Byte Data Register (CAN1_RXMDLyR) (y=0/1)</h3>
+
+<p><strong>Offset address:</strong> 0x1B8, 0x1C8</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">DATA3[7:0]</td><td colspan="8">DATA2[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">DATA1[7:0]</td><td colspan="8">DATA0[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>DATA3[7:0]</td>
+<td>RO</td>
+<td>Data byte 3 of the received message.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>DATA2[7:0]</td>
+<td>RO</td>
+<td>Data byte 2 of the received message.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>DATA1[7:0]</td>
+<td>RO</td>
+<td>Data byte 1 of the received message.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>DATA0[7:0]</td>
+<td>RO</td>
+<td>Data byte 0 of the received message.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.19-can1-receive-mailbox-high-byte-data-register-can1_rxmdhyr-y-0-1">25.8.19 CAN1 Receive Mailbox High Byte Data Register (CAN1_RXMDHyR) (y=0/1)</h3>
+
+<p><strong>Offset address:</strong> 0x1BC, 0x1CC</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">DATA7[7:0]</td><td colspan="8">DATA6[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">DATA5[7:0]</td><td colspan="8">DATA4[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>DATA7[7:0]</td>
+<td>RO</td>
+<td>Data byte 7 of the received message.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>DATA6[7:0]</td>
+<td>RO</td>
+<td>Data byte 6 of the received message.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>DATA5[7:0]</td>
+<td>RO</td>
+<td>Data byte 5 of the received message.</td>
+<td>x</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>DATA4[7:0]</td>
+<td>RO</td>
+<td>Data byte 4 of the received message.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.20-can1-filter-master-control-register-can1_fctlr">25.8.20 CAN1 Filter Master Control Register (CAN1_FCTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x200</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>FINIT</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0x2A1C</td>
+</tr>
+<tr>
+<td>[15:1]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>FINIT</td>
+<td>RW</td>
+<td>Filter initialization mode enable flag bit.<br>
+1: Filter banks are in initialization mode;<br>
+0: Filter banks are in normal mode.</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.21-can1-filter-mode-register-can1_fmcfgr">25.8.21 CAN1 Filter Mode Register (CAN1_FMCFGR)</h3>
+
+<p><strong>Offset address:</strong> 0x204</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>FBM13</td><td>FBM12</td><td>FBM11</td><td>FBM10</td><td>FBM9</td><td>FBM8</td><td>FBM7</td><td>FBM6</td><td>FBM5</td><td>FBM4</td><td>FBM3</td><td>FBM2</td><td>FBM1</td><td>FBM0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:14]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:0]</td>
+<td>FBMx</td>
+<td>RW</td>
+<td>Filter bank x operating mode control bit; can only be written when FINIT is 1.<br>
+1: Filter bank x registers are in identifier list mode;<br>
+0: Filter bank x registers are in mask mode.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.22-can1-filter-bit-width-register-can1_fscfgr">25.8.22 CAN1 Filter Bit Width Register (CAN1_FSCFGR)</h3>
+
+<p><strong>Offset address:</strong> 0x20C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>FSC13</td><td>FSC12</td><td>FSC11</td><td>FSC10</td><td>FSC9</td><td>FSC8</td><td>FSC7</td><td>FSC6</td><td>FSC5</td><td>FSC4</td><td>FSC3</td><td>FSC2</td><td>FSC1</td><td>FSC0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:14]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:0]</td>
+<td>FSCx</td>
+<td>RW</td>
+<td>Filter bank x bit width control bit; can only be written when FINIT is 1.<br>
+1: Filter bank x registers are a single 32-bit;<br>
+0: Filter bank x registers are 2 × 16-bit.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.23-can1-filter-fifo-association-register-can1_fafifor">25.8.23 CAN1 Filter FIFO Association Register (CAN1_FAFIFOR)</h3>
+
+<p><strong>Offset address:</strong> 0x214</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>FFA13</td><td>FFA12</td><td>FFA11</td><td>FFA10</td><td>FFA9</td><td>FFA8</td><td>FFA7</td><td>FFA6</td><td>FFA5</td><td>FFA4</td><td>FFA3</td><td>FFA2</td><td>FFA1</td><td>FFA0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:14]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:0]</td>
+<td>FFAx</td>
+<td>RW</td>
+<td>Filter bank x associated FIFO control bit; can only be written when FINIT is 1.<br>
+1: Filter bank x is associated with FIFO_1;<br>
+0: Filter bank x is associated with FIFO_0.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.24-can1-filter-activation-register-can1_fwr">25.8.24 CAN1 Filter Activation Register (CAN1_FWR)</h3>
+
+<p><strong>Offset address:</strong> 0x21C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>FACT13</td><td>FACT12</td><td>FACT11</td><td>FACT10</td><td>FACT9</td><td>FACT8</td><td>FACT7</td><td>FACT6</td><td>FACT5</td><td>FACT4</td><td>FACT3</td><td>FACT2</td><td>FACT1</td><td>FACT0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:14]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:0]</td>
+<td>FACTx</td>
+<td>RW</td>
+<td>Filter bank x activation control bit.<br>
+1: Filter bank x is activated;<br>
+0: Filter bank x is disabled.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="25.8.25-can1-filter-bank-filter-registers-can1_firx-i-0-13-x-1-2">25.8.25 CAN1 Filter Bank Filter Registers (CAN1_FiRx) (i=0-13, x=1/2)</h3>
+
+<p><strong>Offset address:</strong> 0x240-0x31C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>FB31</td><td>FB30</td><td>FB29</td><td>FB28</td><td>FB27</td><td>FB26</td><td>FB25</td><td>FB24</td><td>FB23</td><td>FB22</td><td>FB21</td><td>FB20</td><td>FB19</td><td>FB18</td><td>FB17</td><td>FB16</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>FB15</td><td>FB14</td><td>FB13</td><td>FB12</td><td>FB11</td><td>FB10</td><td>FB9</td><td>FB8</td><td>FB7</td><td>FB6</td><td>FB5</td><td>FB4</td><td>FB3</td><td>FB2</td><td>FB1</td><td>FB0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>FB</td>
+<td>RW</td>
+<td>Flag bits of the filter bank registers; can only be written when FINIT is 1.<br>
+Identifier mode:<br>
+1: The corresponding bit expects a recessive bit level;<br>
+0: The corresponding bit expects a dominant bit level.<br>
+Mask mode:<br>
+1: Must match the corresponding identifier register bit;<br>
+0: Does not need to match the corresponding identifier register bit.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

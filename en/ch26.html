@@ -1,0 +1,758 @@
+<h1 id="chapter-26-flexible-static-memory-controller-fsmc">Chapter 26: Flexible Static Memory Controller (FSMC)</h1>
+<p>The Flexible Static Memory Controller (FSMC) supports multiple static memory types and a rich set of memory operation methods. It can be used to expand different types of large-capacity static memories according to system application requirements.</p>
+
+<h2 id="26.1-main-features">26.1 Main Features</h2>
+<ul>
+<li>Supports operation of SRAM, ROM, NOR FLASH, and PSRAM</li>
+<li>Supports operation of NAND FLASH with built-in hardware ECC, capable of detecting up to 8 KByte of data</li>
+<li>Supports operation of synchronous devices, such as PSRAM</li>
+<li>Supports 8-bit or 16-bit data bus width</li>
+<li>Timing signals are software-programmable</li>
+</ul>
+
+<h2 id="26.2-functional-description">26.2 Functional Description</h2>
+
+<h3 id="26.2.1-module-structure">26.2.1 Module Structure</h3>
+<p>The FSMC mainly consists of the HB bus interface, NOR memory controller, NAND memory controller, and external device interface.</p>
+
+<figure><img src="figures/fig_26_1.png"><figcaption>Figure 26-1: FSMC module block diagram</figcaption></figure>
+
+<h3 id="26.2.2-external-device-address-mapping">26.2.2 External Device Address Mapping</h3>
+<p>The FSMC divides memory blocks into two fixed-size 16 MByte memory blocks according to the address lines, as shown in Figure 26-2.</p>
+
+<figure><img src="figures/fig_26_2.png"><figcaption>Figure 26-2: FSMC memory blocks</figcaption></figure>
+
+<table class="data-table">
+<caption>Figure 26-2: FSMC memory block mapping</caption>
+<tr><th>Address</th><th>Memory block</th><th>Supported storage types</th></tr>
+<tr><td>6000 0000h – 60FF FFFFh</td><td>Block 1 (1×16MB)</td><td>NOR/PSRAM</td></tr>
+<tr><td>7000 0000h – 70FF FFFFh</td><td>Block 2 (1×16MB)</td><td>NAND flash</td></tr>
+</table>
+
+<h4 id="26.2.2.1-nor-psram-address-mapping">26.2.2.1 NOR/PSRAM Address Mapping</h4>
+
+<table class="data-table">
+<caption>Table 26-1: External memory address</caption>
+<tr><th>Data width</th><th>Address lines connected to memory</th><th>Maximum accessible memory space (bit)</th></tr>
+<tr><td>8-bit</td><td>HADDR[23:0] correspondingly connected to FSMC_A[23:0]</td><td>16MB×8=128Mbit</td></tr>
+<tr><td>16-bit</td><td>HADDR[23:1] correspondingly connected to FSMC_A[22:0], HADDR[0] not connected</td><td>16MB/2×16=128Mbit</td></tr>
+</table>
+
+<div class="note">Note: 100-pin chips support FSMC and only support address/data multiplexed mode.</div>
+
+<p>NOR FLASH and PSRAM support unaligned access. For asynchronous mode, each operation requires an exact address; for synchronous mode, the address signal is issued only once, after which data is transferred in bulk sequentially via CLK. For NOR FLASH that supports unaligned bulk access, the unaligned access mode of the memory can be set to the same mode as HB. If this cannot be set, disable the unaligned access mode and split the unaligned access request into two consecutive access operations.</p>
+
+<h4 id="26.2.2.2-nand-address-mapping">26.2.2.2 NAND Address Mapping</h4>
+<p>NAND FLASH mapping and timing registers are shown in Table 26-2.</p>
+
+<table class="data-table">
+<caption>Table 26-2: Memory mapping and timing registers</caption>
+<tr><th>Start address</th><th>End address</th><th>FSMC memory block</th><th>Memory space</th><th>Timing register</th></tr>
+<tr><td>0x78000000</td><td>0x78FFFFFF</td><td rowspan="2">Block 2 — NAND FLASH</td><td>Attribute</td><td>FSMC_PATT2 (0x6C)</td></tr>
+<tr><td>0x70000000</td><td>0x70FFFFFF</td><td>Common</td><td>FSMC_PMEM2 (0x68)</td></tr>
+</table>
+
+<p>The common and attribute spaces can be divided within the low 256 KB into the address area (second 128 KB region), command area (second 64 KB region), and data area (first 64 KB region), as shown in Table 26-3.</p>
+<p>The specific process for software to access NAND FLASH by operating these three regions:</p>
+<ul>
+<li>Send read/write and other operation commands to NAND FLASH: software can send commands by operating any address in the command area;</li>
+<li>Send the address to be operated to NAND FLASH: software can send commands by operating any address in the address area;</li>
+<li>Read/write data from/to NAND FLASH: software can write or read data by operating any address in the data area.</li>
+</ul>
+
+<table class="data-table">
+<caption>Table 26-3: NAND memory block selection</caption>
+<tr><th>Region name</th><th>HADDR[17:16]</th><th>Address range</th></tr>
+<tr><td>Address area</td><td>1X</td><td>0x020000–0x03FFFF</td></tr>
+<tr><td>Command area</td><td>01</td><td>0x010000–0x01FFFF</td></tr>
+<tr><td>Data area</td><td>00</td><td>0x000000–0x00FFFF</td></tr>
+</table>
+
+<h3 id="26.2.3-nor-psram-controller">26.2.3 NOR/PSRAM Controller</h3>
+<p>The FSMC supports 8-bit, 16-bit, and 32-bit asynchronous operations for SRAM and ROM, asynchronous mode and burst mode operations for PSRAM, and asynchronous mode and burst mode operations for NOR FLASH. All controller output signals change on the rising edge of the internal clock HCLK. For synchronous write mode (PSRAM), the output data changes on the falling edge of the memory clock (CLK). Refer to the synchronous and asynchronous transfer timing diagrams for details. The memory read/write parameters are software-configurable, as shown in Table 26-4.</p>
+
+<table class="data-table">
+<caption>Table 26-4: Software-controllable NOR/PSRAM read/write parameters</caption>
+<tr><th>Parameter</th><th>Read/Write mode</th><th>Parameter value range</th></tr>
+<tr><td>Address setup time</td><td>Asynchronous</td><td>1 ≤ T ≤ 16 (HB HCLK)</td></tr>
+<tr><td>Address hold time</td><td>Asynchronous</td><td>1 ≤ T ≤ 16 (HB HCLK)</td></tr>
+<tr><td>Data setup time</td><td>Asynchronous</td><td>2 ≤ T ≤ 256 (HB HCLK)</td></tr>
+<tr><td>Bus turnaround time</td><td>Asynchronous or synchronous read</td><td>1 ≤ T ≤ 16 (HB HCLK)</td></tr>
+<tr><td>Clock division factor</td><td>Synchronous</td><td>2 ≤ T ≤ 16 (HB HCLK)</td></tr>
+<tr><td>Data generation time</td><td>Synchronous</td><td>2 ≤ T ≤ 17 (Memory CLK)</td></tr>
+</table>
+
+<h4 id="26.2.3.1-external-memory-multiplexed-interface-signals">26.2.3.1 External Memory Multiplexed Interface Signals</h4>
+<p>NOR FLASH and PSRAM interfaces are shown in Table 26-5 and Table 26-6.</p>
+
+<table class="data-table">
+<caption>Table 26-5: Multiplexed NOR FLASH interface</caption>
+<tr><th>FSMC pin</th><th>Direction</th><th>Description</th></tr>
+<tr><td>CLK</td><td>Output</td><td>Clock line (only for synchronous burst mode)</td></tr>
+<tr><td>A[23:16]</td><td>Output</td><td>Address lines</td></tr>
+<tr><td>AD[15:0]</td><td>Input/Output</td><td>16-bit address/data lines (multiplexed)</td></tr>
+<tr><td>NE[1]</td><td>Output</td><td>Chip select line</td></tr>
+<tr><td>NOE</td><td>Output</td><td>Output enable</td></tr>
+<tr><td>NWE</td><td>Output</td><td>Write enable</td></tr>
+<tr><td>NL (NADV)</td><td>Output</td><td>Latch enable</td></tr>
+<tr><td>NWAIT</td><td>Input</td><td>Wait signal line (only for NOR FLASH)</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-6: Multiplexed PSRAM interface</caption>
+<tr><th>FSMC pin</th><th>Direction</th><th>Description</th></tr>
+<tr><td>CLK</td><td>Output</td><td>Clock line (only for synchronous burst mode)</td></tr>
+<tr><td>A[23:16]</td><td>Output</td><td>Address lines</td></tr>
+<tr><td>AD[15:0]</td><td>Input/Output</td><td>16-bit address/data lines (multiplexed)</td></tr>
+<tr><td>NE[1]</td><td>Output</td><td>Chip select line</td></tr>
+<tr><td>NOE</td><td>Output</td><td>Output enable</td></tr>
+<tr><td>NWE</td><td>Output</td><td>Write enable</td></tr>
+<tr><td>NL (NADV)</td><td>Output</td><td>Latch enable</td></tr>
+<tr><td>NWAIT</td><td>Input</td><td>Wait signal line</td></tr>
+<tr><td>NBL[1]</td><td>Output</td><td>High byte enable (NUB)</td></tr>
+<tr><td>NBL[0]</td><td>Output</td><td>Low byte enable (NLB)</td></tr>
+</table>
+
+<div class="note">Note: Signals with the "N" prefix indicate active-low signals.</div>
+
+<h4 id="26.2.3.2-supported-memories-and-operation-modes">26.2.3.2 Supported Memories and Operation Modes</h4>
+<p>Supported memories and operation modes are shown in Table 26-7.</p>
+
+<table class="data-table">
+<caption>Table 26-7: Supported memories and operation modes</caption>
+<tr><th>Memory</th><th>Mode</th><th>HB data width</th><th>Memory width</th><th>Description</th></tr>
+<tr><td rowspan="6">NOR FLASH</td><td>Async read</td><td>8</td><td>16</td><td></td></tr>
+<tr><td>Async read</td><td>16</td><td>16</td><td></td></tr>
+<tr><td>Async write</td><td>16</td><td>16</td><td></td></tr>
+<tr><td>Async read</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Async write</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Sync read</td><td>16</td><td>16</td><td></td></tr>
+<tr><td></td><td>Sync read</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td rowspan="9">PSRAM</td><td>Async read</td><td>8</td><td>16</td><td>Uses byte signals NBL[1:0]</td></tr>
+<tr><td>Async write</td><td>8</td><td>16</td><td>Uses byte signals NBL[1:0]</td></tr>
+<tr><td>Async read</td><td>16</td><td>16</td><td></td></tr>
+<tr><td>Async write</td><td>16</td><td>16</td><td></td></tr>
+<tr><td>Async read</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Async write</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Sync read</td><td>16</td><td>16</td><td></td></tr>
+<tr><td>Sync read</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Sync write</td><td>8</td><td>16</td><td>Uses byte signals NBL[1:0]</td></tr>
+<tr><td></td><td>Sync write</td><td>16/32</td><td>16</td><td></td></tr>
+<tr><td rowspan="2">SRAM and ROM</td><td>Async read</td><td>8/16/32</td><td>8/16</td><td>Uses byte signals NBL[1:0]</td></tr>
+<tr><td>Async write</td><td>8/16/32</td><td>8/16</td><td>Uses byte signals NBL[1:0]</td></tr>
+</table>
+
+<h4 id="26.2.3.3-nor-psram-asynchronous-transfer-address-data-multiplexed-timing-diagrams">26.2.3.3 NOR/PSRAM Asynchronous Transfer Address/Data Multiplexed Timing Diagrams</h4>
+<p>For asynchronous static memory (NOR FLASH and PSRAM) operations, note the following:</p>
+<ul>
+<li>When extended mode is enabled, modes A, B, C, and D can be mixed for read and write operations to the memory.</li>
+</ul>
+
+<figure><img src="figures/fig_26_3.png"><figcaption>Figure 26-3: Mode 1 read operation (multiplexed)</figcaption></figure>
+
+<figure><img src="figures/fig_26_4.png"><figcaption>Figure 26-4: Mode 1 write operation (multiplexed)</figcaption></figure>
+
+<div class="note">Note: The last HCLK cycle of the write operation guarantees the address and data hold time after the NWE rising edge. Because this HCLK cycle exists, DATAST must be greater than 0 (DATAST > 0).</div>
+
+<table class="data-table">
+<caption>Table 26-8: Mode 1 FSMC_BCR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>0x000</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>0x0</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>1 if the memory supports this feature, otherwise 0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>0x0</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>0x0</td></tr>
+<tr><td>12</td><td>WREN</td><td>Set as needed</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>This bit has no effect</td></tr>
+<tr><td>10</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>Meaningful when bit15 is 1</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>0x0</td></tr>
+<tr><td>7</td><td>Reserved</td><td>0x1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>This bit has no effect</td></tr>
+<tr><td>[5:4]</td><td>MWID</td><td>Set as needed</td></tr>
+<tr><td>[3:2]</td><td>MTYP</td><td>Set as needed, excluding 0x2 (NOR FLASH)</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>0x1</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>0x1</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-9: Mode 1 FSMC_BTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>This bit has no effect</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Write operation is (DATAST+1 HCLK), read operation is (DATAST+3 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK)</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<figure><img src="figures/fig_26_5.png"><figcaption>Figure 26-5: Mode A read operation (multiplexed)</figcaption></figure>
+
+<figure><img src="figures/fig_26_6.png"><figcaption>Figure 26-6: Mode A write operation (multiplexed)</figcaption></figure>
+
+<table class="data-table">
+<caption>Table 26-10: Mode A FSMC_BCR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>0x000</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>0x0</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>1 if the memory supports this feature, otherwise 0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>0x1</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>0x0</td></tr>
+<tr><td>12</td><td>WREN</td><td>Set as needed</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>This bit has no effect</td></tr>
+<tr><td>10</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>Meaningful when bit15 is 1</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>0x0</td></tr>
+<tr><td>7</td><td>Reserved</td><td>0x1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>This bit has no effect</td></tr>
+<tr><td>[5:4]</td><td>MWID</td><td>Set as needed</td></tr>
+<tr><td>[3:2]</td><td>MTYP</td><td>Set as needed, excluding 0x2 (NOR FLASH)</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>0x1</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>0x1</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-11: Mode A FSMC_BTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x0</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Read operation is (DATAST+3 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>This bit has no effect</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Read operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-12: Mode A FSMC_BWTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x0</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Write operation is (DATAST+1 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK)</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Write operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<figure><img src="figures/fig_26_7.png"><figcaption>Figure 26-7: Mode B read operation (multiplexed)</figcaption></figure>
+
+<figure><img src="figures/fig_26_8.png"><figcaption>Figure 26-8: Mode B write operation (multiplexed)</figcaption></figure>
+
+<table class="data-table">
+<caption>Table 26-13: Mode B FSMC_BCR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>0x000</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>0x0</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>1 if the memory supports this feature, otherwise 0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>0x1</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>0x0</td></tr>
+<tr><td>12</td><td>WREN</td><td>Set as needed</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>This bit has no effect</td></tr>
+<tr><td>10</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>Meaningful when bit15 is 1.</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>0x0</td></tr>
+<tr><td>7</td><td>Reserved</td><td>0x1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>0x1</td></tr>
+<tr><td>[5:4]</td><td>MWID</td><td>Set as needed</td></tr>
+<tr><td>[3:2]</td><td>MTYP</td><td>0x2 (NOR FLASH)</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>0x1</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>0x1</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-14: Mode B FSMC_BTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x1</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Read operation is (DATAST+3 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK)</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Read operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-15: Mode B FSMC_BWTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x1</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Write operation is (DATAST+1 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK)</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Write operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<figure><img src="figures/fig_26_9.png"><figcaption>Figure 26-9: Mode C read operation (multiplexed)</figcaption></figure>
+
+<figure><img src="figures/fig_26_10.png"><figcaption>Figure 26-10: Mode C write operation (multiplexed)</figcaption></figure>
+
+<table class="data-table">
+<caption>Table 26-16: Mode C FSMC_BCR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>0x000</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>0x0</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>1 if the memory supports this feature, otherwise 0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>0x1</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>0x0</td></tr>
+<tr><td>12</td><td>WREN</td><td>Set as needed</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>This bit has no effect</td></tr>
+<tr><td>10</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>Meaningful when bit15 is 1.</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>0x0</td></tr>
+<tr><td>7</td><td>Reserved</td><td>0x1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>0x1</td></tr>
+<tr><td>[5:4]</td><td>MWID</td><td>Set as needed</td></tr>
+<tr><td>[3:2]</td><td>MTYP</td><td>0x2 (NOR FLASH)</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>0x1</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>0x1</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-17: Mode C FSMC_BTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x2</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Read operation is (DATAST+3 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK)</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Read operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-18: Mode C FSMC_BWTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x2</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Write operation is (DATAST+1 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK)</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Write operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<figure><img src="figures/fig_26_11.png"><figcaption>Figure 26-11: Mode D read operation (multiplexed)</figcaption></figure>
+
+<figure><img src="figures/fig_26_12.png"><figcaption>Figure 26-12: Mode D write operation (multiplexed)</figcaption></figure>
+
+<table class="data-table">
+<caption>Table 26-19: Mode D FSMC_BCR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>0x000</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>0x0</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>1 if the memory supports this feature, otherwise 0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>0x1</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>0x0</td></tr>
+<tr><td>12</td><td>WREN</td><td>Set as needed</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>This bit has no effect</td></tr>
+<tr><td>10</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>Meaningful when bit15 is 1.</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>0x0</td></tr>
+<tr><td>7</td><td>Reserved</td><td>0x1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>Set as needed</td></tr>
+<tr><td>[5:4]</td><td>MWID</td><td>Set as needed</td></tr>
+<tr><td>[3:2]</td><td>MTYP</td><td>Set as needed</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>0x1</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>0x1</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-20: Mode D FSMC_BTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x3</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>This bit has no effect</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>This bit has no effect</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Read operation is (DATAST+3 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK).</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Read operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-21: Mode D FSMC_BWTR1 bit fields</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x3</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>0x0</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>0x0</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>0x0</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>Data setup time. Write operation is (DATAST+1 HCLK). Minimum value is 1.</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>Address hold time. (ADDHLD+1 HCLK).</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>Address setup time. Write operation is (ADDSET+1 HCLK).</td></tr>
+</table>
+
+<h4 id="26.2.3.4-nor-psram-synchronous-transfer-address-data-multiplexed-timing-diagrams">26.2.3.4 NOR/PSRAM Synchronous Transfer Address/Data Multiplexed Timing Diagrams</h4>
+<p>Note the data delay and NOR FLASH latency: the DATLAT value must be consistent with the definition in the NOR FLASH configuration register. The clock cycles when the NADV signal is low are not counted in the delay parameter. The FSMC DATLAT parameter can be DATALAT+2 or DATALAT+3. For special memories that generate an NWAIT signal during the data hold time, DATLAT must be set to the minimum value. For other memories that do not generate an NWAIT signal during the data hold time, the data hold time of the FSMC and the memory must be set consistently.</p>
+<p>For single bulk transfers, note that the memory is configured in synchronous burst mode. If 16-bit data is transferred, the FSMC performs one burst transfer of length 1. If 32-bit data is transferred, the FSMC splits it into two 16-bit transfers and performs one burst transfer of length 2.</p>
+<p>During NOR FLASH synchronous burst mode access, after the hold time (DATLAT+1 CLK), if the NWAIT signal is detected as low, the FSMC must insert wait cycles before the NWAIT goes high. When the NWAIT becomes high, the FSMC considers the data valid. During the wait state insertion controlled by the NWAIT signal, the controller continuously sends clock pulses to the memory, maintains the chip select signal and output enable signal, and ignores invalid data signals. In burst transfer mode, the NWAIT signal of the NOR FLASH can select two timing configurations by configuring the WAITCFG bit.</p>
+
+<figure><img src="figures/fig_26_13.png"><figcaption>Figure 26-13: Synchronous bus multiplexed read operation (multiplexed)</figcaption></figure>
+
+<table class="data-table">
+<caption>Table 26-22: FSMC_BCR1 bit fields (synchronous read mode)</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>0x000</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>This bit has no effect</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>0x0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>0x0</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>0x0</td></tr>
+<tr><td>12</td><td>WREN</td><td>This bit has no effect</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>Set as needed</td></tr>
+<tr><td>10</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>Set as needed</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>0x1</td></tr>
+<tr><td>7</td><td>Reserved</td><td>0x1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>Set as needed</td></tr>
+<tr><td>[5:4]</td><td>MWID</td><td>Set as needed</td></tr>
+<tr><td>[3:2]</td><td>MTYP</td><td>0x1 or 0x2</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>0x1</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>0x1</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-23: FSMC_BTR1 bit fields (synchronous read mode)</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x0</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>Data hold time</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>0x0 – Reserved; 0x1 - CLK=2 HCLK</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>This bit has no effect</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>This bit has no effect</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>This bit has no effect</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>This bit has no effect</td></tr>
+</table>
+
+<figure><img src="figures/fig_26_14.png"><figcaption>Figure 26-14: Synchronous bus multiplexed write operation (multiplexed)</figcaption></figure>
+
+<table class="data-table">
+<caption>Table 26-24: FSMC_BCR1 bit fields (synchronous write mode)</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>0x000</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>0x1</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>0x0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>0x0</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>1 if the memory supports this feature, otherwise 0</td></tr>
+<tr><td>12</td><td>WREN</td><td>0x1</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>0x0</td></tr>
+<tr><td>10</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>Set as needed</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>This bit has no effect</td></tr>
+<tr><td>7</td><td>Reserved</td><td>0x1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>Set as needed</td></tr>
+<tr><td>[5:4]</td><td>MWID</td><td>Set as needed</td></tr>
+<tr><td>[3:2]</td><td>MTYP</td><td>0x1</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>0x1</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>0x1</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-25: FSMC_BTR1 bit fields (synchronous write mode)</caption>
+<tr><th>Bitx</th><th>Name</th><th>Configuration value</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>0x0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD</td><td>0x0</td></tr>
+<tr><td>[27:24]</td><td>DATLAT</td><td>Data hold time</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV</td><td>0x0 – Reserved; 0x1 - CLK=2 HCLK</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN</td><td>This bit has no effect</td></tr>
+<tr><td>[15:8]</td><td>DATAST</td><td>This bit has no effect</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD</td><td>This bit has no effect</td></tr>
+<tr><td>[3:0]</td><td>ADDSET</td><td>This bit has no effect</td></tr>
+</table>
+
+<h3 id="26.2.4-nand-flash-controller">26.2.4 NAND FLASH Controller</h3>
+<p>The FSMC supports 8-bit and 16-bit NAND FLASH operations. The FSMC can generate multiple address cycles as needed, and theoretically there is no limit to the NAND FLASH capacity that the FSMC can address. The NAND FLASH read/write parameters are software-configurable, as shown in Table 26-26.</p>
+
+<table class="data-table">
+<caption>Table 26-26: Software-controllable NAND read/write parameters</caption>
+<tr><th>Parameter</th><th>Function</th><th>Read/Write</th><th>Parameter value range</th></tr>
+<tr><td>Memory setup time</td><td>Address setup time before issuing command</td><td>Read/Write</td><td>1 ≤ T ≤ 255 (HB HCLK)</td></tr>
+<tr><td>Memory wait time</td><td>Minimum duration of command</td><td>Read/Write</td><td>1 ≤ T ≤ 255 (HB HCLK)</td></tr>
+<tr><td>Memory hold time</td><td>Address hold time after command ends; also data hold time during write</td><td>Read/Write</td><td>1 ≤ T ≤ 255 (HB HCLK)</td></tr>
+<tr><td>Memory data bus high-z time</td><td>Duration the data bus remains high-impedance after write operation starts</td><td>Write</td><td>0 ≤ T ≤ 255 (HB HCLK)</td></tr>
+</table>
+
+<h4 id="26.2.4.1-external-memory-interface-signals">26.2.4.1 External Memory Interface Signals</h4>
+<p>The 8-bit and 16-bit NAND FLASH interfaces are shown in Table 26-27 and Table 26-28.</p>
+
+<table class="data-table">
+<caption>Table 26-27: 8-bit NAND FLASH</caption>
+<tr><th>FSMC pin</th><th>Direction</th><th>Description</th></tr>
+<tr><td>A[17]</td><td>Output</td><td>Address latch enable signal (ALE)</td></tr>
+<tr><td>A[16]</td><td>Output</td><td>Command latch enable signal (CLE)</td></tr>
+<tr><td>D[7:0]</td><td>Input/Output</td><td>8-bit bidirectional address/data multiplexed bus</td></tr>
+<tr><td>NCE[2]</td><td>Output</td><td>Chip select line</td></tr>
+<tr><td>NOE</td><td>Output</td><td>Output enable</td></tr>
+<tr><td>NWE</td><td>Output</td><td>Write enable</td></tr>
+<tr><td>NWAIT</td><td>Input</td><td>Wait signal line</td></tr>
+</table>
+
+<table class="data-table">
+<caption>Table 26-28: 16-bit NAND FLASH</caption>
+<tr><th>FSMC pin</th><th>Direction</th><th>Description</th></tr>
+<tr><td>A[17]</td><td>Output</td><td>Address latch enable signal (ALE)</td></tr>
+<tr><td>A[16]</td><td>Output</td><td>Command latch enable signal (CLE)</td></tr>
+<tr><td>D[15:0]</td><td>Input/Output</td><td>16-bit bidirectional address/data multiplexed bus</td></tr>
+<tr><td>NCE[2]</td><td>Output</td><td>Chip select line</td></tr>
+<tr><td>NOE</td><td>Output</td><td>Output enable</td></tr>
+<tr><td>NWE</td><td>Output</td><td>Write enable</td></tr>
+<tr><td>NWAIT</td><td>Input</td><td>Wait signal line</td></tr>
+</table>
+
+<h4 id="26.2.4.2-supported-memories-and-operation-modes">26.2.4.2 Supported Memories and Operation Modes</h4>
+<p>Supported memories and operation modes are shown in Table 26-29.</p>
+
+<table class="data-table">
+<caption>Table 26-29: Supported memories and operation modes</caption>
+<tr><th>Memory</th><th>Mode</th><th>HB data width</th><th>Memory width</th><th>Description</th></tr>
+<tr><td rowspan="6">8-bit NAND</td><td>Async read</td><td>8</td><td>8</td><td></td></tr>
+<tr><td>Async write</td><td>8</td><td>8</td><td></td></tr>
+<tr><td>Async read</td><td>16</td><td>8</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Async write</td><td>16</td><td>8</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Async read</td><td>32</td><td>8</td><td>Split into 4 FSMC accesses</td></tr>
+<tr><td>Async write</td><td>32</td><td>8</td><td>Split into 4 FSMC accesses</td></tr>
+<tr><td rowspan="5">16-bit NAND</td><td>Async read</td><td>8</td><td>16</td><td></td></tr>
+<tr><td>Async read</td><td>16</td><td>16</td><td></td></tr>
+<tr><td>Async write</td><td>16</td><td>16</td><td></td></tr>
+<tr><td>Async read</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+<tr><td>Async write</td><td>32</td><td>16</td><td>Split into 2 FSMC accesses</td></tr>
+</table>
+
+<h4 id="26.2.4.3-nand-flash-timing-diagram-including-pre-wait-function">26.2.4.3 NAND FLASH Timing Diagram (Including Pre-wait Function)</h4>
+<p>NAND FLASH operation timing control involves the FSMC_PMEM2 and FSMC_PATT2 timing registers, each containing 4 parameters. MEMHOLD, MEMWAIT, and ATTSET correspond to the number of HCLK cycles for the three stages of NAND FLASH operation. The MEMHIZ parameter corresponds to when the FSMC starts driving the data bus. The NAND FLASH controller common memory space access timing is shown in Figure 26-15.</p>
+
+<figure><img src="figures/fig_26_15.png"><figcaption>Figure 26-15: NAND FLASH controller common memory space access timing</figcaption></figure>
+
+<h4 id="26.2.4.4-nand-flash-operation-flow">26.2.4.4 NAND FLASH Operation Flow</h4>
+<p>The NAND FLASH command latch enable signal (CLE) and address latch enable signal (ALE) are driven by FSMC address lines A16 and A17, respectively. Therefore, when sending commands or addresses to NAND FLASH, a write operation must be performed to a specific address in the memory space. The NAND FLASH read operation process is as follows:</p>
+<ol>
+<li>According to the characteristics of the NAND FLASH to be operated, configure the PWID, PTYP, PWAITEN, and PBKEN of the FSMC_PCR2, FSMC_PMEM2, and FSMC_PATT2 registers.</li>
+<li>Write the command byte to the common memory space. During the period when NWE is low, CLE outputs a high level. At this time, the command byte is recognized by the NAND FLASH as a command and latched. The subsequent page read operation does not need to repeat sending this command.</li>
+<li>Then write 4 bytes to the memory space as the start address for the read operation. During the period when NWE is low, ALE outputs a high level. At this time, the 4 bytes are recognized by the NAND FLASH as the start address for the read operation. When operating the attribute memory space, the FSMC can generate different timing to implement the pre-wait function of some NAND FLASH devices.</li>
+<li>Before starting a new operation, the FSMC controller must wait for the NAND FLASH R/NB signal to go high. During the wait period, the FSMC controller must keep the NCE signal low.</li>
+<li>The FSMC controller can read out the memory page byte by byte from the NAND FLASH by operating the common memory space.</li>
+</ol>
+
+<h4 id="26.2.4.5-nand-flash-pre-wait-function">26.2.4.5 NAND FLASH Pre-wait Function</h4>
+<p>Certain special NAND FLASH devices require the R/NB signal to go low after the last address byte is input, as shown in Figure 26-16.</p>
+<p>In the figure: (1) CPU writes command byte 0x00 to 0x70010000; (2) CPU writes NAND FLASH address A7–A0 to 0x70020000; (3) CPU writes NAND FLASH address A15–A8 to 0x70020000; (4) CPU writes NAND FLASH address A23–A16 to 0x70020000; (5) CPU writes NAND FLASH address A31–A24 to 0x70020000.</p>
+
+<figure><img src="figures/fig_26_16.png"><figcaption>Figure 26-16: Operating special NAND FLASH</figcaption></figure>
+
+<p>When using this function, configure the MEMHOLD field of the FSMC_PMEM2 register to guarantee the tWB timing. After that, for all read/write operations to the NAND FLASH, the FSMC controller inserts (MEMHOLD+1) HCLK hold delay between the rising edge of the NWE signal and the next operation. To solve this issue, use the attribute space to configure the ATTHOLD value to meet the tWB timing, while keeping MEMHOLD at the minimum value. In this case, only when writing the last byte of the NAND FLASH address does the FSMC controller need to write to the attribute memory space; all other NAND FLASH read/write operations use the common memory space.</p>
+
+<h4 id="26.2.4.6-nand-flash-ecc-function">26.2.4.6 NAND FLASH ECC Function</h4>
+<p>The FSMC NAND FLASH controller includes a hardware error correction code (ECC) calculation module, which can effectively reduce the software workload on the CPU when processing error correction codes. The ECC module supports correcting 1-bit errors and detecting 2-bit errors per 256, 512, 1024, 2048, 4096, or 8192 bytes during NAND FLASH read/write operations. The valid ECC result bits corresponding to page sizes are shown in Table 26-30. After the ECC calculation circuit is enabled, the ECC module monitors the NAND FLASH data bus and read/write signals (NCE and NWE). Notes for using ECC:</p>
+<ul>
+<li>When accessing NAND FLASH, data appearing on the D[15:0] bus is latched and used for ECC calculation.</li>
+<li>After the specified number of bytes has been written to or read from NAND FLASH, the software reads the ECC value from the FSMC_ECCR2 register. To recalculate ECC, first clear ECCEN to 0, then write 1 to re-enable ECC calculation.</li>
+</ul>
+
+<table class="data-table">
+<caption>Table 26-30: Page size corresponding to valid ECC result bits</caption>
+<tr><th>ECCPS[2:0]</th><th>Page size (bytes)</th><th>ECC valid bits</th></tr>
+<tr><td>000</td><td>256</td><td>ECC[21:0]</td></tr>
+<tr><td>001</td><td>512</td><td>ECC[23:0]</td></tr>
+<tr><td>010</td><td>1024</td><td>ECC[25:0]</td></tr>
+<tr><td>011</td><td>2048</td><td>ECC[27:0]</td></tr>
+<tr><td>100</td><td>4096</td><td>ECC[29:0]</td></tr>
+<tr><td>101</td><td>8192</td><td>ECC[31:0]</td></tr>
+</table>
+
+<h2 id="26.3-register-description">26.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 26-31: FSMC related register list</caption>
+<tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+<tr><td>R32_FSMC_BCR1</td><td>0xA0000000</td><td>SRAM/NOR-Flash chip select control register 1</td><td>0x000030DX</td></tr>
+<tr><td>R32_FSMC_BTR1</td><td>0xA0000004</td><td>SRAM/NOR-Flash chip select timing register 1</td><td>0x0FFFFFFF</td></tr>
+<tr><td>R32_FSMC_PCR2</td><td>0xA0000060</td><td>NAND-Flash control register 2</td><td>0x00000018</td></tr>
+<tr><td>R32_FSMC_SR2</td><td>0xA0000064</td><td>FIFO status and interrupt register 2</td><td>0x00000040</td></tr>
+<tr><td>R32_FSMC_PMEM2</td><td>0xA0000068</td><td>Common memory space timing register 2</td><td>0xFCFCFCFC</td></tr>
+<tr><td>R32_FSMC_PATT2</td><td>0xA000006C</td><td>Attribute memory space timing register 2</td><td>0xFCFCFCFC</td></tr>
+<tr><td>R32_FSMC_ECCR2</td><td>0xA0000074</td><td>ECC result register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_FSMC_BWTR1</td><td>0xA0000104</td><td>SRAM/NOR-Flash write timing register 1</td><td>0x0FFFFFFF</td></tr>
+</table>
+
+<h3 id="26.3.1-sram-nor-flash-chip-select-control-register-1-fsmc_bcr1">26.3.1 SRAM/NOR-Flash Chip Select Control Register 1 (FSMC_BCR1)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="12">Reserved</td><td>CBURSTRW</td><td colspan="3">Reserved</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td>ASYNCWAIT</td><td>EXTMOD</td><td>WAITEN</td><td>WREN</td><td>WAITCFG</td><td>Reserved</td><td>WAITPOL</td><td>BURSTEN</td><td>Reserved</td><td>FACCEN</td><td colspan="2">MWID[1:0]</td><td colspan="2">MTYP[1:0]</td><td>MUXEN</td><td>MBKEN</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>19</td><td>CBURSTRW</td><td>RW</td><td>Synchronous write enable: 1: write operation in synchronous mode; 0: write operation in asynchronous mode.</td><td>0</td></tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>15</td><td>ASYNCWAIT</td><td>RW</td><td>Wait signal during asynchronous transfer: 1: enable wait signal during asynchronous transfer; 0: disable wait signal during asynchronous transfer.</td><td>0</td></tr>
+<tr><td>14</td><td>EXTMOD</td><td>RW</td><td>Extended mode enable: 1: allow write to use FSMC_BWTR register; 0: do not allow write to use FSMC_BWTR register.</td><td>0</td></tr>
+<tr><td>13</td><td>WAITEN</td><td>RW</td><td>Wait enable. When the flash memory is in burst transfer mode, this bit controls whether wait signals are inserted based on the NWAIT signal. 1: use NWAIT signal; 0: disable NWAIT signal.</td><td>1</td></tr>
+<tr><td>12</td><td>WREN</td><td>RW</td><td>Write operation enable: 1: allow FSMC to write to memory; 0: disable FSMC from writing to memory.</td><td>1</td></tr>
+<tr><td>11</td><td>WAITCFG</td><td>RW</td><td>Wait timing configuration: 1: NWAIT signal is active during the wait state; 0: NWAIT signal is active one data cycle before the wait state.</td><td>0</td></tr>
+<tr><td>10</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>9</td><td>WAITPOL</td><td>RW</td><td>Wait signal polarity: 1: NWAIT wait signal is active high; 0: NWAIT wait signal is active low.</td><td>0</td></tr>
+<tr><td>8</td><td>BURSTEN</td><td>RW</td><td>Synchronous read enable: 1: enable synchronous read mode, perform read access in synchronous mode; 0: disable synchronous read mode, perform read access in asynchronous mode.</td><td>0</td></tr>
+<tr><td>7</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>1</td></tr>
+<tr><td>6</td><td>FACCEN</td><td>RW</td><td>NOR FLASH access enable: 1: allow NOR FLASH access; 0: disable NOR FLASH access.</td><td>1</td></tr>
+<tr><td>[5:4]</td><td>MWID[1:0]</td><td>RW</td><td>Data bus width: 00: 8-bit; 01: 16-bit; 10: Reserved; 11: Reserved.</td><td>01b</td></tr>
+<tr><td>[3:2]</td><td>MTYP[1:0]</td><td>RW</td><td>Memory type: 00: SRAM, ROM; 01: PSRAM; 10: NOR FLASH; 11: Reserved.</td><td>xxb</td></tr>
+<tr><td>1</td><td>MUXEN</td><td>RW</td><td>Address/data multiplex enable: 1: address/data multiplexed; 0: address/data not multiplexed.</td><td>x</td></tr>
+<tr><td>0</td><td>MBKEN</td><td>RW</td><td>Memory block enable: 1: enable the corresponding memory block; 0: disable the corresponding memory block.</td><td>x</td></tr>
+</table>
+
+<h3 id="26.3.2-sram-nor-flash-chip-select-timing-register-1-fsmc_btr1">26.3.2 SRAM/NOR-Flash Chip Select Timing Register 1 (FSMC_BTR1)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="2">Reserved</td><td colspan="2">ACCMOD[1:0]</td><td colspan="4">DATLAT[3:0]</td><td colspan="4">CLKDIV[3:0]</td><td colspan="4">BUSTURN[3:0]</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td colspan="8">DATAST[7:0]</td><td colspan="4">ADDHLD[3:0]</td><td colspan="4">ADDSET[3:0]</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD[1:0]</td><td>RW</td><td>Asynchronous access mode: 00: Mode A; 01: Mode B; 10: Mode C; 11: Mode D.</td><td>00b</td></tr>
+<tr><td>[27:24]</td><td>DATLAT[3:0]</td><td>RW</td><td>Data hold time. Used for synchronous burst mode (only for NOR FLASH). 0000: first data hold time is 2 CLK clocks; ...; 1110: first data hold time is 16 CLK clocks; 1111: first data hold time is 17 CLK clocks.</td><td>1111b</td></tr>
+<tr><td>[23:20]</td><td>CLKDIV[3:0]</td><td>RW</td><td>Clock division ratio (CLK signal). This parameter has no effect when accessing asynchronous NOR FLASH, SRAM, and ROM. 0000: Reserved; 0001: 1 CLK cycle = 2 HCLK cycles; ...; 1110: 1 CLK cycle = 15 HCLK cycles; 1111: 1 CLK cycle = 16 HCLK cycles.</td><td>1111b</td></tr>
+<tr><td>[19:16]</td><td>BUSTURN[3:0]</td><td>RW</td><td>Bus turnaround time. (Only for NOR FLASH) 0000: bus turnaround time = 1 HCLK cycle; ...; 1110: bus turnaround time = 15 HCLK cycles; 1111: bus turnaround time = 16 HCLK cycles.</td><td>1111b</td></tr>
+<tr><td>[15:8]</td><td>DATAST[7:0]</td><td>RW</td><td>Data hold time. 00000000: data hold time = 1 HCLK cycle; 00000001: data hold time = 2 HCLK cycles; ...; 11111110: data hold time = 255 HCLK cycles; 11111111: data hold time = 256 HCLK cycles. For the data hold time of each memory type and access method, refer to the corresponding diagrams (Figures 26-3 to 26-12). For example: Mode 1 and Mode A, read operation with DATAST=1: data hold time = DATAST+3 = 4 HCLK cycles.</td><td>0xFF</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD[3:0]</td><td>RW</td><td>Address hold time. (Only for asynchronous operations) 0000: address hold time = 1 HCLK cycle; ...; 1110: address hold time = 15 HCLK cycles; 1111: address hold time = 16 HCLK cycles.</td><td>1111b</td></tr>
+<tr><td>[3:0]</td><td>ADDSET[3:0]</td><td>RW</td><td>Address setup time. (Only for asynchronous operations) 0000: address setup time = 1 HCLK cycle; ...; 1110: address setup time = 15 HCLK cycles; 1111: address setup time = 16 HCLK cycles. For the data hold time of each memory type and access method, refer to the corresponding diagrams (Figures 26-3 to 26-12). For example: Mode 1 and Mode A, read operation with DATAST=1: data hold time = DATAST+3 = 4 HCLK cycles.</td><td>1111b</td></tr>
+</table>
+
+<h3 id="26.3.3-nand-flash-control-register-2-fsmc_pcr2">26.3.3 NAND-Flash Control Register 2 (FSMC_PCR2)</h3>
+<p><strong>Offset address:</strong> 0x60</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="12">Reserved</td><td colspan="3">ECCPS[2:0]</td><td>TAR[3]</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td colspan="3">TAR[2:0]</td><td colspan="4">TCLR[3:0]</td><td colspan="2">Reserved</td><td>ECCEN</td><td colspan="2">PWID[1:0]</td><td>PTYP</td><td>PBKEN</td><td>PWAITEN</td><td>Reserved</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:20]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[19:17]</td><td>ECCPS[2:0]</td><td>RW</td><td>ECC page size: 000: 256 Byte; 001: 512 Byte; 010: 1024 Byte; 011: 2048 Byte; 100: 4096 Byte; 101: 8192 Byte; 111: Reserved.</td><td>000b</td></tr>
+<tr><td>[16:13]</td><td>TAR[3:0]</td><td>RW</td><td>ALE to RE delay: 0000: 1 HCLK cycle; ...; 1110: 15 HCLK cycles; 1111: 16 HCLK cycles.</td><td>0000b</td></tr>
+<tr><td>[12:9]</td><td>TCLR[3:0]</td><td>RW</td><td>CLE to RE delay: 0000: 1 HCLK cycle; ...; 1110: 15 HCLK cycles; 1111: 16 HCLK cycles.</td><td>0000b</td></tr>
+<tr><td>[8:7]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>6</td><td>ECCEN</td><td>RW</td><td>ECC enable: 1: enable ECC; 0: disable ECC.</td><td>0</td></tr>
+<tr><td>[5:4]</td><td>PWID[1:0]</td><td>RW</td><td>Data bus width: 00: 8-bit; 01: 16-bit; 10: Reserved; 11: Reserved.</td><td>01b</td></tr>
+<tr><td>3</td><td>PTYP</td><td>RW</td><td>Memory type: 1: NAND flash; 0: Reserved.</td><td>1</td></tr>
+<tr><td>2</td><td>PBKEN</td><td>RW</td><td>NAND memory enable: 1: enable the corresponding memory block; 0: disable the corresponding memory block.</td><td>0</td></tr>
+<tr><td>1</td><td>PWAITEN</td><td>RW</td><td>Wait function enable: 1: enable; 0: disable.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</table>
+
+<h3 id="26.3.4-fifo-status-and-interrupt-register-2-fsmc_sr2">26.3.4 FIFO Status and Interrupt Register 2 (FSMC_SR2)</h3>
+<p><strong>Offset address:</strong> 0x64</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="16">Reserved</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td colspan="7">Reserved</td><td>FEMPT</td><td colspan="6">Reserved</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:7]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>6</td><td>FEMPT</td><td>RO</td><td>FIFO empty flag. 1: FIFO empty; 0: FIFO not empty.</td><td>1</td></tr>
+<tr><td>[5:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</table>
+
+<h3 id="26.3.5-common-memory-space-timing-register-2-fsmc_pmem2">26.3.5 Common Memory Space Timing Register 2 (FSMC_PMEM2)</h3>
+<p><strong>Offset address:</strong> 0x68</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="8">MEMHIZx[7:0]</td><td colspan="8">MEMHOLDx[7:0]</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td colspan="8">MEMWAITx[7:0]</td><td colspan="8">MEMSETx[7:0]</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:24]</td><td>MEMHIZx[7:0]</td><td>RW</td><td>Common space data bus high-impedance time: 00000000: NAND FLASH 0 HCLK cycles; ...; 11111110: NAND FLASH 254 HCLK cycles; 11111111: NAND FLASH 255 HCLK cycles.</td><td>0xFC</td></tr>
+<tr><td>[23:16]</td><td>MEMHOLDx[7:0]</td><td>RW</td><td>Common space hold time: 00000000: Reserved; 00000001: 1 HCLK cycle; ...; 11111110: 254 HCLK cycles; 11111111: 255 HCLK cycles.</td><td>0xFC</td></tr>
+<tr><td>[15:8]</td><td>MEMWAITx[7:0]</td><td>RW</td><td>Common space wait time. (Must add the wait cycles introduced by the NWAIT signal going low) 00000000: Reserved; 00000001: 2 HCLK cycles; ...; 11111110: 255 HCLK cycles; 11111111: 256 HCLK cycles.</td><td>0xFC</td></tr>
+<tr><td>[7:0]</td><td>MEMSETx[7:0]</td><td>RW</td><td>Common space setup time: 00000000: NAND FLASH 2 HCLK cycles; ...; 11111110: NAND FLASH 256 HCLK cycles; 11111111: NAND FLASH 257 HCLK cycles.</td><td>0xFC</td></tr>
+</table>
+
+<h3 id="26.3.6-attribute-memory-space-timing-register-2-fsmc_patt2">26.3.6 Attribute Memory Space Timing Register 2 (FSMC_PATT2)</h3>
+<p><strong>Offset address:</strong> 0x6C</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="8">ATTHIZx[7:0]</td><td colspan="8">ATTHOLDx[7:0]</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td colspan="8">ATTWAITx[7:0]</td><td colspan="8">ATTSETx[7:0]</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:24]</td><td>ATTHIZx[7:0]</td><td>RW</td><td>Attribute space data bus high-impedance time: 00000000: 0 HCLK cycles; ...; 11111110: 254 HCLK cycles; 11111111: 255 HCLK cycles.</td><td>0xFC</td></tr>
+<tr><td>[23:16]</td><td>ATTHOLDx[7:0]</td><td>RW</td><td>Attribute space hold time: 00000000: Reserved; 00000001: 1 HCLK cycle; ...; 11111110: 254 HCLK cycles; 11111111: 255 HCLK cycles.</td><td>0xFC</td></tr>
+<tr><td>[15:8]</td><td>ATTWAITx[7:0]</td><td>RW</td><td>Attribute space wait time. (Must add the wait cycles introduced by the NWAIT signal going low) 00000000: 1 HCLK cycle; 00000001: 2 HCLK cycles; ...; 11111110: 255 HCLK cycles; 11111111: 256 HCLK cycles.</td><td>0xFC</td></tr>
+<tr><td>[7:0]</td><td>ATTSETx[7:0]</td><td>RW</td><td>Attribute space setup time: 00000000: 1 HCLK cycle; ...; 11111110: 255 HCLK cycles; 11111111: 256 HCLK cycles.</td><td>0xFC</td></tr>
+</table>
+
+<h3 id="26.3.7-ecc-result-register-2-fsmc_eccr2">26.3.7 ECC Result Register 2 (FSMC_ECCR2)</h3>
+<p><strong>Offset address:</strong> 0x74</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="16">ECC[31:16]</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td colspan="16">ECC[15:0]</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:0]</td><td>ECC[31:0]</td><td>RO</td><td>ECC calculation result.</td><td>0</td></tr>
+</table>
+
+<h3 id="26.3.8-sram-nor-flash-write-timing-register-1-fsmc_bwtr1">26.3.8 SRAM/NOR-Flash Write Timing Register 1 (FSMC_BWTR1)</h3>
+<p><strong>Offset address:</strong> 0x104</p>
+
+<table class="reg-bits">
+<tr><td>31</td><td>30</td><td>29</td><td>28</td><td>27</td><td>26</td><td>25</td><td>24</td><td>23</td><td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td></tr>
+<tr><td colspan="2">Reserved</td><td colspan="2">ACCMOD[1:0]</td><td colspan="8">Reserved</td><td colspan="4">BUSTYRN[3:0]</td></tr>
+<tr><td>15</td><td>14</td><td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td>4</td><td>3</td><td>2</td><td>1</td><td>0</td></tr>
+<tr><td colspan="8">DATAST[7:0]</td><td colspan="4">ADDHLD[3:0]</td><td colspan="4">ADDSET[3:0]</td></tr>
+</table>
+
+<table class="reg-fields">
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+<tr><td>[31:30]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[29:28]</td><td>ACCMOD[1:0]</td><td>RW</td><td>Access mode. (This bit is valid when EXTMOD is 1) 00: Access mode A; 01: Access mode B; 10: Access mode C; 11: Access mode D.</td><td>00b</td></tr>
+<tr><td>[27:20]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[19:16]</td><td>BUSTYRN[3:0]</td><td>RW</td><td>Bus turnaround time. 0000: 1 HCLK cycle; 0001: 2 HCLK cycles; ...; 1110: 15 HCLK cycles; 1111: 16 HCLK cycles.</td><td>1111b</td></tr>
+<tr><td>[15:8]</td><td>DATAST[7:0]</td><td>RW</td><td>Data hold time: 00000000: Reserved; 00000001: 2 HCLK cycles; ...; 11111110: 255 HCLK cycles; 11111111: 256 HCLK cycles.</td><td>0xFF</td></tr>
+<tr><td>[7:4]</td><td>ADDHLD[3:0]</td><td>RW</td><td>Address hold time: 0000: Reserved; 0001: 2 HCLK cycles; ...; 1110: 15 HCLK cycles; 1111: 16 HCLK cycles.</td><td>1111b</td></tr>
+<tr><td>[3:0]</td><td>ADDSET[3:0]</td><td>RW</td><td>Address setup time: 0000: 1 HCLK cycle; 0001: 2 HCLK cycles; ...; 1110: 15 HCLK cycles; 1111: 16 HCLK cycles.</td><td>1111b</td></tr>
+</table>

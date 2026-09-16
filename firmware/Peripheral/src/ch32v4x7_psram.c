@@ -1,8 +1,8 @@
 /********************************** (C) COPYRIGHT  *******************************
 * File Name          : ch32v4x7_psram.c
 * Author             : WCH
-* Version            : V1.0.0
-* Date               : 2025/12/01
+* Version            : V1.0.1
+* Date               : 2026/06/29
 * Description        : This file provides all the PSRAM firmware functions.
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
@@ -375,7 +375,7 @@ FlagStatus PSRAM_GetFlagStatus(uint32_t PSRAM_FLAG)
 }
 
 /*********************************************************************
- * @fn      SDIO_ITConfig
+ * @fn      PSRAM_ITConfig
  *
  * @brief   Enables or disables the PSRAM interrupts.
  *

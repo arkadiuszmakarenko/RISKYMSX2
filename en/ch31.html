@@ -1,0 +1,120 @@
+<h1 id="chapter-31-electronic-signature-esig">Chapter 31: Electronic Signature (ESIG)</h1>
+
+<p>The electronic signature contains chip identification information: flash memory area capacity and a unique device identifier. It is programmed by the manufacturer into the system storage area of the memory module at the factory, and can be read via SWD (SDI) or application code.</p>
+
+<h2 id="31.1-functional-description">31.1 Functional Description</h2>
+
+<p><strong>Flash memory area capacity:</strong> Indicates the size available for the user application on the current chip.</p>
+
+<p><strong>Unique device identifier:</strong> A 96-bit binary code that is unique to any given microcontroller. Users can only read it and cannot modify it. This unique identification information can be used as a security password for the microcontroller (product), encryption/decryption key, product serial number, etc., to improve system security mechanisms or indicate identity information.</p>
+
+<p>All of the above content can be accessed by users in 8/16/32-bit reads.</p>
+
+<h2 id="31.2-register-description">31.2 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 31-1: ESIG related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_ESIG_FLACAP</td><td>0x1FFFF7E0</td><td>Flash capacity register</td><td>0xXXXX</td></tr>
+<tr><td>R32_ESIG_UNIID1</td><td>0x1FFFF7E8</td><td>UID register 1</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_ESIG_UNIID2</td><td>0x1FFFF7EC</td><td>UID register 2</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_ESIG_UNIID3</td><td>0x1FFFF7F0</td><td>UID register 3</td><td>0xXXXXXXXX</td></tr>
+</tbody>
+</table>
+
+<h3 id="31.2.1-flash-capacity-register-esig_flacap">31.2.1 Flash Capacity Register (ESIG_FLACAP)</h3>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">F_SIZE[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>F_SIZE[15:0]</td>
+<td>RO</td>
+<td>Flash capacity in Kbytes.<br>
+Example: 0x0080 = 128 K bytes</td>
+<td>X</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="31.2.2-uid-register-esig_uniid1">31.2.2 UID Register (ESIG_UNIID1)</h3>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">U_ID[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">U_ID[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>U_ID[31:0]</td>
+<td>RO</td>
+<td>Bits 0-31 of the UID.</td>
+<td>X</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="31.2.3-uid-register-esig_uniid2">31.2.3 UID Register (ESIG_UNIID2)</h3>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">U_ID[63:48]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">U_ID[47:32]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>U_ID[63:32]</td>
+<td>RO</td>
+<td>Bits 32-63 of the UID.</td>
+<td>X</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="31.2.4-uid-register-esig_uniid3">31.2.4 UID Register (ESIG_UNIID3)</h3>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">U_ID[95:80]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">U_ID[79:64]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>U_ID[95:64]</td>
+<td>RO</td>
+<td>Bits 64-95 of the UID.</td>
+<td>X</td>
+</tr>
+</tbody>
+</table>

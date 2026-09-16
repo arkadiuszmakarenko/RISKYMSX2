@@ -1,0 +1,327 @@
+<h1 id="chapter-18-two-wire-communication-bus-i2c">Chapter 18: Two-Wire Communication Bus (I2C)</h1>
+
+<p>The Inter-Integrated Circuit bus (I2C) is widely used for communication between microcontrollers and sensors or other off-chip modules. It natively supports multi-master and multi-slave modes, and can communicate at two speeds — 100 kHz (standard) and 400 kHz (fast) — using only two lines (SDA and SCL). The I2C bus is also compatible with the SMBus protocol, supporting not only I2C timing but also arbitration, timing, and DMA, and provides a CRC checksum function.</p>
+
+<h2 id="18.1-main-features">18.1 Main Features</h2>
+<ul>
+<li>Supports master mode and slave mode</li>
+<li>Supports 7-bit or 10-bit addressing</li>
+<li>Slave device supports dual 7-bit address</li>
+<li>Supports two speed modes: 100 kHz and 400 kHz</li>
+<li>Multiple status modes, multiple error flags</li>
+<li>Supports clock stretching function</li>
+<li>2 interrupt vectors</li>
+<li>Supports DMA</li>
+<li>Supports PEC</li>
+<li>SMBus compatible</li>
+</ul>
+
+<h2 id="18.2-overview">18.2 Overview</h2>
+<p>I2C is a half-duplex bus; it can only operate in one of the following four modes at a time: master transmitter mode, master receiver mode, slave transmitter mode, and slave receiver mode. The I2C module operates in slave mode by default. After generating a START condition, it automatically switches to master mode; when arbitration is lost or a STOP condition is generated, it switches back to slave mode. The I2C module supports multi-master functionality.</p>
+<p>In master mode, the I2C module actively sends out data and addresses. Both data and addresses are transmitted in 8-bit units, MSB first and LSB last. Following a START event, one byte (in 7-bit addressing mode) or two bytes (in 10-bit addressing mode) of address is sent. After every 8 bits of data or address transmitted by the master, the slave must reply with an acknowledge (ACK) by pulling the SDA line low, as shown in Figure 18-1.</p>
+
+<figure><img src="figures/fig_18_1.png"><figcaption>Figure 18-1: I2C Timing Diagram</figcaption></figure>
+
+<p>To operate correctly, the I2C must be provided with a proper input clock. In standard mode, the minimum input clock is 2 MHz; in fast mode, the minimum input clock is 4 MHz.</p>
+<p>Figure 18-2 shows the functional block diagram of the I2C module.</p>
+
+<figure><img src="figures/fig_18_2.png"><figcaption>Figure 18-2: I2C Functional Block Diagram</figcaption></figure>
+
+<h2 id="18.3-master-mode">18.3 Master Mode</h2>
+<p>In master mode, the I2C module initiates data transfer and outputs the clock signal. Data transfer begins with a START event and ends with a STOP event. The steps for master-mode communication are as follows:</p>
+<ul>
+<li>Set the correct clock in Control Register 2 (R16_I2C_CTLR2) and the Clock Control Register (R16_I2C_CKCFGR); set an appropriate rise time in the Rise Time Register (R16_I2C_RTR).</li>
+<li>Set the PE bit in Control Register 1 (R16_I2C_CTLR1) to enable the peripheral.</li>
+<li>Set the START bit in Control Register 1 (R16_I2C_CTLR1) to generate a START event. After setting the START bit, the I2C module automatically switches to master mode, the MSL bit is set, and a START event is generated. After the START event is generated, the SB bit is set; if the ITEVTEN bit (in R16_I2C_CTLR2) is set, an interrupt is generated. At this point, read Status Register 1 (R16_I2C_STAR1), then write the slave address to the data register; the SB bit is cleared automatically.</li>
+<li>If 10-bit addressing mode is used, write the data register to send the header sequence (the header sequence is 11110xx0b, where xx represents the upper 2 bits of the 10-bit address).</li>
+<li>After sending the header sequence, the ADD10 bit in the status register is set. If the ITEVTEN bit is set, an interrupt is generated. At this point, read R16_I2C_STAR1, then write the second address byte to the data register to clear the ADD10 bit.</li>
+<li>Then write the data register to send the second address byte. After sending the second address byte, the ADDR bit in the status register is set. If the ITEVTEN bit is set, an interrupt is generated. At this point, read R16_I2C_STAR1 and then read R16_I2C_STAR2 to clear the ADDR bit.</li>
+<li>If 7-bit addressing mode is used, write the data register to send the address byte. After sending the address byte, the ADDR bit in the status register is set. If the ITEVTEN bit is set, an interrupt is generated. At this point, read R16_I2C_STAR1 and then read R16_I2C_STAR2 to clear the ADDR bit.</li>
+</ul>
+<p>In 7-bit addressing mode, the first byte transmitted is the address byte: the upper 7 bits represent the target slave device address, and the 8th bit determines the direction of the subsequent message — 0 means the master writes data to the slave, and 1 means the master reads information from the slave.</p>
+<p>In 10-bit addressing mode, as shown in Figure 18-3, during the address phase the first byte is 11110xx0 (xx is the upper 2 bits of the 10-bit address), and the second byte is the lower 8 bits of the 10-bit address. If the master subsequently enters transmitter mode, it continues sending data; if it prepares to enter receiver mode, it must re-issue a START condition followed by a byte 11110xx1, and then enter master receiver mode.</p>
+
+<figure><img src="figures/fig_18_3.png"><figcaption>Figure 18-3: Master Transmit/Receive Data Diagram for 10-bit Addressing</figcaption></figure>
+
+<p>In transmitter mode, the master's internal shift register sends data from the data register onto the SDA line. When the master receives an ACK, the TxE bit in Status Register 1 (R16_I2C_STAR1) is set. If ITEVTEN and ITBUFEN are set, an interrupt is also generated. Writing data to the data register clears the TxE bit. If the TxE bit is set and no new data has been written to the data register before the last data transmission, the BTF bit is set; SCL is held low until it is cleared. Reading R16_I2C_STAR1 and then writing data to the data register clears the BTF bit.</p>
+<p>In receiver mode, the I2C module receives data from the SDA line and writes it into the data register through the shift register. After each byte, if the ACK bit is set, the I2C module sends an acknowledge (low level), and the RxNE bit is set. If ITEVTEN and ITBUFEN are set, an interrupt is also generated. If RxNE is set and the previous data has not been read before new data is received, the BTF bit is set; SCL is held low until BTF is cleared. Reading R16_I2C_STAR1 and then reading the data register clears the BTF bit.</p>
+<p>When the master finishes transmitting data, it actively generates a STOP event by setting the STOP bit. In receiver mode, the master must NAK the acknowledge position of the last data byte. Note that after generating a NAK, the I2C module switches to slave mode.</p>
+
+<h2 id="18.4-slave-mode">18.4 Slave Mode</h2>
+<p>In slave mode, the I2C module can recognize its own address and the general call address. Software can enable or disable recognition of the general call address. Once a START event is detected, the I2C module compares the SDA data (via the shift register) with its own address (bit count depends on ENDUAL and ADDMODE) or the general call address (when ENGC is set). If there is no match, it ignores the data until a new START event is generated. If the header sequence matches, an ACK is generated and the module waits for the second address byte; if the second address byte also matches, or in 7-bit addressing the full address matches, then:</p>
+<ul>
+<li>First, an ACK is generated; the ADDR bit is set. If the ITEVTEN bit is set, a corresponding interrupt is generated.</li>
+<li>If dual address mode is used (ENDUAL bit set), the DUALF bit must also be read to determine which address the master is addressing.</li>
+</ul>
+<p>The slave mode defaults to receiver mode. When the last bit of the received header sequence is 1, or the last bit of a 7-bit address is 1 (depending on whether a header sequence or a normal 7-bit address was received first), the I2C module enters transmitter mode; the TRA bit indicates whether the current mode is receiver or transmitter.</p>
+<p>In transmitter mode, after the ADDR bit is cleared, the I2C module sends bytes from the data register to the SDA line through the shift register. After receiving an ACK, the TxE bit is set. If ITEVTEN and ITBUFEN are set, an interrupt is generated. If TxE is set but no new data is written to the data register before the next data transmission completes, the BTF bit is set. SCL is held low until BTF is cleared. Reading Status Register 1 (R16_I2C_STAR1) and then writing data to the data register clears the BTF bit.</p>
+<p>In receiver mode, after ADDR is cleared, the I2C module stores SDA data into the data register through the shift register. After each received byte, the I2C module sets an ACK bit and sets the RxNE bit. If ITEVTEN and ITBUFEN are set, an interrupt is generated. If RxNE is set and the old data has not been read before new data is received, BTF is set. SCL is held low until BTF is cleared. Reading Status Register 1 (R16_I2C_STAR1) and reading the data in the data register clears the BTF bit.</p>
+<p>When the I2C module detects a STOP event, it sets the STOPF bit. If ITEVFEN is set, an interrupt is generated. The user must read the status register (R16_I2C_STAR1) and then write to the control register (e.g., reset the control word SWRST) to clear it.</p>
+
+<h2 id="18.5-errors">18.5 Errors</h2>
+
+<h3 id="18.5.1-bus-error-berr">18.5.1 Bus Error (BERR)</h3>
+<p>During transmission of an address or data, when the I2C module detects an external START or STOP event, a bus error is generated. When a bus error occurs, the BERR bit is set; if ITERREN is set, an interrupt is also generated. In slave mode, the data is discarded and the hardware releases the bus. If it was a START signal, the hardware treats it as a repeated START and begins waiting for an address or STOP signal; if it was a STOP signal, it operates as a normal stop condition in advance. In master mode, the hardware does not release the bus and the current transfer is not affected; the user code decides whether to abort the transfer.</p>
+
+<h3 id="18.5.2-acknowledge-failure-af">18.5.2 Acknowledge Failure (AF)</h3>
+<p>When the I2C module detects that no acknowledge follows a byte, an acknowledge error is generated. When an acknowledge error occurs: the AF bit is set; if ITERREN is set, an interrupt is also generated. Upon an AF error, if the I2C module is in slave mode, the hardware must release the bus; if in master mode, the software must generate a STOP event.</p>
+
+<h3 id="18.5.3-arbitration-lost-arlo">18.5.3 Arbitration Lost (ARLO)</h3>
+<p>When the I2C module detects arbitration loss, an arbitration lost error is generated. When an arbitration lost error occurs: the ARLO bit is set; if ITERREN is set, an interrupt is also generated. The I2C module switches to slave mode and no longer responds to transfers addressed to its own slave address unless a master initiates a new START event; the hardware releases the bus.</p>
+
+<h3 id="18.5.4-overrun-underrun-error-ovr">18.5.4 Overrun/Underrun Error (OVR)</h3>
+<p>Overrun error: In slave mode, if clock stretching is disabled and the I2C module is receiving data, if a new byte of data has been received but the previously received data has not yet been read, an overrun error occurs. When an overrun error occurs, the last received byte is discarded and the sender should retransmit the last byte sent.</p>
+<p>Underrun error: In slave mode, if clock stretching is disabled and the I2C module is transmitting data, if new data has not been written to the data register before the clock of the next byte arrives, an underrun error occurs. When an underrun error occurs, the previous data in the data register is sent twice; the receiver should discard the duplicate data. To avoid underrun errors, the I2C module should write data to the data register before the first rising edge of the next byte.</p>
+
+<h2 id="18.6-clock-stretching">18.6 Clock Stretching</h2>
+<p>If clock stretching is disabled, the possibility of overrun/underrun errors exists. However, if clock stretching is enabled:</p>
+<ul>
+<li>In transmitter mode, if TxE is set and BTF is set, SCL is held low until the user reads the status register and writes the data to be transmitted to the data register.</li>
+<li>In receiver mode, if RxNE is set and BTF is set, SCL is held low after receiving data until the user reads the status register and reads the data register.</li>
+</ul>
+<p>Thus, enabling clock stretching avoids overrun/underrun errors.</p>
+
+<h2 id="18.7-smbus">18.7 SMBus</h2>
+<p>SMBus is also a two-wire interface, typically used between system and power management. SMBus and I2C share many similarities; for example, SMBus uses the same 7-bit addressing mode as I2C. The following are common features of SMBus and I2C:</p>
+<ol>
+<li>Master-slave communication mode; the master provides the clock and multi-master/multi-slave is supported;</li>
+<li>Two-wire communication structure, where SMBus can optionally have an alert line;</li>
+<li>Both support 7-bit address format.</li>
+</ol>
+<p>SMBus and I2C also differ:</p>
+<ol>
+<li>I2C supports speeds up to 400 kHz, while SMBus supports up to 100 kHz and has a minimum speed limit of 10 kHz;</li>
+<li>When the SMBus clock is low for more than 35 ms, a timeout is reported, but I2C has no such limit;</li>
+<li>SMBus has fixed logic levels, whereas I2C does not — it depends on VDD;</li>
+<li>SMBus has bus protocols, whereas I2C does not.</li>
+</ol>
+<p>SMBus also includes device identification, address resolution protocol, unique device identifiers, SMBus alert, and various bus protocols. Refer to the SMBus specification version 2.0 for details. When using SMBus, simply set the SMBUS bit in the control register, and configure the SMBTYPE and ENAARP bits as needed.</p>
+
+<h2 id="18.8-interrupts">18.8 Interrupts</h2>
+<p>Each I2C module has two interrupt vectors: the event interrupt and the error interrupt. Both interrupt types support the interrupt sources shown in Figure 18-4.</p>
+
+<figure><img src="figures/fig_18_4.png"><figcaption>Figure 18-4: I2C Interrupt Requests</figcaption></figure>
+
+<h2 id="18.9-dma">18.9 DMA</h2>
+<p>DMA can be used for bulk data transmission and reception. When using DMA, the ITBUFEN bit in the control register must not be set.</p>
+
+<h3 id="dma-transmission">DMA Transmission</h3>
+<p>DMA mode is activated by setting the DMAEN bit in the CTLR2 register. Whenever the TxE bit is set, data is loaded from the configured memory into the I2C data register by the DMA. The following settings are required to allocate a channel for the I2C:</p>
+<ol>
+<li>Set the I2C_DATAR register address in the DMAy_PADDRx register, and set the memory address in the DMAy_MADDRx register, so that after each TxE event, data is transferred from memory to the I2C_DATAR register.</li>
+<li>Set the desired number of bytes to transfer in the DMAy_CNTRx register. This value is decremented after each TxE event.</li>
+<li>Configure the channel priority using the PL[0:1] bits in the DMAy_CFGRx register.</li>
+<li>Set the DIR bit in the DMAy_CFGRx register, and optionally configure an interrupt request to be issued when half or all of the transfer is complete, according to application requirements.</li>
+<li>Activate the channel by setting the EN bit in the DMAy_CFGRx register.</li>
+</ol>
+<p>When the number of data transfers configured in the DMA controller has been completed, the DMA controller sends an end-of-transfer EOT/EOT_1 signal to the I2C interface. If interrupts are enabled, a DMA interrupt is generated.</p>
+
+<h3 id="dma-reception">DMA Reception</h3>
+<p>After setting the DMAEN bit in the CTLR2 register, DMA receive mode can be used. When using DMA reception, the DMA transfers data from the data register to a preset memory area. The following steps are required to allocate a channel for the I2C:</p>
+<ol>
+<li>Set the I2C_DATAR register address in the DMAy_PADDRx register, and set the memory address in the DMAy_MADDRx register, so that after each RxNE event, data is written from the I2C_DATAR register to memory.</li>
+<li>Set the desired number of bytes to transfer in the DMAy_CNTRx register. This value is decremented after each RxNE event.</li>
+<li>Configure the channel priority using the PL[0:1] bits in the DMAy_CFGRx register.</li>
+<li>Clear the DIR bit in the DMAy_CFGRx register, and optionally configure an interrupt request to be issued when half or all of the data transfer is complete, according to application requirements.</li>
+<li>Activate the channel by setting the EN bit in the DMAy_CFGRx register.</li>
+</ol>
+<p>When the number of data transfers configured in the DMA controller has been completed, the DMA controller sends an end-of-transfer EOT/EOT_1 signal to the I2C interface. If interrupts are enabled, a DMA interrupt is generated.</p>
+
+<h2 id="18.10-packet-error-checking">18.10 Packet Error Checking</h2>
+<p>Packet Error Checking (PEC) adds a CRC8 checksum step to improve transmission reliability. The following polynomial is used to calculate each serial data bit:</p>
+<p>$$ C = X^8 + X^2 + X + 1 $$</p>
+<p>PEC calculation is activated by the ENPEC bit in the control register and is computed over all message bytes, including the address and read/write bit. In transmission, when PEC is enabled, a one-byte CRC8 result is appended after the last data byte. In receive mode, the last byte is treated as the CRC8 checksum result; if it does not match the internally computed result, a NAK is returned. For a master receiver, a NAK is returned regardless of whether the checksum is correct or not.</p>
+
+<h2 id="18.11-debug-mode">18.11 Debug Mode</h2>
+<p>After the system enters debug mode, the DBG_I2C_SMBUS_TIMEOUT bit of the DEBUG module can be used to determine whether the I2C SMBus timeout control continues to operate or stops.</p>
+
+<h2 id="18.12-register-description">18.12 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 18-1: I2C Register List</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_I2C_CTLR1</td><td>0x40005400</td><td>I2C Control Register 1</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_CTLR2</td><td>0x40005404</td><td>I2C Control Register 2</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_OADDR1</td><td>0x40005408</td><td>I2C Address Register 1</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_OADDR2</td><td>0x4000540C</td><td>I2C Address Register 2</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_DATAR</td><td>0x40005410</td><td>I2C Data Register</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_STAR1</td><td>0x40005414</td><td>I2C Status Register 1</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_STAR2</td><td>0x40005418</td><td>I2C Status Register 2</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_CKCFGR</td><td>0x4000541C</td><td>I2C Clock Register</td><td>0x0000</td></tr>
+<tr><td>R16_I2C_RTR</td><td>0x40005420</td><td>I2C Rise Time Register</td><td>0x0002</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.1-i2c-control-register-1-i2c_ctlr1">18.12.1 I2C Control Register 1 (I2C_CTLR1)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>SWRST</td><td>Reserved</td><td>ALERT</td><td>PEC</td><td>POS</td><td>ACK</td><td>STOP</td><td>START</td><td>NOSTRETCH</td><td>ENGC</td><td>ENPEC</td><td>ENARP</td><td>SMBTYPE</td><td>Reserved</td><td>SMBUS</td><td>PE</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>15</td><td>SWRST</td><td>RW</td><td>Software reset. Setting this bit by user code resets the I2C peripheral. Before resetting, ensure the I2C bus pins are released and the bus is idle.<div class="note">Note: This bit can be used to reset the I2C module when no STOP condition is detected on the bus but the BUSY bit is 1.</div></td><td>0</td></tr>
+<tr><td>14</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>13</td><td>ALERT</td><td>RW</td><td>SMBus alert bit. User code can set or clear this bit; when PE is set, this bit can be cleared by hardware. 1: Drives the SMBusALERT pin low, and the response address header should follow the ACK signal; 0: Releases the SMBusALERT pin high, and the response address header should follow the NACK signal.</td><td>0</td></tr>
+<tr><td>12</td><td>PEC</td><td>RW</td><td>Packet error checking enable bit. Setting this bit enables PEC. User code can set or clear this bit; it is cleared by hardware after PEC is transferred, a START or STOP is generated, or PE is cleared. 1: With PEC; 0: Without PEC.<div class="note">Note: PEC is invalidated upon arbitration loss.</div></td><td>0</td></tr>
+<tr><td>11</td><td>POS</td><td>RW</td><td>ACK and PEC position control. This bit can be set or cleared by user code, and can be cleared by hardware when PE is cleared. 1: The ACK bit controls the ACK/NAK of the next byte received in the shift register; the PEC indicates that the next byte in the shift register is PEC. 0: The ACK bit controls the ACK/NAK of the byte currently being received in the shift register; the PEC bit indicates that the current byte in the shift register is PEC.<div class="note">Note: The usage of the POS bit in 2-byte data reception is as follows: It must be configured before reception. To NACK the 2nd byte, the ACK bit must be cleared immediately after clearing the ADDR bit; to detect the PEC of the second byte, the PEC bit must be set after configuring the POS bit following the ADDR event.</div></td><td>0</td></tr>
+<tr><td>10</td><td>ACK</td><td>RW</td><td>Acknowledge enable bit. Can be set or cleared by user code; can be cleared by hardware when PE is set. 1: Returns an acknowledge after receiving a byte; 0: No acknowledge.</td><td>0</td></tr>
+<tr><td>9</td><td>STOP</td><td>RW</td><td>STOP event generation bit. Can be set or cleared by user code, cleared by hardware when a STOP event is detected, or set by hardware when a timeout error is detected. Master mode: 1: Generates a STOP event after the current byte transfer or current START condition; 0: No STOP event generated. Slave mode: 1: Releases SCL and SDA lines after the current byte transfer; 0: No STOP event generated.</td><td>0</td></tr>
+<tr><td>8</td><td>START</td><td>RW</td><td>START event generation bit. Can be set or cleared by user code, cleared by hardware when a START condition is issued or PE is cleared. Master mode: 1: Repeatedly generates a START event; 0: No START event generated. Slave mode: 1: Generates a START event when the bus is idle; 0: No START event generated.</td><td>0</td></tr>
+<tr><td>7</td><td>NOSTRETCH</td><td>RW</td><td>Clock stretching disable bit. Used to disable clock stretching in slave mode when the ADDR or BTF flag is set, until cleared by software. 1: Disable clock stretching; 0: Enable clock stretching.</td><td>0</td></tr>
+<tr><td>6</td><td>ENGC</td><td>RW</td><td>General call enable bit. Setting this bit enables general call, acknowledging the general call address 00h.</td><td>0</td></tr>
+<tr><td>5</td><td>ENPEC</td><td>RW</td><td>PEC enable bit. Setting this bit enables PEC calculation.</td><td>0</td></tr>
+<tr><td>4</td><td>ENARP</td><td>RW</td><td>ARP enable bit. Setting this bit enables ARP. If SMBTYPE=0, the default address of the SMBus device is used; if SMBTYPE=1, the SMBus master address is used.</td><td>0</td></tr>
+<tr><td>3</td><td>SMBTYPE</td><td>RW</td><td>SMBus device type. Set to 1 for SMBus master, set to 0 for SMBus slave.</td><td>0</td></tr>
+<tr><td>2</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>1</td><td>SMBUS</td><td>RW</td><td>SMBus mode select. Set to 1 to use SMBus mode; set to 0 to use I2C mode.</td><td>0</td></tr>
+<tr><td>0</td><td>PE</td><td>RW</td><td>I2C peripheral enable bit. 1: Enable I2C module; 0: Disable I2C module.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.2-i2c-control-register-2-i2c_ctlr2">18.12.2 I2C Control Register 2 (I2C_CTLR2)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>LAST</td><td>DMAEN</td><td>ITBUFEN</td><td>ITEVTEN</td><td>ITERREN</td><td>Reserved</td><td>Reserved</td><td>FREQ[5]</td><td>FREQ[4]</td><td>FREQ[3]</td><td>FREQ[2]</td><td>FREQ[1]</td><td>FREQ[0]</td><td>—</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:13]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>LAST</td><td>RW</td><td>DMA last transfer bit. 1: The next DMA EOT is the last transfer; 0: The next DMA EOT is not the last transfer.<div class="note">Note: This bit is used in master receiver mode to generate a NAK on the last received data byte.</div></td><td>0</td></tr>
+<tr><td>11</td><td>DMAEN</td><td>RW</td><td>DMA request enable bit. Setting this bit allows DMA requests when TxE or RxNE is set.</td><td>0</td></tr>
+<tr><td>10</td><td>ITBUFEN</td><td>RW</td><td>Buffer interrupt enable bit. 1: Generates an event interrupt when TxE or RxNE is set; 0: No interrupt when TxE or RxNE is set.</td><td>0</td></tr>
+<tr><td>9</td><td>ITEVTEN</td><td>RW</td><td>Event interrupt enable bit. Setting this bit enables event interrupts. An interrupt is generated under the following conditions: SB=1 (master mode); ADDR=1 (master/slave mode); ADD10=1 (master mode); STOPF=1 (slave mode); BTF=1 with no TxE or RxNE event; if ITBUFEN=1, TxE event is 1; if ITBUFEN=1, RxNE event is 1.</td><td>0</td></tr>
+<tr><td>8</td><td>ITERREN</td><td>RW</td><td>Error interrupt enable bit. Setting this bit enables error interrupts. An interrupt is generated under the following conditions: BERR=1; ARLO=1; AF=1; OVR=1; PECERR=1; TIMEOUT=1; SMBAlert=1.</td><td>0</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[5:0]</td><td>FREQ[5:0]</td><td>RW</td><td>I2C module clock frequency field. The correct clock frequency must be entered to generate proper timing. The allowed range is 4–60 MHz. Must be set between 000100b and 111100b, in MHz.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.3-i2c-address-register-1-i2c_oaddr1">18.12.3 I2C Address Register 1 (I2C_OADDR1)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>ADDMODE</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>ADD[9]</td><td>ADD[8]</td><td>ADD[7]</td><td>ADD[6]</td><td>ADD[5]</td><td>ADD[4]</td><td>ADD[3]</td><td>ADD[2]</td><td>ADD[1]</td><td>ADD0</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>15</td><td>ADDMODE</td><td>RW</td><td>Addressing mode. 1: 10-bit slave address (does not respond to 7-bit address); 0: 7-bit slave address (does not respond to 10-bit address).</td><td>0</td></tr>
+<tr><td>[14:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[9:8]</td><td>ADD[9:8]</td><td>RW</td><td>Interface address; bits 9–8 when using 10-bit addressing, ignored when using 7-bit addressing.</td><td>0</td></tr>
+<tr><td>[7:1]</td><td>ADD[7:1]</td><td>RW</td><td>Interface address, bits 7–1.</td><td>0</td></tr>
+<tr><td>0</td><td>ADD0</td><td>RW</td><td>Interface address; bit 0 when using 10-bit addressing, ignored when using 7-bit addressing.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.4-i2c-address-register-2-i2c_oaddr2">18.12.4 I2C Address Register 2 (I2C_OADDR2)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>ADD2[7]</td><td>ADD2[6]</td><td>ADD2[5]</td><td>ADD2[4]</td><td>ADD2[3]</td><td>ADD2[2]</td><td>ADD2[1]</td><td>ENDUAL</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:1]</td><td>ADD2[7:1]</td><td>RW</td><td>Interface address; bits 7–1 of the address in dual address mode.</td><td>0</td></tr>
+<tr><td>0</td><td>ENDUAL</td><td>RW</td><td>Dual address mode enable bit. Setting this bit allows ADD2 to also be recognized.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.5-i2c-data-register-i2c_datar">18.12.5 I2C Data Register (I2C_DATAR)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>DR[7]</td><td>DR[6]</td><td>DR[5]</td><td>DR[4]</td><td>DR[3]</td><td>DR[2]</td><td>DR[1]</td><td>DR[0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>DR[7:0]</td><td>RW</td><td>Data register. This field holds received data or data to be transmitted on the bus.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.6-i2c-status-register-1-i2c_star1">18.12.6 I2C Status Register 1 (I2C_STAR1)</h3>
+<p><strong>Offset address:</strong> 0x14</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>SMBALERT</td><td>TIMEOUT</td><td>Reserved</td><td>PECERR</td><td>OVR</td><td>AF</td><td>ARLO</td><td>BERR</td><td>TxE</td><td>RxNE</td><td>Reserved</td><td>STOPF</td><td>ADD10</td><td>BTF</td><td>ADDR</td><td>SB</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>15</td><td>SMBALERT</td><td>RW0</td><td>SMBus alert bit. Can be reset by user writing 0, or by hardware when PE goes low. In SMBus master mode: 1: SMBus alert generated on the pin; 0: No SMBus alert. In SMBus slave mode: 1: SMBAlert response address header received until SMBAlert goes low; 0: No SMBAlert response address header received.</td><td>0</td></tr>
+<tr><td>14</td><td>TIMEOUT</td><td>RW0</td><td>Timeout or Tlow error flag. Can be reset by user writing 0, or by hardware when PE goes low. 1: SCL has been low for 25 ms, or master low-level accumulated clock stretch time exceeds 10 ms, or slave low-level accumulated time exceeds 25 ms; 0: No timeout error.<div class="note">Note: In slave mode when this bit is set, the slave resets communication and the hardware releases the bus; in master mode when this bit is set, the hardware generates a stop condition.</div></td><td>0</td></tr>
+<tr><td>13</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>PECERR</td><td>RW0</td><td>PEC error flag during reception. Can be reset by user writing 0, or by hardware when PE goes low. 1: PEC error; returns NAK after receiving PEC; 0: No PEC error.</td><td>0</td></tr>
+<tr><td>11</td><td>OVR</td><td>RW0</td><td>Overrun/underrun flag. 1: Overrun/underrun event occurred: when NOSTRETCH=1, in receive mode a new byte is received but the content in the data register has not been read, so the newly received byte is lost; in transmit mode, no new data is written to the data register and the same byte is sent twice; 0: No overrun/underrun event.</td><td>0</td></tr>
+<tr><td>10</td><td>AF</td><td>RW0</td><td>Acknowledge failure flag. Can be reset by user writing 0, or by hardware when PE goes low. 1: Acknowledge error; 0: Acknowledge normal.</td><td>0</td></tr>
+<tr><td>9</td><td>ARLO</td><td>RW0</td><td>Arbitration lost flag. Can be reset by user writing 0, or by hardware when PE goes low. 1: Arbitration lost detected, the module lost control of the bus; 0: Arbitration normal.</td><td>0</td></tr>
+<tr><td>8</td><td>BERR</td><td>RW0</td><td>Bus error flag. Can be reset by user writing 0, or by hardware when PE goes low. 1: START or STOP condition error; 0: Normal.</td><td>0</td></tr>
+<tr><td>7</td><td>TxE</td><td>RO</td><td>Data register empty flag. Cleared by writing data to the data register, or automatically by hardware after a START or STOP is generated, or when PE is 0. 1: Transmit data register empty; 0: Data register not empty.</td><td>0</td></tr>
+<tr><td>6</td><td>RxNE</td><td>RO</td><td>Data register not empty flag. Cleared by read/write operation on the data register, or by hardware when PE is 0. 1: Data register not empty during reception; 0: Normal.</td><td>0</td></tr>
+<tr><td>5</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>4</td><td>STOPF</td><td>RO</td><td>STOP event flag. Cleared by a write operation to Control Register 1 after the user reads Status Register 1, or by hardware when PE is 0. 1: The slave detected a STOP event on the bus after an acknowledge; 0: No STOP event detected.</td><td>0</td></tr>
+<tr><td>3</td><td>ADD10</td><td>RO</td><td>10-bit address header sent flag. Cleared by a write operation to Control Register 1 after the user reads Status Register 1, or by hardware when PE is 0. 1: In 10-bit addressing mode, the master has sent the first address byte; 0: None.</td><td>0</td></tr>
+<tr><td>2</td><td>BTF</td><td>RO</td><td>Byte transfer finished flag. Cleared by a read/write operation on the data register after the user reads Status Register 1; during transfer, cleared by hardware after a START or STOP is generated, or when PE is 0. 1: Byte transfer finished. When NOSTRETCH=0: in transmit mode, when new data is sent and the data register has not been written with new data; in receive mode, when a new byte is received but the data register has not been read; 0: None.</td><td>0</td></tr>
+<tr><td>1</td><td>ADDR</td><td>RW0</td><td>Address sent/matched flag. Cleared by a read operation on Status Register 2 after the user reads Status Register 1, or by hardware when PE is 0. Master mode: 1: Address sent complete — in 10-bit addressing mode, set after receiving the ACK of the second address byte; in 7-bit addressing mode, set after receiving the ACK of the address; 0: Address sending not complete. Slave mode: 1: Received address matched; 0: Address did not match or no address received.</td><td>0</td></tr>
+<tr><td>0</td><td>SB</td><td>RO</td><td>Start bit sent flag. Cleared by a write operation to the data register after reading Status Register 1, or by hardware when PE is 0. 1: Start bit sent; 0: Start bit not sent.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.7-i2c-status-register-2-i2c_star2">18.12.7 I2C Status Register 2 (I2C_STAR2)</h3>
+<p><strong>Offset address:</strong> 0x18</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>PEC[7]</td><td>PEC[6]</td><td>PEC[5]</td><td>PEC[4]</td><td>PEC[3]</td><td>PEC[2]</td><td>PEC[1]</td><td>PEC[0]</td><td>DUALF</td><td>SMBHOST</td><td>SMBDEFAULT</td><td>GENCALL</td><td>Reserved</td><td>TRA</td><td>BUSY</td><td>MSL</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>PEC[7:0]</td><td>RO</td><td>Packet error checking field. When PEC is enabled (ENPEC set), this field holds the PEC value.</td><td>0</td></tr>
+<tr><td>7</td><td>DUALF</td><td>RO</td><td>Dual flag (matched). Cleared by hardware when a STOP or START is generated, or when PE=0. 1: The received address matches the content of OAR2; 0: The received address matches the content of OAR1.</td><td>0</td></tr>
+<tr><td>6</td><td>SMBHOST</td><td>RO</td><td>SMBus host header flag. Cleared by hardware when a STOP or START is generated, or when PE=0. 1: When SMBTYPE=1 and ENARP=1, the SMBus host address was received; 0: SMBus host address not received.</td><td>0</td></tr>
+<tr><td>5</td><td>SMBDEFAULT</td><td>RO</td><td>SMBus device default address flag. Cleared by hardware when a STOP or START is generated, or when PE=0. 1: When ENARP=1, the SMBus device default address was received; 0: Address not received.</td><td>0</td></tr>
+<tr><td>4</td><td>GENCALL</td><td>RO</td><td>General call address flag. Cleared by hardware when a STOP or START is generated, or when PE=0. 1: When ENGC=1, the general call address was received; 0: General call address not received.</td><td>0</td></tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>TRA</td><td>RO</td><td>Transmitter/receiver flag. Cleared by hardware when a STOP event is detected (STOPF=1), a repeated START condition, bus arbitration is lost (ARLO=1), or PE=0. 1: Data transmitted; 0: Data received. This bit is determined by the R/W bit of the address byte.</td><td>0</td></tr>
+<tr><td>1</td><td>BUSY</td><td>RO</td><td>Bus busy flag. Cleared when a STOP condition is detected. This information is still updated when the interface is disabled (PE=0). 1: Bus busy: SDA or SCL is low; 0: Bus idle, no communication.</td><td>0</td></tr>
+<tr><td>0</td><td>MSL</td><td>RO</td><td>Master/slave mode indicator. Set by hardware when the interface is in master mode (SB=1); cleared by hardware when a STOP is detected on the bus, arbitration is lost, or PE=0.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.8-i2c-clock-register-i2c_ckcfgr">18.12.8 I2C Clock Register (I2C_CKCFGR)</h3>
+<p><strong>Offset address:</strong> 0x1C</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>F/S</td><td>DUTY</td><td>Reserved</td><td>Reserved</td><td>CCR[11]</td><td>CCR[10]</td><td>CCR[9]</td><td>CCR[8]</td><td>CCR[7]</td><td>CCR[6]</td><td>CCR[5]</td><td>CCR[4]</td><td>CCR[3]</td><td>CCR[2]</td><td>CCR[1]</td><td>CCR[0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>15</td><td>F/S</td><td>RW</td><td>Master mode select bit. 1: Fast mode; 0: Standard mode.</td><td>0</td></tr>
+<tr><td>14</td><td>DUTY</td><td>RW</td><td>Duty cycle in fast mode: 1: Tlow/Thigh = 16/9; 0: Tlow/Thigh = 2.</td><td>0</td></tr>
+<tr><td>[13:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[11:0]</td><td>CCR[11:0]</td><td>RW</td><td>Clock divider coefficient field; determines the SCL clock frequency waveform.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="18.12.9-i2c-rise-time-register-i2c_rtr">18.12.9 I2C Rise Time Register (I2C_RTR)</h3>
+<p><strong>Offset address:</strong> 0x20</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>TRISE[5]</td><td>TRISE[4]</td><td>TRISE[3]</td><td>TRISE[2]</td><td>TRISE[1]</td><td>TRISE[0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[5:0]</td><td>TRISE[5:0]</td><td>RW</td><td>Maximum rise time field. Sets the SCL rise time in master mode. The maximum rise time equals (TRISE − 1) clock cycles. This bit can only be set when PE is cleared. For example, if the I2C module input clock period is 125 ns and TRISE is 9, the maximum rise time is (9 − 1) × 125 ns = 1000 ns.</td><td>000010b</td></tr>
+</tbody>
+</table>

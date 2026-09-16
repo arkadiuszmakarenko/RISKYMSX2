@@ -1,0 +1,504 @@
+<h1 id="chapter-32-flash-and-user-option-bytes-flash">Chapter 32: Flash and User Option Bytes (FLASH)</h1>
+
+<h2 id="32.1-flash-organization">32.1 Flash Organization</h2>
+
+<p>The chip's internal flash memory organization is as follows:</p>
+
+<table class="data-table">
+<caption>Table 32-1: Flash Organization Structure</caption>
+<thead>
+<tr><th>Block</th><th>Name</th><th>Address Range</th><th>Size (bytes)</th></tr>
+</thead>
+<tbody>
+<tr><td rowspan="8">Main Memory</td><td>Page 0</td><td>0x08000000 – 0x080000FF</td><td>256</td></tr>
+<tr><td>Page 1</td><td>0x08000100 – 0x080001FF</td><td>256</td></tr>
+<tr><td>Page 2</td><td>0x08000200 – 0x080002FF</td><td>256</td></tr>
+<tr><td>Page 3</td><td>0x08000300 – 0x080003FF</td><td>256</td></tr>
+<tr><td>Page 4</td><td>0x08000400 – 0x080004FF</td><td>256</td></tr>
+<tr><td>Page 5</td><td>0x08000500 – 0x080005FF</td><td>256</td></tr>
+<tr><td>Page 6</td><td>0x08000600 – 0x080006FF</td><td>256</td></tr>
+<tr><td>Page 7</td><td>0x08000700 – 0x080007FF</td><td>256</td></tr>
+<tr><td></td><td>…</td><td>…</td><td>…</td></tr>
+<tr><td></td><td>Page 3967</td><td>0x080F7F00 – 0x080F7FFF</td><td>256</td></tr>
+<tr><td rowspan="2">Information Block</td><td>System Boot Code Storage</td><td>0x1FFF8000 – 0x1FFFEFFF</td><td>28K</td></tr>
+<tr><td>User Option Bytes</td><td>0x1FFFF800 – 0x1FFFF87F</td><td>128</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note:
+<ol>
+<li>The main memory area above is used for storing user application programs, and write protection is partitioned in units of 4K bytes (16 pages); except for the "manufacturer configuration word" area which is factory-locked and not accessible by the user, other areas can be operated by the user under certain conditions.</li>
+<li>For chips whose lot number's fifth-from-last digit is greater than 0, the zero-wait-region supports both RVV instruction and DMA 64-bit accesses.</li>
+</ol>
+</div>
+
+<h2 id="32.2-flash-programming-and-security">32.2 Flash Programming and Security</h2>
+
+<h3 id="32.2.1-two-programming-erase-methods">32.2.1 Two Programming/Erase Methods</h3>
+<ul>
+<li><strong>Standard Programming:</strong> This is the default programming method (compatible mode). In this mode, the CPU performs programming in single 2-byte operations, and performs erase and full-chip erase operations in single 4K-byte operations.</li>
+<li><strong>Fast Programming:</strong> This method uses page operations (recommended). After unlocking via a specific sequence, it performs single 256-byte programming, 32K-byte erase, and full-chip erase operations.</li>
+</ul>
+<div class="note">Note: FLASH erase/write related functions can only be placed in the zero-wait-region FLASH.</div>
+
+<h3 id="32.2.2-security-preventing-illegal-access-read-write-erase">32.2.2 Security — Preventing Illegal Access (Read, Write, Erase)</h3>
+<ul>
+<li>Page write protection</li>
+<li>Read protection</li>
+</ul>
+
+<p>When the chip is in read-protected state:</p>
+<ol>
+<li>Main memory pages 0–15 (4K bytes) are automatically write-protected and are not controlled by the FLASH_WPR register; when read protection is released, all main memory pages are controlled by the FLASH_WPR register.</li>
+<li>The system boot code area, SWD or SDI mode, and RAM area cannot erase or program the main memory, except for full-chip erase. The user option bytes area can be erased or programmed. If an attempt is made to release read protection (programming user option bytes), the chip will automatically erase the entire user area.</li>
+</ol>
+
+<h2 id="32.3-flash-enhanced-read-mode">32.3 FLASH Enhanced Read Mode</h2>
+
+<p>The FLASH enhanced read mode is applicable when the user program runs in FLASH (the user code space exceeds the CODE size space configured by the user option byte RAM_CODE_MOD[1:0] bits). Enabling this mode can improve FLASH access efficiency. To enable this mode, set the EHMOD bit of the FLASH_CTLR register to 1; at this point, read the EHMODS bit — if the EHMODS bit is 1, the enhanced read mode has taken effect. To disable this mode, first clear the EHMOD bit to 0, then set RSENACT to 1. The access clock frequency can also be selected by configuring the SCKMOD bit of the FLASH_CTLR register.</p>
+
+<div class="note">Note: When using the FLASH enhanced read mode, please note the following:
+<ol>
+<li>Before performing any erase or programming operations on the FLASH (including releasing read protection and other user option byte programming), you must first exit the enhanced read mode, otherwise erase and programming operations will fail.</li>
+<li>Before entering stop mode, you must first exit the enhanced read mode, otherwise the stop mode may be abnormal.</li>
+<li>After power reset and system reset are completed, the chip automatically exits the enhanced read mode under hardware control.</li>
+</ol>
+</div>
+
+<h2 id="32.4-register-description">32.4 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 32-2: FLASH Related Register List</caption>
+<thead>
+<tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+</thead>
+<tbody>
+<tr><td>R32_FLASH_KEYR</td><td>0x40022004</td><td>FPEC key register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_FLASH_OBKEYR</td><td>0x40022008</td><td>OBKEY register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_FLASH_STATR</td><td>0x4002200C</td><td>Status register</td><td>0x00000000</td></tr>
+<tr><td>R32_FLASH_CTLR</td><td>0x40022010</td><td>Control register</td><td>0x02008080</td></tr>
+<tr><td>R32_FLASH_ADDR</td><td>0x40022014</td><td>Address register</td><td>0x00000000</td></tr>
+<tr><td>R32_FLASH_OBR</td><td>0x4002201C</td><td>Option byte register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_FLASH_WPR</td><td>0x40022020</td><td>Write protection register</td><td>0xXXXXXXXX</td></tr>
+<tr><td>R32_FLASH_MODEKEYR</td><td>0x40022024</td><td>Extended key register</td><td>0xXXXXXXXX</td></tr>
+</tbody>
+</table>
+
+<h3 id="32.4.1-fpec-key-register-flash_keyr">32.4.1 FPEC Key Register (FLASH_KEYR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">KEYR[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">KEYR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>KEYR[31:0]</td><td>WO</td><td>FPEC key, used to input the FPEC unlock key including:<br>RDPRT key = 0x000000A5;<br>KEY1 = 0x45670123;<br>KEY2 = 0xCDEF89AB.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="32.4.2-obkey-register-flash_obkeyr">32.4.2 OBKEY Register (FLASH_OBKEYR)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">OBKEYR[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">OBKEYR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>OBKEYR[31:0]</td><td>WO</td><td>Option byte key, used to input the option byte key to release OBWRE.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="32.4.3-status-register-flash_statr">32.4.3 Status Register (FLASH_STATR)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="6">Reserved</td><td>EHMODS</td><td>EOP</td><td>Reserved</td><td>WRPRTERR</td><td colspan="2">Reserved</td><td>WRBSY</td><td>BSY</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>EHMODS</td><td>RO</td><td>FLASH enhanced read mode enable status:<br>1: FLASH enhanced read mode enabled;<br>0: FLASH enhanced read mode not enabled.</td><td>0</td></tr>
+<tr><td>6</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>EOP</td><td>RW1</td><td>Indicates end of operation, write 1 to clear.<br>Hardware sets this bit on each successful erase or programming.</td><td>0</td></tr>
+<tr><td>4</td><td>WRPRTERR</td><td>RW1</td><td>Indicates write protection error, write 1 to clear.<br>Hardware sets this bit if programming is attempted at a write-protected address.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>1</td><td>WRBSY</td><td>RO</td><td>This bit is used during fast page programming to indicate that programming data is being written. During page programming, when data is written, this bit is set to '1' and automatically cleared to '0' by hardware; if this bit is '0', the next data can be written.</td><td>0</td></tr>
+<tr><td>0</td><td>BSY</td><td>RO</td><td>Indicates busy status:<br>1: Flash operation in progress;<br>0: Operation finished.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: When performing programming operations, ensure that the STRT bit of the FLASH_CTLR register is 0.</div>
+
+<h3 id="32.4.4-control-register-flash_ctlr">32.4.4 Control Register (FLASH_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td colspan="2">SCKMOD[1:0]</td><td>EHMOD</td><td>Reserved</td><td>RSENACT</td><td>PGSTRT</td><td>Reserved</td><td>BER32</td><td>Reserved</td><td>FTPG</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>FLOCK</td><td>Reserved</td><td>EOPIE</td><td>Reserved</td><td>ERRIE</td><td>Reserved</td><td>OBWRE</td><td>Reserved</td><td>LOCK</td><td>STRT</td><td>OBER</td><td>OBPG</td><td>Reserved</td><td>MER</td><td>PER</td><td>PG</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:27]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[26:25]</td><td>SCKMOD[1:0]</td><td>RW</td><td>FLASH access clock configuration:<br>00: FLASH access clock frequency = HCLK;<br>01: FLASH access clock frequency = (HCLK/2);<br>10: FLASH access clock frequency = (HCLK/4);<br>11: Reserved.<br>Note: FLASH access clock frequency does not exceed 100MHz; this bit is standard unlock + fast unlock.</td><td>01b</td></tr>
+<tr><td>24</td><td>EHMOD</td><td>RW</td><td>FLASH enhanced read mode: This mode can improve access efficiency when the program runs in FLASH.<br>1: Enable FLASH enhanced read mode.<br>0: Disable FLASH enhanced read mode; must be used together with the RSENACT bit — the exit steps are: first clear the EHMOD bit to 0, then set RSENACT to 1.<br>This bit is standard unlock + fast unlock.</td><td>0</td></tr>
+<tr><td>23</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>22</td><td>RSENACT</td><td>WO</td><td>Exit enhanced read mode, automatically cleared by hardware; must be used together with the EHMOD bit — the exit steps are: first clear the EHMOD bit to 0, then set RSENACT to 1.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>21</td><td>PGSTRT</td><td>RW0</td><td>Start. Set to 1 to start a page programming operation, automatically cleared by hardware.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>[20:19]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>18</td><td>BER32</td><td>RW</td><td>Execute 32KB erase.<br>This bit is standard unlock + fast unlock.</td><td>0</td></tr>
+<tr><td>17</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>16</td><td>FTPG</td><td>RW</td><td>Execute fast page programming operation.<br>This bit is standard unlock + fast unlock.</td><td>0</td></tr>
+<tr><td>15</td><td>FLOCK</td><td>RW1</td><td>Fast programming lock. Can only write '1'. When this bit is '1', the fast programming/erase mode is not available. After detecting the correct unlock sequence, hardware clears this bit to '0'. Software sets it to 1 to re-lock.<br>This bit is standard unlock.</td><td>1</td></tr>
+<tr><td>[14:13]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>12</td><td>EOPIE</td><td>RW</td><td>Operation complete interrupt control (EOP set in FLASH_STATR register):<br>1: Interrupt generation enabled;<br>0: Interrupt generation disabled.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>11</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>10</td><td>ERRIE</td><td>RW</td><td>Error status interrupt control (PGERR/WRPRTERR set in FLASH_STATR register):<br>1: Interrupt generation enabled;<br>0: Interrupt generation disabled.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>9</td><td>OBWRE</td><td>RW0</td><td>User option byte lock, software clears to 0:<br>1: Indicates that user option byte programming operations can be performed. Hardware sets this bit after the correct sequence is written to the FLASH_OBKEYR register;<br>0: Software clears to re-lock user option bytes.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>8</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>7</td><td>LOCK</td><td>RW1</td><td>Lock. Can only write '1'. When this bit is '1', FPEC and FLASH_CTLR are locked and not writable. After detecting the correct unlock sequence, hardware clears this bit to '0'. After an unsuccessful unlock attempt, this bit will not change again until the next system reset.<br>This bit is standard unlock.</td><td>1</td></tr>
+<tr><td>6</td><td>STRT</td><td>RW1</td><td>Start. Set to 1 to start an erase operation, hardware automatically clears to 0 (BSY becomes '0').<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>5</td><td>OBER</td><td>RW</td><td>Execute user option byte erase.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>4</td><td>OBPG</td><td>RW</td><td>Execute user option byte programming.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>MER</td><td>RW</td><td>Execute full erase operation (erase the entire user area).<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>1</td><td>PER</td><td>RW</td><td>Execute sector (4KB) erase operation.<br>This bit is standard unlock.</td><td>0</td></tr>
+<tr><td>0</td><td>PG</td><td>RW</td><td>Execute standard programming operation.<br>This bit is standard unlock.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="32.4.5-address-register-flash_addr">32.4.5 Address Register (FLASH_ADDR)</h3>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">FAR[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">FAR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>FAR[31:0]</td><td>WO</td><td>Flash address. For programming, this is the programming address; for erase, this is the starting address of the erase.<br>This register cannot be written when the BSY bit in the FLASH_STATR register is '1'.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="32.4.6-option-byte-register-flash_obr">32.4.6 Option Byte Register (FLASH_OBR)</h3>
+
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td>RAM_CODE_MOD</td><td>Reserved</td><td>STANDYRST</td><td>STOPRST</td><td>IWDGSW</td><td>RDPRT</td><td>OBERR</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>9</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>x</td></tr>
+<tr><td>8</td><td>RAM_CODE_MOD</td><td>RO</td><td>1: CODE-576KB + RAM-136KB<br>0: CODE-512KB + RAM-200KB</td><td>x</td></tr>
+<tr><td>[7:5]</td><td>USER/Reserved</td><td>RO</td><td>Reserved.</td><td>x</td></tr>
+<tr><td>4</td><td>STANDYRST</td><td>RO</td><td>System reset control in standby mode.</td><td>x</td></tr>
+<tr><td>3</td><td>STOPRST</td><td>RO</td><td>System reset control in stop mode.</td><td>x</td></tr>
+<tr><td>2</td><td>IWDGSW</td><td>RO</td><td>Independent watchdog (IWDG) hardware enable bit.</td><td>1</td></tr>
+<tr><td>1</td><td>RDPRT</td><td>RO</td><td>Read protection status.<br>1: Indicates flash is currently read-protected;<br>0: Indicates flash read protection is not active.</td><td>1</td></tr>
+<tr><td>0</td><td>OBERR</td><td>RO</td><td>Option byte error.<br>1: Indicates option byte and its complement do not match;<br>0: Indicates option byte and its complement match.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: USER and RDPRT are loaded from the user option byte area after system reset.</div>
+
+<h3 id="32.4.7-write-protection-register-flash_wpr">32.4.7 Write Protection Register (FLASH_WPR)</h3>
+
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">WRP[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">WRP[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>WRP[31:0]</td><td>RO</td><td>Flash write protection status.<br>1: Write protection not active;<br>0: Write protection active.<br>Each bit represents the write protection status of 4K bytes (16 pages) of memory.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: WPR is loaded from the user option byte area after system reset.</div>
+
+<h3 id="32.4.8-extended-key-register-flash_modekeyr">32.4.8 Extended Key Register (FLASH_MODEKEYR)</h3>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">MODEKEYR[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MODEKEYR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>MODEKEYR[31:0]</td><td>WO</td><td>Input the following sequence to unlock fast programming/erase mode:<br>KEY1 = 0x45670123;<br>KEY2 = 0xCDEF89AB.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h2 id="32.5-flash-operation-flow">32.5 Flash Operation Flow</h2>
+
+<h3 id="32.5.1-read-operation">32.5.1 Read Operation</h3>
+
+<p>Direct addressing is performed within the universal address space. Any 8/16/32-bit data read operation can access the flash module's content and obtain the corresponding data.</p>
+
+<h3 id="32.5.2-unlocking-flash">32.5.2 Unlocking Flash</h3>
+
+<p>After system reset, the flash controller (FPEC) and FLASH_CTLR register are locked and not accessible. The flash controller module can be unlocked by writing a sequence to the FLASH_KEYR register.</p>
+
+<p>Unlock sequence:</p>
+<ol>
+<li>Write KEY1 = 0x45670123 to the FLASH_KEYR register (step 1 must be KEY1);</li>
+<li>Write KEY2 = 0xCDEF89AB to the FLASH_KEYR register (step 2 must be KEY2).</li>
+</ol>
+<p>The above operations must be executed in order and consecutively; otherwise, they are considered erroneous and will lock the FPEC module and FLASH_CTLR register and generate a bus error until the next system reset.</p>
+
+<p>The flash controller (FPEC) and FLASH_CTLR register can be re-locked by setting the "LOCK" bit of the FLASH_CTLR register to 1.</p>
+
+<h3 id="32.5.3-main-memory-standard-programming">32.5.3 Main Memory Standard Programming</h3>
+
+<p>Standard programming writes 2 bytes at a time. When the PG bit of the FLASH_CTLR register is '1', each half-word (2 bytes) written to the flash address starts a programming operation. Writing any non-half-word data will cause the FPEC to generate a bus error. During programming, the BSY bit is '1'; when programming is complete, the BSY bit is '0' and the EOP bit is '1'.</p>
+
+<div class="note">Note: When the BSY bit is '1', writing to any register is prohibited.</div>
+
+<figure><img src="figures/fig_32_1.png"><figcaption>Figure 32-1: FLASH Programming</figcaption></figure>
+
+<ol>
+<li>Check the LOCK bit of the FLASH_CTLR register; if it is 1, perform the "Unlock Flash" operation.</li>
+<li>Set the PG bit of the FLASH_CTLR register to '1' to enable standard programming mode.</li>
+<li>Write the half-word to be programmed to the specified flash address (even address).</li>
+<li>Wait for the BSY bit to become '0' or the EOP bit of the FLASH_STATR register to become '1' to indicate programming is complete, then clear the EOP bit to 0.</li>
+<li>Check the FLASH_STATR register for errors, or read the programmed address data for verification.</li>
+<li>To continue programming, repeat steps 3–5; to finish programming, clear the PG bit to 0.</li>
+</ol>
+
+<h3 id="32.5.4-main-memory-standard-erase">32.5.4 Main Memory Standard Erase</h3>
+
+<p>Flash can be erased by sector (4K bytes) or by full chip.</p>
+
+<figure><img src="figures/fig_32_2.png"><figcaption>Figure 32-2: FLASH Page Erase</figcaption></figure>
+
+<ol>
+<li>Check the LOCK bit of the FLASH_CTLR register; if it is 1, perform the "Unlock Flash" operation.</li>
+<li>Set the PER bit of the FLASH_CTLR register to '1' to enable sector erase mode.</li>
+<li>Write the page header address to be erased to the FLASH_ADDR register.</li>
+<li>Set the STRT bit of the FLASH_CTLR register to '1' to start an erase operation.</li>
+<li>Wait for the BSY bit to become '0' or the EOP bit of the FLASH_STATR register to become '1' to indicate erase is complete, then clear the EOP bit to 0.</li>
+<li>Read the erased page data for verification.</li>
+<li>To continue sector erase, repeat steps 3–5; to finish erasing, clear the PER bit to 0.</li>
+</ol>
+
+<div class="note">Note: After successful erase, word read = 0xe339e339, half-word read = 0xe339, even address byte read = 0x39, odd address read = 0xe3.</div>
+
+<figure><img src="figures/fig_32_3.png"><figcaption>Figure 32-3: FLASH Full-Chip Erase</figcaption></figure>
+
+<ol>
+<li>Check the LOCK bit of the FLASH_CTLR register; if it is 1, perform the "Unlock Flash" operation.</li>
+<li>Set the MER bit of the FLASH_CTLR register to '1' to enable full-chip erase mode.</li>
+<li>Set the STRT bit of the FLASH_CTLR register to '1' to start the erase operation.</li>
+<li>Wait for the BSY bit to become '0' or the EOP bit of the FLASH_STATR register to become '1' to indicate erase is complete, then clear the EOP bit to 0.</li>
+<li>Read the erased page data for verification.</li>
+<li>Clear the MER bit to 0.</li>
+</ol>
+
+<h3 id="32.5.5-fast-programming-mode-unlock">32.5.5 Fast Programming Mode Unlock</h3>
+
+<p>The fast programming mode can be unlocked by writing a sequence to the FLASH_MODEKEYR register. After unlocking, the FLOCK bit of the FLASH_CTLR register will be cleared to 0, indicating that fast erase and programming operations can be performed. It can be re-locked by software setting the "FLOCK" bit of the FLASH_CTLR register to 1.</p>
+
+<p>Unlock sequence:</p>
+<ol>
+<li>Write KEY1 = 0x45670123 to the FLASH_MODEKEYR register;</li>
+<li>Write KEY2 = 0xCDEF89AB to the FLASH_MODEKEYR register.</li>
+</ol>
+<p>The above operations must be executed in order and consecutively; otherwise, they are considered erroneous and will lock until the next system reset before they can be unlocked again.</p>
+
+<div class="note">Note: Fast programming operations require unlocking both the "LOCK" and "FLOCK" layers.</div>
+
+<h3 id="32.5.6-main-memory-fast-programming">32.5.6 Main Memory Fast Programming</h3>
+
+<p>Fast programming is performed per page (256 bytes).</p>
+<ol>
+<li>Check the LOCK bit of the FLASH_CTLR register; if it is '1', perform the "Unlock Flash" operation.</li>
+<li>Check the FLOCK bit of the FLASH_CTLR register; if it is '1', perform the "Fast Programming Mode Unlock" operation.</li>
+<li>Check the BSY bit of the FLASH_STATR register to confirm no other programming operations are in progress.</li>
+<li>Set the FTPG bit of the FLASH_CTLR register to '1' to enable fast page programming mode.</li>
+<li>Write data to the FLASH address using 32-bit mode, for example:<br><code>*(uint32_t*)0x8000000 = 0x12345678;</code></li>
+<li>Wait for the WR_BSY bit of the FLASH_STATR register to become '0', then write the next data.</li>
+<li>Repeat steps 5–6 a total of 64 times.</li>
+<li>Set the PGSTRT bit of the FLASH_CTLR register to '1' to start fast page programming.</li>
+<li>Wait for the BSY bit to become '0' or the EOP bit of the FLASH_STATR register to become '1' to indicate a fast page programming is complete, then clear the EOP bit to 0.</li>
+<li>Check the FLASH_STATR register for errors, or read the programmed address data for verification.</li>
+<li>To continue fast page programming, repeat steps 5–10; to finish programming, clear the FTPG bit to 0.</li>
+</ol>
+
+<h3 id="32.5.7-main-memory-fast-erase">32.5.7 Main Memory Fast Erase</h3>
+
+<p>Fast erase is performed per block (32K bytes).</p>
+<ol>
+<li>Check the LOCK bit of the FLASH_CTLR register; if it is 1, perform the "Unlock Flash" operation.</li>
+<li>Check the FLOCK bit of the FLASH_CTLR register; if it is 1, perform the "Fast Programming Mode Unlock" operation.</li>
+<li>Check the BSY bit of the FLASH_STATR register to confirm no other programming operations are in progress.</li>
+<li>Set the BER32 bit of the FLASH_CTLR register to '1' to enable fast block erase (32K bytes) mode.</li>
+<li>Write the starting address of the fast erase block to the FLASH_ADDR register.</li>
+<li>Set the STRT bit of the FLASH_CTLR register to '1' to start a fast block erase (32K bytes) operation.</li>
+<li>Wait for the BSY bit to become '0' or the EOP bit of the FLASH_STATR register to become '1' to indicate erase is complete, then clear the EOP bit to 0.</li>
+<li>Check the FLASH_STATR register for errors, or read the erased page address data for verification.</li>
+<li>To continue fast page erase, repeat steps 5–8; to finish erasing, clear the BER32 bit to 0.</li>
+</ol>
+
+<div class="note">Note: After successful erase, word read = 0xe339e339, half-word read = 0xe339, even address byte read = 0x39, odd address read = 0xe3.</div>
+
+<h2 id="32.6-user-option-bytes">32.6 User Option Bytes</h2>
+
+<p>User option bytes are burned into FLASH and are reloaded into the corresponding registers after system reset. The user can erase and program them freely. The user option byte information block has a total of 8 bytes (4 bytes for write protection, 1 byte for read protection, 1 byte for configuration options, 2 bytes for storing user data). Each bit has its complement bit for verification during the loading process. The option byte information structure and meaning are described below.</p>
+
+<table class="data-table">
+<caption>Table 32-3: 32-bit Option Byte Format Partition</caption>
+<thead>
+<tr><th>[31:24]</th><th>[23:16]</th><th>[15:8]</th><th>[7:0]</th></tr>
+</thead>
+<tbody>
+<tr><td>Option Byte 1 Complement</td><td>Option Byte 1</td><td>Option Byte 0 Complement</td><td>Option Byte 0</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 32-4: User Option Byte Information Structure</caption>
+<thead>
+<tr><th>Address</th><th>Bits</th><th>[31:24]</th><th>[23:16]</th><th>[15:8]</th><th>[7:0]</th></tr>
+</thead>
+<tbody>
+<tr><td>0x1FFFF800</td><td></td><td>nUSER</td><td>USER</td><td>nRDPR</td><td>RDPR</td></tr>
+<tr><td>0x1FFFF804</td><td></td><td>nData1</td><td>Data1</td><td>nData0</td><td>Data0</td></tr>
+<tr><td>0x1FFFF808</td><td></td><td>nWRPR1</td><td>WRPR1</td><td>nWRPR0</td><td>WRPR0</td></tr>
+<tr><td>0x1FFFF80C</td><td></td><td>nWRPR3</td><td>WRPR3</td><td>nWRPR2</td><td>WRPR2</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<thead>
+<tr><th>Name/Byte</th><th>Description</th><th>Reset Value</th></tr>
+</thead>
+<tbody>
+<tr><td>RDPR</td><td>Read protection control bit, configures whether the code in flash can be read out.<br>0xA5: If this byte is 0xA5 (nRDP must be 0x5A), indicates the current code is in non-read-protected state and can be read out;<br>Other values: Indicates code read protection state, not readable. Pages 0–15 (4K) will be automatically write-protected, not controlled by WRPR0.</td><td>0xA5</td></tr>
+<tr><td>USER bit 7</td><td>Reserved.</td><td>1</td></tr>
+<tr><td>USER bit 6</td><td>RAM_CODE_MOD<br>1: CODE-576KB + RAM-136KB<br>0: CODE-512KB + RAM-200KB</td><td>x</td></tr>
+<tr><td>USER bits [5:3]</td><td>Reserved.</td><td>111b</td></tr>
+<tr><td>USER bit 2</td><td>STANDYRST — System reset control in standby mode:<br>1: Not enabled, entering standby mode does not reset system;<br>0: Enabled, entering standby mode generates system reset.</td><td>1</td></tr>
+<tr><td>USER bit 1</td><td>STOPRST — System reset control in stop mode:<br>1: Not enabled, entering stop mode does not reset system;<br>0: Enabled, entering stop mode generates system reset.</td><td>1</td></tr>
+<tr><td>USER bit 0</td><td>IWDGSW — Independent watchdog (IWDG) hardware enable bit:<br>1: IWDG function enabled by software, hardware enable disabled;<br>0: IWDG function enabled by hardware (determined by LSI clock).</td><td>1</td></tr>
+<tr><td>Data0–Data1</td><td>Store 2 bytes of user data.</td><td>0xFFFF</td></tr>
+<tr><td>WRPR0 - WRPR3</td><td>Write protection control bits. Each bit controls the write protection status of one sector (4K bytes/sector) in main memory:<br>1: Write protection disabled;<br>0: Write protection enabled.<br>The 4 bytes are used to protect a total of 992K bytes of main memory.<br>WRPR0: Write protection control for sectors 0–7;<br>WRPR1: Write protection control for sectors 8–15;<br>WRPR2: Write protection control for sectors 16–23;<br>WRPR3: Bits 0–6 provide write protection for sectors 24–30; bit 7 provides write protection for sectors 31–247.</td><td>0xFFFFFFFF</td></tr>
+</tbody>
+</table>
+
+<h3 id="32.6.1-user-option-byte-unlock">32.6.1 User Option Byte Unlock</h3>
+
+<p>The user option byte operation can be unlocked by writing a sequence to the FLASH_OBKEYR register. After unlocking, the OBWRE bit of the FLASH_CTLR register will be set to 1, indicating that user option byte erase and programming can be performed. It can be re-locked by software clearing the "OBWRE" bit of the FLASH_CTLR register to 0.</p>
+
+<p>Unlock sequence:</p>
+<ol>
+<li>Write KEY1 = 0x45670123 to the FLASH_OBKEYR register;</li>
+<li>Write KEY2 = 0xCDEF89AB to the FLASH_OBKEYR register.</li>
+</ol>
+<div class="note">Note: User option byte operations require unlocking both the "LOCK" and "OBWRE" layers.</div>
+
+<h3 id="32.6.2-user-option-byte-programming">32.6.2 User Option Byte Programming</h3>
+
+<p>Only standard programming mode is supported, writing a half-word (2 bytes) at a time. In practice, when programming user option bytes, the FPEC only uses the low byte of the half-word and automatically calculates the high byte (the high byte is the complement of the low byte), then starts the programming operation. This ensures that the option byte and its complement are always correct.</p>
+<ol>
+<li>Check the LOCK bit of the FLASH_CTLR register; if it is 1, perform the "Unlock Flash" operation.</li>
+<li>Check the BSY bit of the FLASH_STATR register to confirm no other programming operations are in progress.</li>
+<li>Check the OBWRE bit of the FLASH_CTLR register; if it is 0, perform the "User Option Byte Unlock" operation.</li>
+<li>Set the OBPG bit of the FLASH_CTLR register to '1'.</li>
+<li>Write the half-word (2 bytes) to be programmed to the specified address.</li>
+<li>Wait for the BSY bit to become '0' or the EOP bit of the FLASH_STATR register to become '1' to indicate programming is complete, then clear the EOP bit to 0.</li>
+<li>Read the programmed address data for verification.</li>
+<li>To continue programming, repeat steps 5–7; to finish programming, clear the OBPG bit to 0.</li>
+</ol>
+<div class="note">Note: When modifying the "read protection" in the option bytes to "non-protected" state, a full-chip erase of the main memory area will be automatically executed. If options other than "read protection" are modified, no full-chip erase operation will occur.</div>
+
+<h3 id="32.6.3-user-option-byte-erase">32.6.3 User Option Byte Erase</h3>
+
+<p>Directly erase the entire 128-byte user option byte area.</p>
+<ol>
+<li>Check the LOCK bit of the FLASH_CTLR register; if it is 1, perform the "Unlock Flash" operation.</li>
+<li>Check the BSY bit of the FLASH_STATR register to confirm no programming operation is in progress.</li>
+<li>Check the OBWRE bit of the FLASH_CTLR register; if it is 0, perform the "User Option Byte Unlock" operation.</li>
+<li>Set the OBER bit of the FLASH_CTLR register to '1', then set the STRT bit of the FLASH_CTLR register to '1' to start user option byte erase.</li>
+<li>Wait for the BSY bit to become '0' or the EOP bit of the FLASH_STATR register to become '1' to indicate erase is complete, then clear the EOP bit to 0.</li>
+<li>Read the erased address data for verification.</li>
+<li>Clear the OBER bit to 0 to finish.</li>
+</ol>
+<div class="note">Note: After successful erase, word read = 0xe339e339, half-word read = 0xe339, byte read = 0x39.</div>
+
+<h3 id="32.6.4-releasing-read-protection">32.6.4 Releasing Read Protection</h3>
+
+<p>Whether the flash is read-protected is determined by the user option bytes. Reading the FLASH_OBR register, when the RDPRT bit is '1', it indicates the current flash is in read-protected state, and flash operations are subject to a series of security protections of the read-protected state. The process of releasing read protection is as follows:</p>
+<ol>
+<li>Erase the entire user option byte area. At this point, the read protection field RDPR still has read protection in effect.</li>
+<li>Program the user option bytes, writing the correct RDPR code 0xA5 to release the flash read protection. (This step will first cause the system to automatically perform a full-chip erase operation on the flash.)</li>
+<li>Perform a power-on reset to reload the option bytes (including the new RDPR code); at this point, read protection is released.</li>
+</ol>
+
+<h3 id="32.6.5-releasing-write-protection">32.6.5 Releasing Write Protection</h3>
+
+<p>Whether the flash is write-protected is determined by the user option bytes. Reading the FLASH_WPR register, each bit represents 4K bytes of flash space. When a bit is '1', it indicates non-write-protected state; when '0', it indicates write-protected. The process of releasing write protection is as follows:</p>
+<ol>
+<li>Erase the entire user option byte area.</li>
+<li>Write the correct RDPR code 0xA5 to allow read access;</li>
+<li>Perform a system reset to reload the option bytes (including the new WRPR[3:0] bytes); write protection is released.</li>
+</ol>

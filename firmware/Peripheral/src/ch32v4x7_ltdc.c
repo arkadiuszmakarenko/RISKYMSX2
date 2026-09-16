@@ -1,8 +1,8 @@
 /********************************** (C) COPYRIGHT *******************************
 * File Name          : ch32v4x7_ltdc.c
 * Author             : WCH
-* Version            : V1.0.0
-* Date               : 2025/12/01
+* Version            : V1.0.1
+* Date               : 2026/06/30
 * Description        : This file provides all the LTDC firmware functions.
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
@@ -775,3 +775,26 @@ void LTDC_ClearITPendingBit(uint32_t LTDC_IT)
 {
     LTDC->ICR = (uint32_t)LTDC_IT;
 }
+
+/*********************************************************************
+ * @fn      LTDC_DMA_Cmd
+ *
+ * @brief   Stop or start the LTDC DMA Transfer.
+ * 
+ * @param   NewState
+ *           ENABLE - stop the DMA transfer 
+ *           DISABLE - start the DMA transfer 
+ * 
+ * @return  none
+ */
+void LTDC_DMA_Cmd(FunctionalState NewState)
+{
+    if (NewState != DISABLE)
+    {
+        LTDC->IER &= ~(1 << 2);
+    }
+    else
+    {
+        LTDC->IER |= (1 << 2);
+    }
+} 

@@ -1,0 +1,196 @@
+<h1 id="chapter-8-window-watchdog-wwdg">Chapter 8: Window Watchdog (WWDG)</h1>
+
+<p>The Window Watchdog is generally used to monitor software faults during system operation, such as external interference, unpredictable logic errors, and other conditions. It requires refreshing the counter (kicking the dog) within a specific window time (with upper and lower limits); otherwise, a watchdog circuit reset of the system will be generated if the refresh occurs earlier or later than this window time.</p>
+
+<h2 id="8.1-main-features">8.1 Main Features</h2>
+<ul>
+<li>Programmable 7-bit down-counter</li>
+<li>Dual-condition reset: the current counter value is less than 0x40, or the counter value is reloaded outside the window time</li>
+<li>Early wakeup notification function (EWI), used to perform a timely kick action to prevent system reset</li>
+</ul>
+
+<h2 id="8.2-functional-description">8.2 Functional Description</h2>
+
+<h3 id="8.2.1-principle-and-usage">8.2.1 Principle and Usage</h3>
+
+<p>The Window Watchdog operates based on a 7-bit down-counter, which is attached to the PB1 bus. The counting time base WWDG_CLK is derived from the (PCLK1/4096) clock divider, and the divider coefficient is set in the WDGTB[1:0] field of the configuration register WWDG_CFGR. The down-counter is in a free-running state; whether the watchdog function is enabled or not, the counter continuously decrements in a loop. As shown in Figure 8-1, the internal structure block diagram of the Window Watchdog.</p>
+
+<figure><img src="figures/fig_8_1.png"><figcaption>Figure 8-1: Window Watchdog block diagram</figcaption></figure>
+
+<ul>
+<li><strong>Starting the Window Watchdog</strong><br>
+After system reset, the watchdog is in the disabled state. Setting the WDGA bit of the WWDG_CTLR register can enable the watchdog; afterwards it cannot be disabled unless a reset occurs.</li>
+</ul>
+
+<div class="note">Note: The WWDG clock source can be disabled by setting the RCC_PB1PCENR register, pausing the WWDG_CLK counting and indirectly stopping the watchdog function; alternatively, the WWDG module can be reset by setting the RCC_PB1PRSTR register, which has the same effect as a reset.</div>
+
+<ul>
+<li><strong>Watchdog Configuration</strong><br>
+The watchdog internally contains a 7-bit counter that continuously decrements in a loop, supporting read/write access. To use the watchdog reset function, the following operations must be performed:</li>
+</ul>
+
+<ol>
+<li><strong>Counting time base:</strong> Via the WDGTB[1:0] field of the WWDG_CFGR register. Note that the WWDG module clock of the RCC unit must be enabled.</li>
+<li><strong>Window counter:</strong> Set the W[6:0] field of the WWDG_CFGR register. This counter is used by hardware for comparison with the current counter. The value is configured by user software and does not change. It serves as the upper limit value of the window time.</li>
+<li><strong>Watchdog enable:</strong> Software sets the WDGA bit of the WWDG_CTLR register to 1 to enable the watchdog function, which can then generate a system reset.</li>
+<li><strong>Kick (feed) the watchdog:</strong> That is, refresh the current counter value by configuring the T[6:0] field of the WWDG_CTLR register. This action must be executed within the periodic window time after the watchdog function is enabled, otherwise a watchdog reset will occur.</li>
+</ol>
+
+<ul>
+<li><strong>Kick window time</strong><br>
+As shown in Figure 8-2, the gray area is the monitoring window area of the Window Watchdog. Its upper limit time t2 corresponds to the time point when the current counter value reaches the window value W[6:0]; its lower limit time t3 corresponds to the time point when the current counter value reaches 0x3F. Within this area, where t2&lt;t&lt;t3, a kick operation (writing T[6:0]) can be performed to refresh the current counter value.</li>
+</ul>
+
+<figure><img src="figures/fig_8_2.png"><figcaption>Figure 8-2: Counting mode of the Window Watchdog</figcaption></figure>
+
+<ul>
+<li><strong>Watchdog reset:</strong>
+<ol>
+<li>When a kick operation is not performed in time, causing the value of the T[6:0] counter to change from 0x40 to 0x3F, a "window watchdog reset" will occur, generating a system reset. That is, when T6-bit is detected by hardware as 0, a system reset will occur.</li>
+</ol>
+</li>
+</ul>
+
+<div class="note">Note: The application can write T6-bit to 0 via software to generate a system reset, equivalent to a software reset function.</div>
+
+<ol start="2">
+<li>When a counter refresh action is performed during the time when kicking is not allowed, i.e., writing to the T[6:0] field during the time t1≤t≤t2, a "window watchdog reset" will occur, generating a system reset.</li>
+</ol>
+
+<ul>
+<li><strong>Early wakeup</strong><br>
+To prevent system reset caused by not refreshing the counter in time, the watchdog module provides an Early Wakeup Interrupt (EWI) notification. When the counter decrements to 0x40, an early wakeup signal is generated and the WEIF flag is set to 1. If the EWI bit is set, a window watchdog interrupt is triggered at the same time. At this point, there is 1 counter clock cycle remaining before hardware reset (decrementing to 0x3F), during which the application can immediately perform a kick operation.</li>
+</ul>
+
+<h3 id="8.2.2-debug-mode">8.2.2 Debug Mode</h3>
+
+<p>When the system enters debug mode, the WWDG counter can be configured to continue running or stop via the debug module registers.</p>
+
+<h2 id="8.3-register-description">8.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 8-1: WWDG related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_WWDG_CTLR</td><td>0x40002C00</td><td>Control register</td><td>0x007F</td></tr>
+<tr><td>R16_WWDG_CFGR</td><td>0x40002C04</td><td>Configuration register</td><td>0x007F</td></tr>
+<tr><td>R16_WWDG_STATR</td><td>0x40002C08</td><td>Status register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<h3 id="8.3.1-wwdg-control-register-wwdg_ctlr">8.3.1 WWDG Control Register (WWDG_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td>WDGA</td><td colspan="7">T[6:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>WDGA</td>
+<td>RW1</td>
+<td>Window watchdog reset enable bit.<br>
+1: Enable watchdog function (can generate reset signal);<br>
+0: Disable watchdog function.<br>
+Software writes 1 to enable, but it can only be cleared by hardware after reset.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:0]</td>
+<td>T[6:0]</td>
+<td>RW</td>
+<td>7-bit down-counter, which decrements by 1 every 4096*2<sup>WDGTB</sup> PCLK1 cycles. When the counter decrements from 0x40 to 0x3F, i.e., when T6 toggles to 0, a watchdog reset is generated.</td>
+<td>0x7F</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="8.3.2-wwdg-configuration-register-wwdg_cfgr">8.3.2 WWDG Configuration Register (WWDG_CFGR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="6">Reserved</td><td>EWI</td><td colspan="2">WDGTB[1:0]</td><td colspan="7">W[6:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>EWI</td>
+<td>RW1</td>
+<td>Early wakeup interrupt enable bit.<br>
+If this bit is set to 1, an interrupt is generated when the counter value reaches 0x40. This bit can only be cleared by hardware after reset.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[8:7]</td>
+<td>WDGTB[1:0]</td>
+<td>RW</td>
+<td>Window watchdog clock divider selection:<br>
+00: divide by 1, counting time base = PCLK1/4096;<br>
+01: divide by 2, counting time base = PCLK1/4096/2;<br>
+10: divide by 4, counting time base = PCLK1/4096/4;<br>
+11: divide by 8, counting time base = PCLK1/4096/8.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:0]</td>
+<td>W[6:0]</td>
+<td>RW</td>
+<td>7-bit window value of the window watchdog. Used for comparison with the counter value. The kick operation can only be performed when the counter value is less than the window value and greater than 0x3F.</td>
+<td>0x7F</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="8.3.3-wwdg-status-register-wwdg_statr">8.3.3 WWDG Status Register (WWDG_STATR)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>EWIF</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:1]</td>
+<td>Reserved</td>
+<td>WO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>EWIF</td>
+<td>RW0</td>
+<td>Early wakeup interrupt flag bit.<br>
+When the counter reaches 0x40, this bit is set by hardware and must be cleared by software; setting it by the user has no effect. Even if EWI is not set, this bit will still be set normally when the event occurs.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

@@ -1,0 +1,203 @@
+<h1 id="chapter-30-random-number-generator-rng">Chapter 30: Random Number Generator (RNG)</h1>
+
+<p>The Random Number Generator (RNG) is based on continuous analog noise and provides a 32-bit random number when the host reads data.</p>
+
+<h2 id="30.1-main-features">30.1 Main Features</h2>
+<ul>
+<li>Can generate 32-bit random numbers</li>
+<li>Implements error management</li>
+<li>Can be individually disabled to reduce power consumption</li>
+</ul>
+
+<figure><img src="figures/fig_30_1.png"><figcaption>Figure 30-1: RNG block diagram</figcaption></figure>
+
+<h2 id="30.2-functional-description">30.2 Functional Description</h2>
+
+<p>The random number generator is implemented using an analog circuit that generates seeds for the linear feedback shift register (RNG_LFSR) to produce 32-bit random numbers. The RNG_LFSR is clocked by a dedicated clock (PLL48CLK) at a constant frequency, so the quality of the random number is related to the HCLK clock. When a large number of seeds are introduced into the RNG_LFSR, the content of the RNG_LFSR is transferred to the data register (RNG_DR).</p>
+
+<h3 id="30.2.1-rng-operation">30.2.1 RNG Operation</h3>
+
+<p>The specific operation steps of the RNG are as follows:</p>
+<ol>
+<li>If interrupts are enabled, the IE bit in the RNG_CR register must be set to 1 (this interrupt is generated when a random number is ready or an error occurs).</li>
+<li>Enable random number generation by configuring the RNGEN bit of the RNG_CR register, which simultaneously activates the analog section, the RNG_LFSR, and the error detector.</li>
+<li>If interrupts are enabled, each time an interrupt is generated, check that the SEIS and CEIS bits in the RNG_SR register are 0 to confirm that no error has occurred and that DRDY is 1 to confirm that the random number is ready. Then the contents of the RNG_DR register can be read.</li>
+</ol>
+
+<h3 id="30.2.2-error-management">30.2.2 Error Management</h3>
+
+<p>RNG errors include clock errors and seed errors. When a clock error occurs, the RNG can no longer generate random numbers. In this case, check whether the clock controller is correctly configured and can provide the RNG clock, then clear the CEIS bit. When the CECS bit is 0, the RNG can operate normally. When a clock error occurs, it does not affect the previous random number, which can still be used normally. When a seed error occurs, the value in the RNG_DR register cannot be used as a random number. To reuse the RNG, first clear the SEIS bit, then clear the RNGEN bit and set it to 1 again to re-initialize and restart the RNG.</p>
+
+<h2 id="30.3-register-description">30.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 30-1: RNG related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_RNG_CR</td><td>0x40023C00</td><td>RNG control register</td><td>0x00000000</td></tr>
+<tr><td>R32_RNG_SR</td><td>0x40023C04</td><td>RNG status register</td><td>0x00000000</td></tr>
+<tr><td>R32_RNG_DR</td><td>0x40023C08</td><td>RNG data register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="30.3.1-rng-control-register-rng_cr">30.3.1 RNG Control Register (RNG_CR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td>IE</td><td>RNGEN</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>IE</td>
+<td>RW</td>
+<td>Interrupt enable control:<br>
+1: Enable RNG interrupt;<br>
+0: Disable RNG interrupt.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>RNGEN</td>
+<td>RW</td>
+<td>Random number generator enable:<br>
+1: Enable random number generator;<br>
+0: Disable random number generator.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[1:0]</td>
+<td>Reserved</td>
+<td>RW</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="30.3.2-rng-status-register-rng_sr">30.3.2 RNG Status Register (RNG_SR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>SEIS</td><td>CEIS</td><td colspan="2">Reserved</td><td>SECS</td><td>CECS</td><td>DRDY</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>SEIS</td>
+<td>RW</td>
+<td>Seed error interrupt status (this bit is set simultaneously with SECS):<br>
+1: One of the following error sequences detected:<br>
+- More than 64 consecutive identical bits;<br>
+- More than 32 consecutive alternating 0s and 1s.<br>
+0: No error sequence detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>CEIS</td>
+<td>RW</td>
+<td>Clock error interrupt status (this bit is set simultaneously with CECS):<br>
+1: PLL48CLK clock not correctly detected;<br>
+0: PLL48CLK clock correctly detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:3]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>SECS</td>
+<td>RO</td>
+<td>Seed error current status:<br>
+1: One of the following error sequences detected:<br>
+- More than 64 consecutive identical bits;<br>
+- More than 32 consecutive alternating 0s and 1s.<br>
+0: No error sequence detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>CECS</td>
+<td>RO</td>
+<td>Clock error current status:<br>
+1: PLL48CLK clock not correctly detected;<br>
+0: PLL48CLK clock correctly detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>DRDY</td>
+<td>RO</td>
+<td>Data ready (this bit is cleared to 0 after reading the R32_RNG_DR register):<br>
+1: R32_RNG_DR register is valid, this random number is available;<br>
+0: R32_RNG_DR register is invalid, this random number is not available.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="30.3.3-rng-data-register-rng_dr">30.3.3 RNG Data Register (RNG_DR)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">RNDATA[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RNDATA[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>RNDATA</td>
+<td>RO</td>
+<td>32-bit random number.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

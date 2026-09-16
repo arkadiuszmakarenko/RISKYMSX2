@@ -1,8 +1,8 @@
 /********************************** (C) COPYRIGHT *******************************
 * File Name          : ch32v4x7_rcc.c
 * Author             : WCH
-* Version            : V1.0.0
-* Date               : 2025/12/01
+* Version            : V1.0.1
+* Date               : 2026/06/26
 * Description        : This file provides all the RCC firmware functions.
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
@@ -914,6 +914,7 @@ void RCC_MCOConfig(uint8_t RCC_MCO)
  *            RCC_FLAG_SFTRST - Software reset.
  *            RCC_FLAG_IWDGRST - Independent Watchdog reset.
  *            RCC_FLAG_WWDGRST - Window Watchdog reset.
+ *            RCC_FLAG_LPWRRST - Low Power reset
  *
  * @return  FlagStatus - SET or RESET.
  */

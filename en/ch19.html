@@ -1,0 +1,1702 @@
+<h1 id="chapter-19-i3c-bus-i3c">Chapter 19: I3C Bus (I3C)</h1>
+
+<p>The I3C bus is a two-wire serial single-ended multi-drop bus designed to improve upon the traditional I2C bus. The I3C interface handles communication between this device and other devices connected on the I3C bus. As a master device, it enhances the functionality of the I2C interface while maintaining a degree of backward compatibility.</p>
+
+<h2 id="19.1-main-features">19.1 Main Features</h2>
+<ul>
+<li>Supports master device</li>
+<li>Supports MIPI I3C specification v1.1</li>
+<li>Supports DMA function</li>
+<li>In-Band Interrupt (IBI) function</li>
+<li>Hot-Join (HJ) function</li>
+<li>Built-in error detection and recovery</li>
+<li>Supports dynamic address assignment, direct and broadcast Common Command Code (CCC) and private read/write transfers</li>
+</ul>
+
+<h2 id="19.2-overview">19.2 Overview</h2>
+
+<figure><img src="figures/fig_19_1.png"><figcaption>Figure 19-1: I3C block diagram</figcaption></figure>
+
+<h2 id="19.3-functional-description">19.3 Functional Description</h2>
+
+<h3 id="19.3.1-i3c-peripheral-states">19.3.1 I3C Peripheral States</h3>
+
+<p>The I3C peripheral operates only as an I3C master. Under any circumstances, the peripheral is in one of the following states:</p>
+
+<ul>
+<li><strong>Disabled state</strong><br>
+Operating conditions: After the I3C peripheral is reset (the I3CRST bit in the RCC module is set to 1 to perform I3C reset), the peripheral is in the disabled state.<br>
+Transition from disabled state to idle state: When software sets the EN bit in the R32_I3C_CFGR register to 1, the peripheral switches from the disabled state to the idle state after completing the verification of internal configuration parameters.</li>
+
+<li><strong>Idle state</strong><br>
+In the idle state, software can perform partial updates to the I3C peripheral configuration.<br>
+Transition from idle state to active state:<br>
+1) Software-controlled trigger:<br>
+In master mode, software triggers by writing to set the TSFSET bit in the R32_I3C_CFGR register to 1 when initiating frame transfer;<br>
+2) Hardware event trigger:<br>
+The master triggers after receiving a start request from a slave during bus arbitration and after the maximum TCAS time.</li>
+
+<li><strong>Active state</strong><br>
+In the active state, the peripheral performs transfers on the bus.<br>
+In the active state, when the requested transfer is completed, the software is notified through events in the R32_I3C_EVR register, and the corresponding interrupts are enabled through the R32_I3C_INTENR register. After the peripheral switches from the active state to the idle state, communication can still continue on the bus, and partial reconfiguration can be performed.<br>
+As a master: In the active state, the events/flags generated after the requested transfer is completed can be frame complete (FCF), IBI/master-role/hot-join request complete (IBIF/CRF/HJF), or transfer error (ERRF).</li>
+</ul>
+
+<h3 id="19.3.2-i3c-master-states-and-programming-sequences">19.3.2 I3C Master States and Programming Sequences</h3>
+
+<p>In this section, we provide the complete programming sequence for the I3C peripheral as a master, covering state transitions, main subtasks, and conditions.</p>
+
+<p><strong>Master initialization</strong><br>
+When the master is in the disabled state (EN bit in R32_I3C_CFGR register is 0), software must follow these steps for initialization:</p>
+<ul>
+<li>Configure the R32_I3C_CFGR register, set CRINIT to 1 to mark the master role</li>
+<li>Clear the HST_SIE_RST bit in the R32_I3C_RESET register</li>
+<li>Configure I3C bus timing:
+<ol>
+<li>Configure the R32_I3C_TIMINGR0 register to set the SCL clock high-level period and low-level period for legacy I2C and I3C open-drain/push-pull phases</li>
+<li>Configure the R32_I3C_TIMINGR1 register to set the SDA hold time for push-pull phase (tHD_PP), bus idle condition time (I3C tCAS, legacy I2C tBUF), I3C repeated start bit timing (tCASr, tCBSr), I3C stop timing (tCBP), maximum SCL clock low-level stall time (for ENTDAA CCC (tSTALLDAA), legacy I2C ACK/NACK, I3C transfer address phase, write data transfer parity bit, legacy I2C write transfer ACK/NACK data phase, I3C read transfer transition bit or legacy I2C write transfer ACK/NACK phase (tSTALL)). The peripheral used as master can adjust the SCL clock low-level stall time and tNEWCRLock according to its own needs to accommodate the master role switching process (after GETACCCR CCC command)</li>
+<li>Configure the R32_I3C_TIMINGR2 register to set the SCL clock low-level stall time (each phase can be individually enabled or disabled, thus adjusting the SCL clock low-level stall time to meet the requirements of the addressed I3C slave or legacy I2C slave during SDA switching)</li>
+</ol>
+</li>
+<li>Configure the DA[6:0] bits in the R32_I3C_DEVR0 register to set its own dynamic address</li>
+<li>Configure the R32_I3C_DEVRx registers to set the related management for any slave x (x = 1/2/3/4)</li>
+<li>Configure the R32_I3C_CFGR register to set the execution mode for frame transfer or target request transfer</li>
+<li>Configure the R32_I3C_INTENR register to set interrupt generation or polling mode for any event</li>
+<li>After initialization is complete, set the EN bit to 1 to enable the I3C peripheral</li>
+</ul>
+
+<p><strong>Initiating master-initiated frame transfer</strong><br>
+When the master is in the enabled state (EN bit in R32_I3C_CFGR register is 1), software can initiate a frame transfer using any of the following configuration methods:</p>
+<ol>
+<li>Software trigger: By performing a write operation to set the TSFSET bit in the R32_I3C_CFGR register to 1;
+<ul>
+<li>This operation causes the hardware to set the CFNFF flag in the R32_I3C_EVR register to request writing the first control word to the R32_I3C_CTLR register.</li>
+</ul>
+</li>
+<li>No trigger: By software directly writing the first control word to the R32_I3C_CTLR register.</li>
+</ol>
+
+<p>Regardless of the initiation method, the I3C peripheral then switches to the active state. When the control word is not the last message of the I3C frame (i.e., the MEND bit in the R32_I3C_CTLR register is not set), and no transfer error has occurred (i.e., the ERRF bit in the R32_I3C_EVR register is set to 1), the hardware will continuously request the next control word and continue executing the frame transfer:</p>
+<ol>
+<li>If the C-FIFO is in non-DMA mode (CDMAEN bit in R32_I3C_CFGR register is 0), software will write the next control word after the CFNFF flag in the R32_I3C_EVR register is set or the corresponding interrupt is triggered (CFNFIE bit in R32_I3C_INTENR register is set to 1);</li>
+<li>If the C-FIFO is in DMA mode (CDMAEN bit in R32_I3C_CFGR register is 1), the corresponding I3C DMA request will be automatically handled by the assigned DMA channel, which will write the next control word.</li>
+</ol>
+
+<p><strong>Initiating and receiving slave-initiated transfers</strong><br>
+When the master is in the enabled state (EN bit in R32_I3C_CFGR register is 1), the master can initiate transfers, and slaves can also initiate transfers by issuing a start request (driving SDA low), provided that the master has allowed hot-join requests, IBI requests, or master-role requests through the R32_I3C_DEVR0 register.</p>
+
+<p><strong>Executing master-initiated frame transfer</strong><br>
+On the bus, the master continuously executes frame transfers until the last message transfer is completed (FCF bit in R32_I3C_EVR register is 1), or a transfer error occurs (ERRF bit in R32_I3C_EVR register is 1), and the corresponding interrupt is triggered (if enabled). This process relies on the R32_I3C_CTLR and R32_I3C_TDW/TDR registers (explicitly written by software or automatically pushed by the assigned DMA channel) and R32_I3C_RDW/RDR (explicitly read by software or by the assigned DMA channel). After the transfer is completed, the I3C master returns to the idle state.</p>
+
+<p><strong>Updating master transfer configuration</strong><br>
+After returning to the idle state, software can update the I3C peripheral configuration before the next transfer:</p>
+<ul>
+<li>Configure the R32_I3C_TIMINGR2 register to modify the SCL clock stall;</li>
+<li>Configure the R32_I3C_INTENR register to modify the interrupt/polling mode strategy;</li>
+<li>Configure the R32_I3C_CFGR register TXTHRES, RXTHRES, TMODE, TXDMAEN, CDMAEN, RXDMAEN, EXITPTRN, RSTPTRN, NOARBH bits;</li>
+<li>Modify/prepare the control words, status words, and read/write data for the next frame transfer to be executed through software and/or DMA.</li>
+</ul>
+
+<p><strong>Master receiving (broadcast CCC, direct read/write CCC, or private read/write) messages</strong><br>
+When the slave is in the idle state (EN bit in R32_I3C_CFGR register is 1), it indicates that it is ready to receive communication messages from the master on the I3C bus, and is ready to switch to the active state.<br>
+In the active state, the slave first receives the broadcast ENTDAA CCC (possibly after receiving the optional broadcast ENEC/DISEC CCC), and is then assigned a dynamic address. The DAUPF event in the R32_I3C_EVR register is set to 1, and the corresponding interrupt is generated (if enabled), after which the slave returns to the idle state.<br>
+After that, the slave in the idle state is ready to receive any other broadcast CCC messages, direct read/write CCC, or private read/write messages from the master.</p>
+
+<h3 id="19.3.3-i3c-bus-transfers-and-programming">19.3.3 I3C Bus Transfers and Programming</h3>
+
+<h4 id="19.3.3.1-i3c-broadcast-direct-ccc-transfer-except-entdaa-and-rstact-as-master">19.3.3.1 I3C Broadcast/Direct CCC Transfer (except ENTDAA and RSTACT) (as Master)</h4>
+
+<figure><img src="figures/fig_19_2.png"><figcaption>Figure 19-2: I3C CCC message</figcaption></figure>
+
+<p>When the peripheral acts as a master, it supports I3C broadcast CCC write (except ENTDAA and RSTACT), I3C direct CCC write (except RSTACT, first part and n× second part), and I3C direct CCC read (except RSTACT, first part and n× second part). The control word configuration uses MTYPE[3:0]=0110 for the first part (broadcast/direct CCC) and MTYPE[3:0]=0011 for the second part (direct addressing of individual slaves).</p>
+
+<h4 id="19.3.3.2-i3c-broadcast-entdaa-ccc-transfer-as-master">19.3.3.2 I3C Broadcast ENTDAA CCC Transfer (as Master)</h4>
+
+<figure><img src="figures/fig_19_3.png"><figcaption>Figure 19-3: I3C broadcast ENTDAA CCC transfer (as master)</figcaption></figure>
+
+<p>The ENTDAA broadcast CCC is used for dynamic address assignment. The master issues the broadcast ENTDAA CCC (0x7F) with DCNT=0. The process is repeated for each slave to be assigned until there is no ACK from any slave. During each iteration, the master reads 8 bytes (48-bit unique ID, BCR, DCR) from the winning slave, then assigns a dynamic address. The 48-bit unique/provisioned ID is subject to arbitration; the slave that wins arbitration continues to provide its BCR and DCR.</p>
+
+<h4 id="19.3.3.3-i3c-broadcast-direct-rstact-ccc-transfer-as-master">19.3.3.3 I3C Broadcast/Direct RSTACT CCC Transfer (as Master)</h4>
+
+<figure><img src="figures/fig_19_4.png"><figcaption>Figure 19-4: I3C broadcast/direct read/write RSTACT CCC (as master)</figcaption></figure>
+
+<p>The RSTACT CCC is used to reset the activity state of target devices. It can be issued as a broadcast CCC write (0x2A) or a direct CCC write/read (0x9A), with a defining byte (0x00, 0x01, or 0x02). When R32_I3C_CFGR.RSTPTRN=1 and R32_I3C_CTLR.MEND=1, a reset pattern is inserted before the stop condition. The direct version consists of a first part (addressing the CCC) and an n× second part (addressing each individual slave).</p>
+
+<h4 id="19.3.3.4-i3c-private-read-write-transfer-as-master">19.3.3.4 I3C Private Read/Write Transfer (as Master)</h4>
+
+<figure><img src="figures/fig_19_5.png"><figcaption>Figure 19-5: I3C private read/write message (as master)</figcaption></figure>
+
+<p>When the peripheral acts as a master, I3C private write and private read transfers use MTYPE[3:0]=0010. If R32_I3C_CFGR.NOARBH=0, an arbitrable header (7'h7E, RnW=0) is issued after the start condition, followed by a repeated start and the I3C slave address. If NOARBH=1, the slave address is issued directly after the start condition without the arbitrable header. The control word includes ADD[6:0], RNW, DCNT[15:0], and MEND.</p>
+
+<h4 id="19.3.3.5-legacy-i2c-read-write-transfer-as-master">19.3.3.5 Legacy I2C Read/Write Transfer (as Master)</h4>
+
+<figure><img src="figures/fig_19_6.png"><figcaption>Figure 19-6: Legacy I2C read/write transfer (as master)</figcaption></figure>
+
+<p>Legacy I2C write and read transfers use MTYPE[3:0]=0100. Similar to I3C private transfers, if R32_I3C_CFGR.NOARBH=0, an arbitrable header is inserted after the start condition. The legacy I2C transfer uses standard ACK/NACK handshake on the open-drain bus, without transition bits (T). Write data uses ACK/NACK from the slave, and read data uses ACK/NACK from the master (ACK to continue, NACK to end).</p>
+
+<h4 id="19.3.3.6-i3c-ibi-transfer-as-master">19.3.3.6 I3C IBI Transfer (as Master)</h4>
+
+<figure><img src="figures/fig_19_7.png"><figcaption>Figure 19-7: I3C IBI transfer (as master)</figcaption></figure>
+
+<p>When the peripheral acts as a master, slaves can initiate in-band interrupt (IBI) requests by driving SDA low in open-drain while SCL is high. The master provides SCL clocking after tCAS. The IBI request is acknowledged or not acknowledged based on the R32_I3C_DEVRi.IBIACK and R32_I3C_DEVRi.SUSP configuration. If acknowledged, the slave address is read, and if IBIDEN=1, a mandatory data byte (MDB) follows, along with optional payload data bytes. The IBI payload data is received in the R32_I3C_IBIDR register.</p>
+
+<div class="note">Note: When the peripheral acts as a master, the R32_I3C_IBIDR register is used to receive IBI data payloads. Therefore, IBI requests from slaves must not exceed 4 bytes of data payload. If more information needs to be exchanged in the context of this in-band interrupt, the master software must issue a private read control word.</div>
+
+<h4 id="19.3.3.7-i3c-hot-join-request-transfer-as-master">19.3.3.7 I3C Hot-Join Request Transfer (as Master)</h4>
+
+<figure><img src="figures/fig_19_8.png"><figcaption>Figure 19-8: I3C hot-join request transfer (as master)</figcaption></figure>
+
+<p>When the peripheral acts as a master, slaves can initiate hot-join requests by driving SDA low in open-drain while SCL is high when the bus is idle (t > tIDLE = 200μs). The master provides SCL clocking after tCAS. If R32_I3C_CFGR.HJACK=0, the hot-join request is NACKed. If HJACK=1, the reserved address (0x02, RnW=0) is acknowledged, and the HJF flag in R32_I3C_EVR is set to 1. A repeated start (Sr) is issued if there is a pending transfer to execute, otherwise a stop (P) is issued.</p>
+
+<h3 id="19.3.4-i3c-fifo-management">19.3.4 I3C FIFO Management</h3>
+
+<table class="data-table">
+<caption>Table 19-1: I3C FIFO implementation</caption>
+<thead><tr><th>FIFO</th><th>Content</th><th>Unit</th><th>Size</th><th>Used as master (basic principle)</th></tr></thead>
+<tbody>
+<tr><td>C-FIFO</td><td>32-bit control word</td><td>Word</td><td>2</td><td>Master (a frame can be based on multiple control words; this is not the case when used as a slave)</td></tr>
+<tr><td>TX-FIFO</td><td>Data to be transmitted</td><td>Byte</td><td>8</td><td>Master</td></tr>
+<tr><td>RX-FIFO</td><td>Data to be received</td><td>Byte</td><td>8</td><td>Master</td></tr>
+</tbody>
+</table>
+
+<h4 id="19.3.4.1-c-fifo-management-as-master">19.3.4.1 C-FIFO Management (as Master)</h4>
+
+<p>When used as a master, the C-FIFO can be used during broadcast CCC, direct read/write CCC, private read/write, legacy I2C read/write, and software-initiated error recovery.</p>
+
+<figure><img src="figures/fig_19_9.png"><figcaption>Figure 19-9: C-FIFO management (as master)</figcaption></figure>
+
+<p>Figure 19-9 illustrates how the C-FIFO is managed to queue control words on the I3C bus when the I3C peripheral is used as a master.</p>
+
+<p>First, software must initialize C-FIFO management through the CDMAEN bit in the R32_I3C_CFGR register, with the following steps:</p>
+<ul>
+<li>Software directly writes control words (when CDMAEN=0):
+<ul>
+<li>Through polling mode (set CFNFIE=0 in R32_I3C_INTENR register): Before explicitly writing to the R32_I3C_CTLR register, wait for the hardware to request the next control word (CFNFF=1 in R32_I3C_INTENR register)</li>
+<li>Through enabled interrupt notification (when CFNFIE=1)</li>
+</ul>
+</li>
+<li>Written by the assigned DMA channel (when CDMAEN=1), to enable the corresponding I3C peripheral DMA request:
+<ul>
+<li>According to the module-level configuration, the DMA automatically pushes/writes control words from its memory source buffer into the R32_I3C_CTLR register until the frame is completed (a stop bit is issued on the I3C bus after the last message of the frame), except when a transfer error occurs.</li>
+</ul>
+</li>
+<li>In any case, whenever the C-FIFO is empty and a repeated start bit for a new control word must be issued, a C-FIFO underflow is reported (ERRF=1 in R32_I3C_EVR register and COVR=1 in R32_I3C_STATER register). If the ERRIE bit in the R32_I3C_INTENR register is enabled, an interrupt is generated.</li>
+<li>The DMA mode configuration for C-FIFO management can be modified when the I3C peripheral is not in the active state.</li>
+<li>When used as a master, if a transfer error occurs (ERRF=1 in R32_I3C_EVR register), the hardware will automatically flush the C-FIFO.</li>
+</ul>
+
+<h4 id="19.3.4.2-tx-fifo-management-as-master">19.3.4.2 TX-FIFO Management (as Master)</h4>
+
+<p>When used as a master, the TX-FIFO can be used during broadcast or direct CCC (including ENTDAA and RSTACT), if there are defining bytes/sub-command bytes or data bytes, private write, and legacy I2C write.</p>
+
+<figure><img src="figures/fig_19_10.png"><figcaption>Figure 19-10: TX-FIFO management (as master)</figcaption></figure>
+
+<p>Figure 19-10 illustrates how the TX-FIFO is managed to queue data bytes or words to be transmitted on the I3C bus when the I3C peripheral is used as a master.</p>
+
+<p>First, TX-FIFO management must be initialized through the following bit fields in the R32_I3C_CFGR register:</p>
+<ul>
+<li>TXDMAEN: Enable/disable DMA mode for TX-FIFO</li>
+<li>TXTHRES: Push data bytes or words into TX-FIFO</li>
+<li>TMODE: Enable/disable TX-FIFO and C-FIFO preload</li>
+</ul>
+
+<p>Then, depending on the TXDMAEN bit in the R32_I3C_CFGR register, there are two methods to write data to the TX-FIFO:</p>
+<ul>
+<li>Software directly writes by byte/word (when TXDMAEN=0):
+<ul>
+<li>Through polling mode (TXFNFIE=0 in R32_I3C_INTENR register): Before explicitly writing to the R32_I3C_TDR or R32_I3C_TDWR register, wait for the hardware to request the next data byte/word (TXFNFF=1 in R32_I3C_INTENR register), depending on the TXTHRES bit in the R32_I3C_CFGR register</li>
+<li>Through enabled interrupt notification (when TXFNFIE=1)</li>
+</ul>
+</li>
+<li>Written by the assigned DMA channel (when TXDMAEN=1), to enable the corresponding I3C peripheral DMA request:
+<ul>
+<li>According to the DMA module-level configuration, the DMA automatically pushes/writes data bytes/words from its memory source buffer into the R32_I3C_TDR or R32_I3C_TDWR register (depending on the TXTHRES bit in the R32_I3C_CFGR register), until the frame is completed (a stop bit is issued on the I3C bus after the last message of the frame), except when a transfer error occurs.</li>
+</ul>
+</li>
+</ul>
+
+<p>An I3C message begins with a start bit or repeated start bit, and ends with a stop bit or repeated start bit. At the message level, the last data byte/word to be transmitted is indicated by TXLASTF=1 in the R32_I3C_EVR register. When an I3C frame contains multiple messages (separated by repeated start bits), software can use this event to update the corresponding pointer to the buffer used to store the bytes/words of the next message.</p>
+
+<p>When frame completion is reported (FCF=1 in R32_I3C_EVR register, and the corresponding interrupt is enabled), the TX-FIFO is empty. If the TX-FIFO is empty and a data byte must be transmitted on the I3C bus, a TX-FIFO underflow is reported (ERRF=1 in R32_I3C_EVR register and DOVR=1 in R32_I3C_STATER register). If the corresponding interrupt is enabled (ERRIE=1 in R32_I3C_INTENR register), an interrupt is generated. The TX-FIFO management configuration can be modified when the I3C peripheral is not in the active state.</p>
+
+<p>When used as a master, if a transfer error occurs (ERRF=1), the hardware will automatically flush the TX-FIFO.</p>
+
+<p><strong>Without C-FIFO/TX-FIFO preload</strong></p>
+<p>The C-FIFO size is 2 words, and the TX-FIFO size is 8 bytes. Without C-FIFO/TX-FIFO preload enabled (TMODE=0 in R32_I3C_CFGR register), once the C-FIFO receives the first control word, the I3C peripheral will immediately issue a start bit on the I3C bus. The peripheral then decodes the R32_I3C_CTLR register and writes the next data byte or word as needed. Once the hardware requires the next control word to be sent on the I3C bus (e.g., a repeated start bit needs to be issued on the I3C bus or the C-FIFO needs available space), the peripheral immediately requests the control word to be written to the C-FIFO, until the last message (i.e., MEND=1 in R32_I3C_CTLR register). Similarly, once the hardware requires another data byte or word to be sent on the I3C bus (e.g., a repeated start bit needs to be issued on the I3C bus, the TX-FIFO is not full, or a data byte or word must be sent during this I3C message), the data byte/word must be immediately written to the TX-FIFO.</p>
+
+<p><strong>C-FIFO and TX-FIFO preload</strong></p>
+<p>When C-FIFO/TX-FIFO preload is configured (TMODE=1 in R32_I3C_CFGR register), before issuing the start bit on the bus, the I3C peripheral waits as much as possible for the C-FIFO and TX-FIFO to be loaded, as follows:</p>
+<ul>
+<li>Wait for the first control word to be written to the C-FIFO</li>
+<li>Wait for data bytes/words to be written to the TX-FIFO (if any), as defined by the first control word (if RNW=0 and DCNT[15:0]=0 in R32_I3C_CTLR register), up to the TX-FIFO size</li>
+<li>If the TX-FIFO is not full and the first control word is not the last message of the frame (MEND=0 in R32_I3C_CTLR register):
+<ul>
+<li>Wait for the second control word to be written to the C-FIFO, at which point the C-FIFO is full.</li>
+<li>If the TX-FIFO is not full, wait for data bytes/words to be written to the TX-FIFO (if any), as defined by the second control word (RNW=0 and DCNT[15:0] in R32_I3C_CTLR register), up to the TX-FIFO size.</li>
+</ul>
+</li>
+<li>Then, whenever the hardware requires the next control word to be sent on the I3C bus (if a repeated start bit must be issued on the I3C bus), the control word is immediately requested to be written to the C-FIFO, until the last message (MEND=1 in R32_I3C_CTLR register).</li>
+<li>Similarly, whenever the hardware requires the next data byte/word to be sent on the I3C bus (if a repeated start bit must be issued on the I3C bus, the TX-FIFO is not full, or a data byte/word will be sent during this I3C message), the data byte/word must be immediately written to the TX-FIFO.</li>
+</ul>
+
+<h4 id="19.3.4.3-rx-fifo-management-as-master">19.3.4.3 RX-FIFO Management (as Master)</h4>
+
+<p>When used as a master, the RX-FIFO can be used during broadcast ENTDAA CCC, direct CCC read (including direct RSTACT CCC read), private read, and legacy I2C read.</p>
+
+<figure><img src="figures/fig_19_11.png"><figcaption>Figure 19-11: RX-FIFO management (as master)</figcaption></figure>
+
+<p>Figure 19-11 illustrates how the RX-FIFO is managed to queue and pop data bytes or words received on the I3C bus when the I3C peripheral is used as a master.</p>
+
+<p>First, software must initialize RX-FIFO management through the following bit fields in the R32_I3C_CFGR register:</p>
+<ul>
+<li>RXDMAEN: Enable/disable DMA mode for RX-FIFO</li>
+<li>RXTHRES: Pop data bytes or words from the RX-FIFO</li>
+</ul>
+
+<p>Then, the RX-FIFO is read depending on the RXDMAEN bit:</p>
+<ul>
+<li>Software directly reads by byte/word (RXDMAEN=0):
+<ul>
+<li>Through polling mode (RXFNEIE=0 in R32_I3C_INTENR register): Before explicitly reading the R32_I3C_RDR or R32_I3C_RDWR register, wait for the hardware to request the next data byte/word (RXFNEF=1 in R32_I3C_INTENR register), depending on the RXTHRES bit in the R32_I3C_CFGR register</li>
+<li>Through enabled interrupt notification (if RXFNEIE=1 in R32_I3C_INTENR register)</li>
+</ul>
+</li>
+<li>Read by the assigned DMA channel (if RXDMAEN=1), to enable the corresponding I3C peripheral DMA request:
+<ul>
+<li>According to the DMA module-level configuration, the DMA automatically pops/reads data bytes/words from the R32_I3C_RDR or R32_I3C_RDWR register (depending on the RXTHRES bit), and writes them to its memory slave buffer, until the frame is completed (a stop bit is issued on the I3C bus after the last message of the frame), except when a transfer error occurs.</li>
+</ul>
+</li>
+</ul>
+
+<p>An I3C message begins with a start bit or repeated start bit, and ends with a stop bit or repeated start bit. At the message level, the last data byte/word received from the I3C bus is indicated by IRXLASTF=1 in the I3C_EVR register. When an I3C frame contains multiple messages (separated by repeated start bits), software can use this event to update the corresponding pointer to the buffer used to store the data bytes/words of the next message.</p>
+
+<p>If the RX-FIFO is full and a data byte is received on the I3C bus, an RX-FIFO overflow is reported (ERRF=1 in R32_I3C_EVR register and DOVR=1 in R32_I3C_STATER register). If the corresponding interrupt is enabled (ERRIE=1 in R32_I3C_INTENR register), an interrupt is generated. The RX-FIFO management configuration can be modified when the I3C peripheral is not in the active state.</p>
+
+<p><strong>Slave early termination of read transfer</strong></p>
+<p>With the S-FIFO disabled (SMODE=0 in R32_I3C_CFGR register), software is notified of early termination of a read transfer through RXTGTENDF=1 in the R32_I3C_EVR register and the corresponding interrupt (if enabled). Software can then read the status register R32_I3C_STATR to check information related to the last message and obtain the number of data bytes received in the prematurely terminated read transfer (XDCNT[15:0] in R32_I3C_STATR register).</p>
+<p>In any case, if the S-FIFO is enabled (SMODE=1 in R32_I3C_CFGR register), software or DMA (depending on SDMAEN in R32_I3C_CFGR register) must read the status register R32_I3C_STATR once for each message. The number of valid data bytes received in the prematurely terminated read message is reported by XDCNT[15:0] in R32_I3C_STATR register (followed by ABT=1).</p>
+
+<h3 id="19.3.5-i3c-master-error-management">19.3.5 I3C Master Error Management</h3>
+
+<table class="data-table">
+<caption>Table 19-2: Master error management</caption>
+<thead><tr><th>Error type</th><th>Description</th><th>Error detection</th><th>Master operation</th><th>Error reporting</th></tr></thead>
+<tbody>
+<tr>
+<td>CE0</td>
+<td>Illegal formatted CCC (e.g., slave returns fewer data bytes during direct CCC read transfer)</td>
+<td>Detected at the end of legacy I2C read transfer when incorrect ACK is detected</td>
+<td>Hardware holds SCL running for nine clock cycles, can exchange another byte, then issues NACK again followed by a stop bit</td>
+<td>ERRF=1, PERR=1 and CODERR[3:0]=0000b</td>
+</tr>
+<tr>
+<td>CE1</td>
+<td>Watchdog error</td>
+<td>Unable to generate repeated start bit or stop bit at the end of I3C SDR read transfer</td>
+<td>SCL is held running. Software can stop SCL by writing a control word with MTYPE[3:0]=0000 (header message) to the R32_I3C_CTLR register, then must usually wait at least 150µs before issuing another message. After CE1 error is detected, unable to generate start bit</td>
+<td>ERRF=1, PERR=1 and CODERR[3:0]=0001b</td>
+</tr>
+<tr>
+<td>CE2</td>
+<td>No response to broadcast address (1111110b)</td>
+<td>During message transmission (except upgrade fault or reset timing message), header (1111110b+RnW=0) is detected as NACK</td>
+<td>Hardware issues HDR exit timing followed by a stop bit</td>
+<td>ERRF=1, PERR=1 and CODERR[3:0]=0010b</td>
+</tr>
+<tr>
+<td>CE3</td>
+<td>Master role switch failure</td>
+<td>After the new master drives SDA low (initiated by test header or start request from slave) and after the delay time defined in its active state has ended, SCL has not been driven low</td>
+<td>Hardware issues start bit + 1111110b+RnW=0, followed by ACK/NACK from slave, and finally a stop bit</td>
+<td>ERRF=1, PERR=1 and CODERR[3:0]=0011b</td>
+</tr>
+<tr>
+<td>-</td>
+<td>Incorrect 7-bit slave address with parity bit returned in GETACCCR CCC</td>
+<td>Detected incorrect dynamic address and/or parity bit</td>
+<td>Hardware cancels GETACCCR CCC by issuing repeated start bit + 1111110b+RnW=0, followed by ACK/NACK from slave, and finally a stop bit</td>
+<td>ERRF=1 and DERR=1</td>
+</tr>
+<tr>
+<td>-</td>
+<td>Addressed slave is NACKed for the first time in direct CCC read transfer</td>
+<td>NACK detected</td>
+<td>Hardware performs a single retry by issuing repeated start bit + 7-bit same slave address + RnW=1</td>
+<td>-</td>
+</tr>
+<tr>
+<td>-</td>
+<td>Addressed slave is NACKed for the second time in direct CCC write transfer, I3C private read/write transfer, legacy I2C transfer, or direct CCC read transfer</td>
+<td>NACK detected</td>
+<td>Hardware issues a stop bit</td>
+<td>ERRF=1 and ANACK=1</td>
+</tr>
+<tr>
+<td>-</td>
+<td>Assigned/sent dynamic address with parity bit is NACKed for the first time in ENTDAA CCC</td>
+<td>NACK detected</td>
+<td>Hardware performs a single retry assignment loop by issuing repeated start bit + 1111110b+RnW=1, followed by ACK from the (highest priority) slave and 8-byte read data, then the assigned address + parity bit</td>
+<td>-</td>
+</tr>
+<tr>
+<td>-</td>
+<td>Assigned/sent dynamic address with parity bit is NACKed for the second time in ENTDAA CCC</td>
+<td>NACK detected</td>
+<td>Hardware issues a stop bit</td>
+<td>ERRF=1 and DNACK=1</td>
+</tr>
+<tr>
+<td>-</td>
+<td>Write data is NACKed in legacy I2C write transfer</td>
+<td>NACK detected</td>
+<td>Hardware issues a stop bit</td>
+<td>ERRF=1 and DNACK=1</td>
+</tr>
+<tr>
+<td>-</td>
+<td>Relative to I3C bus timing, control words, status words, transmit data, or read data are not written/read in time</td>
+<td>SCL stall timeout</td>
+<td>Hardware issues a stop bit</td>
+<td>ERRF=1 and (COVR=1 or DOVR=1)</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.3.6-i3c-low-power-mode">19.3.6 I3C Low-Power Mode</h3>
+
+<p>When the I3C is in sleep mode under low-power mode, it is not affected. I3C interrupts can wake the device from sleep mode. When in low-power mode, changes on the SCL and SDA buses will wake the system, exiting low-power mode.</p>
+
+<h3 id="19.3.7-i3c-interrupts">19.3.7 I3C Interrupts</h3>
+
+<table class="data-table">
+<caption>Table 19-3: I3C interrupt requests</caption>
+<thead><tr><th>Interrupt event</th><th>Interrupt partition</th><th>Interrupt enable control</th><th>Event flag</th><th>Event clear control</th></tr></thead>
+<tbody>
+<tr><td>Request control word</td><td rowspan="6">Request</td><td>CFNFIE</td><td>CFNFF</td><td>-</td></tr>
+<tr><td>Request data to be transmitted</td><td>TXFNFIE</td><td>TXFNFF</td><td>-</td></tr>
+<tr><td>Request data to be received</td><td>RXFNEIE</td><td>RXFNEF</td><td>-</td></tr>
+<tr><td>Master: frame transfer complete</td><td>FCIE</td><td>FCF</td><td>CFCF</td></tr>
+<tr><td>IBI request received</td><td>IBIIE</td><td>IBIF</td><td>CIBIF</td></tr>
+<tr><td>Hot-join request received</td><td>HJIE</td><td>HJF</td><td>CHJF</td></tr>
+<tr><td>Error occurred</td><td>Error</td><td>ERRIE</td><td>ERRF</td><td>CERRF</td></tr>
+</tbody>
+</table>
+
+<h2 id="19.4-register-description">19.4 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 19-4: I3C related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_I3C_CTLR</td><td>0x40024C00</td><td>I3C control register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_CFGR</td><td>0x40024C04</td><td>I3C configuration register</td><td>0x00000040</td></tr>
+<tr><td>R32_I3C_RDR</td><td>0x40024C10</td><td>I3C receive data byte register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_TDR</td><td>0x40024C18</td><td>I3C transmit data byte register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_IBIDR</td><td>0x40024C20</td><td>I3C IBI payload data register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_RESET</td><td>0x40024C2C</td><td>I3C reset register</td><td>0x03000000</td></tr>
+<tr><td>R32_I3C_STATR</td><td>0x40024C30</td><td>I3C status register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_STATER</td><td>0x40024C34</td><td>I3C status error register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_RMR</td><td>0x40024C40</td><td>I3C receive message register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_EVR</td><td>0x40024C50</td><td>I3C event register</td><td>0x00000003</td></tr>
+<tr><td>R32_I3C_INTENR</td><td>0x40024C54</td><td>I3C interrupt enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_CEVR</td><td>0x40024C58</td><td>I3C clear event register</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_DEVR0</td><td>0x40024C60</td><td>I3C device register 0</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_DEVR1</td><td>0x40024C64</td><td>I3C device register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_DEVR2</td><td>0x40024C68</td><td>I3C device register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_DEVR3</td><td>0x40024C6C</td><td>I3C device register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_DEVR4</td><td>0x40024C70</td><td>I3C device register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_TIMINGR0</td><td>0x40024CA0</td><td>I3C timing register 0</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_TIMINGR1</td><td>0x40024CA4</td><td>I3C timing register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_TIMINGR2</td><td>0x40024CA8</td><td>I3C timing register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_I3C_GETMDSR</td><td>0x40024CD0</td><td>I3C get maximum data speed register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.1-i3c-control-register-r32_i3c_ctlr">19.4.1 I3C Control Register (R32_I3C_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>MEND</td><td colspan="4">MTYPE[3:0]</td><td colspan="3">Reserved</td><td colspan="7">ADD[6:0]</td><td>RNW</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DCNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>MEND</td>
+<td>WO</td>
+<td>End of message type/last message of frame:<br>
+1: This message from the master ends with a stop bit and is the last message of the frame;<br>
+0: This message from the master is followed by a repeated start bit before another message can be issued.<br>
+Note: This bit cannot be 0 when MTYPE[3:0]=0100b.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[30:27]</td>
+<td>MTYPE[3:0]</td>
+<td>WO</td>
+<td>Message type.<br>
+When I3C is used as master:<br>
+0000: SCL clock forced stop until the next control word is executed;<br>
+0001: Header message;<br>
+0010: Private message;<br>
+0011: Direct message (second part of I3C SDR direct CCC command);<br>
+0100: Legacy I2C message;<br>
+Others: Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[26:24]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:17]</td>
+<td>ADD[6:0]</td>
+<td>WO</td>
+<td>7-bit I3C dynamic/I2C static slave address.<br>
+Note: When I3C is used as master, this bit field is used if MTYPE[3:0] is 0010b, 0011b, or 0100b.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>RNW</td>
+<td>WO</td>
+<td>Read/not-write message.<br>
+1: Read message;<br>
+0: Write message.<br>
+Note: When I3C is used as master, this bit field is used if MTYPE[3:0] is 0010b, 0011b, or 0100b.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>DCNT[15:0]</td>
+<td>WO</td>
+<td>Data count to be transferred during read/write messages, in bytes:<br>
+0x0000: No data to transfer;<br>
+0x0001: 1 byte;<br>
+0x0002: 2 bytes;<br>
+...<br>
+0xFFFF: 64KB - 1 byte.<br>
+When I3C is used as master, this bit field is used to set the number of data bytes exchanged on the bus if MTYPE[3:0] is 0010b, 0011b, or 0100b. For private or legacy I2C read/write messages, this bit field must be non-empty.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.2-i3c-control-register-multiplexed-r32_i3c_ctlr">19.4.2 I3C Control Register [Multiplexed] (R32_I3C_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>MEND</td><td colspan="4">MTYPE[3:0]</td><td colspan="3">Reserved</td><td colspan="8">CCC[7:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DCNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>MEND</td>
+<td>WO</td>
+<td>End of message type/last message of frame:<br>
+1: This message from the master ends with a stop bit and is the last message of the frame;<br>
+0: This message from the master is followed by a repeated start bit before another message can be issued.<br>
+Note: This bit cannot be 0 when MTYPE[3:0]=0100b.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[30:27]</td>
+<td>MTYPE[3:0]</td>
+<td>WO</td>
+<td>Message type.<br>
+When I3C is used as master:<br>
+0110: Broadcast/direct CCC command;<br>
+Bits [23:16] (CCC[7:0]) are the 8-bit CCC code issued;<br>
+Bits [15:0] (DCNT[15:0]) are the number of CCC defining bytes, CCC sub-command bytes, or CCC data bytes.<br>
+If bit[23] = CCC[7] = 1: The message is the first part of a direct CCC command for I3C SDR direct CCC command; the direct CCC command (first part) message is:<br>
+– {S/S + 0b111_1110 +RnW = 0/Sr+*} + (direct CCC + T) + (8-bit data + T)* + Sr;<br>
+– After S (start bit), the arbitrable header (0b111_1110 + RnW = 0) is inserted or not depending on the NOARBH bit in the R32_I3C_CFGR register.<br>
+– Sr+*: After Sr (repeated start bit), the hardware automatically inserts (0b111_1110 + R/W).<br>
+If bit[23] = CCC[7] = 0: The message is an I3C SDR broadcast CCC command; the broadcast CCC command message transmitted is:<br>
+– {S/S + 0b111_1110 + RnW = 0/Sr + *} + (broadcast CCC + T) + (8-bit data + T)* + Sr/P<br>
+– After S (start bit), the arbitrable header (0b111_1110 + RnW = 0) is inserted or not depending on the NOARBH bit.<br>
+– Sr+*: After Sr (repeated start bit), the hardware automatically inserts (0b111_1110 + R/W).<br>
+Other values: Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[26:24]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>CCC[7:0]</td>
+<td>WO</td>
+<td>8-bit CCC code:<br>
+If bit[23] = CCC[7] = 1, the message is the first part of an I3C SDR direct CCC command.<br>
+If bit[23] = CCC[7] = 0, the message is an I3C SDR broadcast CCC command (including ENTDAA).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>DCNT[15:0]</td>
+<td>WO</td>
+<td>Count of CCC command-related data to be transmitted as CCC defining bytes, CCC sub-command bytes, or CCC data bytes (in bytes):<br>
+Linear encoding up to 64KB - 1.<br>
+0x0000: No data to transfer;<br>
+Note: Value forced when issuing ENTDAA broadcast CCC.<br>
+0x0001: 1 byte;<br>
+Note: Value forced when issuing RSTACT direct/broadcast CCC.<br>
+0x0002: 2 bytes;<br>
+...<br>
+0xFFFF: 64KB - 1 byte.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.3-i3c-configuration-register-r32_i3c_cfgr">19.4.3 I3C Configuration Register (R32_I3C_CFGR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>TSFSET</td><td colspan="8">Reserved</td><td>CFLUSH</td><td>CDMAEN</td><td>TMODE</td><td colspan="4">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>TXTHRES</td><td>TXFLUSH</td><td>TXDMAEN</td><td>Reserved</td><td>RXTHRES</td><td>RXFLUSH</td><td>RXDMAEN</td><td>HJACK</td><td>PULLUP_EN</td><td>Reserved</td><td>EXITPTRN</td><td>RSTPTRN</td><td>NOARBH</td><td>CRINIT</td><td>EN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>TSFSET</td>
+<td>W0</td>
+<td>Frame transfer setting:<br>
+1: Hardware sets the CFNFF bit to initiate frame transfer;<br>
+0: No operation.<br>
+If this bit is not set to 1, frame transfer can be initiated by software by directly writing the first control word register (R32_I3C_CTLR) when the C-FIFO is empty (CFEF bit in R32_I3C_EVR register is 1). Then, if the first written control word is not marked as end of message (MEND bit in R32_I3C_CTLR register is 0), the hardware will set CFNFF to 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:22]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>21</td>
+<td>CFLUSH</td>
+<td>W0</td>
+<td>C-FIFO flush:<br>
+1: Flush the C-FIFO;<br>
+0: No operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>20</td>
+<td>CDMAEN</td>
+<td>RW</td>
+<td>C-FIFO DMA request enable:<br>
+1: Enable DMA mode for C-FIFO;<br>
+0: Disable DMA mode for C-FIFO.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>19</td>
+<td>TMODE</td>
+<td>RW</td>
+<td>Frame issued on the I3C bus to manage C-FIFO and TX-FIFO:<br>
+1: Preload C-FIFO and TX-FIFO before initiating frame transfer.<br>
+0: Do not preload C-FIFO and TX-FIFO before initiating frame transfer. Frame transfer starts immediately when the first control word appears in the C-FIFO.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[18:15]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>TXTHRES</td>
+<td>RW</td>
+<td>TX-FIFO threshold:<br>
+1: 1 word/4-byte threshold;<br>
+0: 1-byte threshold.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>TXFLUSH</td>
+<td>WO</td>
+<td>TX-FIFO flush:<br>
+1: Flush the TX-FIFO;<br>
+0: No operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>TXDMAEN</td>
+<td>RW</td>
+<td>TX-FIFO DMA request enable:<br>
+1: Enable DMA mode for TX-FIFO;<br>
+0: Disable DMA mode for TX-FIFO.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>RXTHRES</td>
+<td>RW</td>
+<td>RX-FIFO threshold:<br>
+1: 1 word/4-byte threshold;<br>
+0: 1-byte threshold.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>RXFLUSH</td>
+<td>WO</td>
+<td>RX-FIFO flush:<br>
+1: Flush the RX-FIFO;<br>
+0: No operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>RXDMAEN</td>
+<td>RW</td>
+<td>RX-FIFO DMA request enable:<br>
+1: Enable DMA mode for RX-FIFO;<br>
+0: Disable DMA mode for RX-FIFO.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>HJACK</td>
+<td>RW</td>
+<td>Hot-join request acknowledge:<br>
+1: Hot-join request is acknowledged;<br>
+0: Hot-join request is not acknowledged.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>PULLUP_EN</td>
+<td>RW</td>
+<td>SDA pull-up enable:<br>
+1: Enable SDA pull-up;<br>
+0: In low-power mode, the pull-up can be turned off to reduce power consumption.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>EXITPTRN</td>
+<td>RW</td>
+<td>HDR exit timing enable:<br>
+1: Send HDR exit timing after issuing the message header (MTYPE[3:0] bit in R32_I3C_CTLR register is 0001b). This is used for master error detection and escalation handling when the slave does not respond to a private message or direct read CCC.<br>
+0: Do not send HDR exit timing after issuing the message header (MTYPE[3:0] bit in R32_I3C_CTLR register is 0001b). This is used to send a header to test bus ownership after a master role switch if there are concerns (the new master has not enabled its master role by accessing the previous master within the delay time defined in the active state).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>RSTPTRN</td>
+<td>RW</td>
+<td>HDR reset timing enable:<br>
+1: Insert HDR reset timing before the stop bit of any issued frame (including RSTACT CCC command);<br>
+0: Issue a standard stop bit at the end of the frame.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>NOARBH</td>
+<td>RW</td>
+<td>No arbitrable header after start bit:<br>
+1: No arbitrable header<br>
+- For legacy I2C messages or I3C SDR private read/write messages, the slave address is issued directly after the start bit.<br>
+- This is a more efficient option (when issuing 0x7E arbitrable header is useless), but can only be used when the master is certain that the addressed slave device cannot simultaneously issue an IBI or master-role request (to ensure that there is no erroneous parsing and potential conflict between the address issued by the master in open-drain mode and the same address that the slave device could issue after the start bit for IBI or MR).<br>
+0: Issue an arbitrable header (0b111_1110 + RnW = 0) after the start bit, before the legacy I2C message or I3C SDR private read/write message (default).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>CRINIT</td>
+<td>RW</td>
+<td>Mark master/slave role:<br>
+1: Master role;<br>
+0: Slave role.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>EN</td>
+<td>RW</td>
+<td>I3C enable:<br>
+1: Enable I3C;<br>
+0: Disable I3C.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.4-i3c-receive-data-byte-register-r32_i3c_rdr">19.4.4 I3C Receive Data Byte Register (R32_I3C_RDR)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">RDB0[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>RDB0[7:0]</td><td>RO</td><td>8-bit received data on the I3C bus.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.5-i3c-transmit-data-byte-register-r32_i3c_tdr">19.4.5 I3C Transmit Data Byte Register (R32_I3C_TDR)</h3>
+
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">TDB0[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>TDB0[7:0]</td><td>RO</td><td>8-bit transmitted data on the I3C bus.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.6-i3c-ibi-payload-data-register-r32_i3c_ibidr">19.4.6 I3C IBI Payload Data Register (R32_I3C_IBIDR)</h3>
+
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">IBIDB3[7:0]</td><td colspan="8">IBIDB2[7:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">IBIDB1[7:0]</td><td colspan="8">IBIDB0[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>IBIDB3[7:0]</td><td>RW</td><td>8-bit IBI payload data (latest byte on the I3C bus).</td><td>0</td></tr>
+<tr><td>[23:16]</td><td>IBIDB2[7:0]</td><td>RW</td><td>8-bit IBI payload data (byte following IBIDB1[7:0] on the I3C bus).</td><td>0</td></tr>
+<tr><td>[15:8]</td><td>IBIDB1[7:0]</td><td>RW</td><td>8-bit IBI payload data (byte following IBIDB0[7:0] on the I3C bus).</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>IBIDB0[7:0]</td><td>RW</td><td>8-bit IBI payload data (earliest byte on the I3C bus, MDB[7:0] mandatory data byte).</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.7-i3c-reset-register-r32_i3c_reset">19.4.7 I3C Reset Register (R32_I3C_RESET)</h3>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td>HST_SIE_RST</td><td colspan="7">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:25]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0x1</td></tr>
+<tr><td>24</td><td>HST_SIE_RST</td><td>RW</td><td>Master reset register:<br>
+1: The master protocol layer is in reset state;<br>
+0: The master protocol layer is in operating state.</td><td>1</td></tr>
+<tr><td>[23:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.8-i3c-status-register-r32_i3c_statr">19.4.8 I3C Status Register (R32_I3C_STATR)</h3>
+
+<p><strong>Offset address:</strong> 0x30</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">MID[7:0]</td><td colspan="5">Reserved</td><td>DIR</td><td>ABT</td><td>Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">XDCNT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>MID[7:0]</td>
+<td>RO</td>
+<td>Message identifier/counter for a given frame:<br>
+When I3C is used as master, this bit field identifies the control word message (R32_I3C_CTLR) referenced by the R32_I3C_STATR status register. The first message of a frame is identified with MID[7:0] = 0. When a new message control word (R32_I3C_CTLR) on the I3C bus is completed, this bit field is incremented (by hardware). This bit field is reset each time a new frame starts.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:19]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>18</td>
+<td>DIR</td>
+<td>RO</td>
+<td>Message direction:<br>
+1: Read;<br>
+0: Write.<br>
+Note: ENTDAA CCC is considered a write command.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>ABT</td>
+<td>RO</td>
+<td>Slave early termination of private read message:<br>
+1: Slave completed early;<br>
+0: Slave did not complete early.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>XDCNT[15:0]</td>
+<td>RO</td>
+<td>Data counter:<br>
+Condition: During dynamic address assignment process (ENTDAA CCC)<br>
+- When I3C is used as master: Number of slaves detected on the bus;<br>
+Condition: For other transfers during a message<br>
+- Regardless of whether I3C is used as master: Number of data bytes read from the I3C bus or sent on the I3C bus during the message.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.9-i3c-status-error-register-r32_i3c_stater">19.4.9 I3C Status Error Register (R32_I3C_STATER)</h3>
+
+<p><strong>Offset address:</strong> 0x34</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>DERR</td><td>DNACK</td><td>ANACK</td><td>COVR</td><td>DOVR</td><td>Reserved</td><td>PERR</td><td colspan="4">CODERR[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:11]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>DERR</td>
+<td>RO</td>
+<td>Data error:<br>
+1: When the received slave address and/or parity bit does not match, the master detects a data error during the master role switching process (GETACCCR CCC, formerly known as GETACCMST). The active master retains the master role.<br>
+0: No error detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>DNACK</td>
+<td>RO</td>
+<td>Data not acknowledged:<br>
+1: The master detects that the slave did not acknowledge a data byte during:<br>
+i) Legacy I2C write transfer;<br>
+ii) Second attempt to send dynamic address during ENTDAA process.<br>
+0: No error detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>ANACK</td>
+<td>RO</td>
+<td>Address not acknowledged:<br>
+1: The master detects that the slave did not acknowledge the static/dynamic address during:<br>
+i) Legacy I2C read/write transfer;<br>
+ii) Direct CCC write transfer;<br>
+iii) Second attempt of direct CCC read transfer;<br>
+iv) Private read/write transfer;<br>
+0: No error detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>COVR</td>
+<td>RO</td>
+<td>C-FIFO underflow:<br>
+1: The master detects:<br>
+i) C-FIFO underflow: The control FIFO is empty and a repeated start bit must be issued;<br>
+0: No error detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>DOVR</td>
+<td>RO</td>
+<td>RX-FIFO overflow or TX-FIFO underflow:<br>
+i) TX-FIFO underflow: The TX-FIFO is empty and a write data byte must be sent;<br>
+ii) RX-FIFO overflow: The RX-FIFO is full and a new data byte is received;<br>
+0: No error detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>PERR</td>
+<td>RO</td>
+<td>Protocol error:<br>
+1: Protocol error detected;<br>
+0: No error detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>CODERR[3:0]</td>
+<td>RO</td>
+<td>0000: CE0 error (transaction after sending CCC): The master detects an illegally formatted CCC;<br>
+0001: CE1 error (watchdog error): The master detects that the data sent on the bus does not match expectations;<br>
+0010: CE2 error (no response to broadcast address): The master detects that the broadcast address (0b111_1110) is not acknowledged;<br>
+0011: CE3 error (master role switch failure): The master detects that the new master did not drive the bus after the master role switch;<br>
+Other values: Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.10-i3c-receive-message-register-r32_i3c_rmr">19.4.10 I3C Receive Message Register (R32_I3C_RMR)</h3>
+
+<p><strong>Offset address:</strong> 0x40</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="7">RADD[6:0]</td><td>Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">RCODE[7:0]</td><td colspan="5">Reserved</td><td colspan="3">IBIRDCNT[2:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>[23:17]</td>
+<td>RADD[6:0]</td>
+<td>RO</td>
+<td>Received slave address:<br>
+When I3C is configured as master, this bit field records the dynamic address received from the slave during an acknowledged IBI or master-role request.</td>
+<td>0</td>
+</tr>
+<tr><td>16</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[15:8]</td><td>RCODE[7:0]</td><td>RO</td><td>Received CCC code.</td><td>0</td></tr>
+<tr><td>[7:3]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>[2:0]</td>
+<td>IBIRDCNT[2:0]</td>
+<td>RO</td>
+<td>IBI received payload data count:<br>
+When I3C is configured as master, this bit field records the number of valid data bytes received in the R32_I3C_IBIDR register.<br>
+Note: For chips with a lot number second-to-last digit greater than 0, it becomes 0x7 after clearing the IBI request flag.</td>
+<td>0x7</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.11-i3c-event-register-r32_i3c_evr">19.4.11 I3C Event Register (R32_I3C_EVR)</h3>
+
+<p><strong>Offset address:</strong> 0x50</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td>HJF</td><td colspan="3">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>IBIF</td><td colspan="3">Reserved</td><td>ERRF</td><td>RXTGTENDF</td><td>FCF</td><td>Reserved</td><td>RXLASTF</td><td>TXLASTF</td><td>RXFNEF</td><td>TXFNFF</td><td>Reserved</td><td>CFNFF</td><td>TXFEF</td><td>CFEF</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:20]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>19</td>
+<td>HJF</td>
+<td>RO</td>
+<td>Hot-join flag:<br>
+When I3C is used as master, this flag is set to 1 by hardware to indicate that a hot-join request has been received.<br>
+This flag is cleared by software writing 1 to the CHJF bit in the R32_I3C_CEVR register.</td>
+<td>0</td>
+</tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>15</td>
+<td>IBIF</td>
+<td>RO</td>
+<td>IBI flag:<br>
+When I3C is used as master, this flag is set to 1 by hardware to indicate that an IBI request has been received.<br>
+This flag is cleared by software writing 1 to the CIBIF bit in the R32_I3C_CEVR register.</td>
+<td>0</td>
+</tr>
+<tr><td>[14:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>11</td>
+<td>ERRF</td>
+<td>RO</td>
+<td>Error flag:<br>
+This flag is set to 1 by hardware to indicate that an error has occurred. Software must then read R32_I3C_STATER to obtain the error type.<br>
+This flag is cleared by software writing 1 to the CERRF bit in the R32_I3C_CEVR register.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>RXTGTENDF</td>
+<td>RO</td>
+<td>Slave-initiated read end flag:<br>
+When I3C is used as master, this flag indicates that the slave has terminated the read transfer early. Software must then read the status register R32_I3C_STATR to check information related to the last message and obtain the number of data bytes received in the prematurely terminated read transfer (XDCNT in R32_I3C_STATR register).<br>
+This flag is cleared by software writing 1 to the CRXTGTENDF bit in the R32_I3C_CEVR register.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>FCF</td>
+<td>RO</td>
+<td>Frame complete flag:<br>
+When I3C is used as master, this flag is set to 1 by hardware to indicate that the frame on the I3C bus has completed (normally), e.g., when a stop bit is issued.<br>
+This flag is cleared by software writing 1 to the CFCF bit in the R32_I3C_CEVR register.</td>
+<td>0</td>
+</tr>
+<tr><td>8</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>7</td>
+<td>RXLASTF</td>
+<td>RO</td>
+<td>Last read data byte/word flag:<br>
+When I3C is used as master, this flag is set to 1 by hardware to indicate the last data byte/word of the message that must be read from the RX-FIFO (depending on the RXTHRES bit in the I3C_CFGR register). When the last data byte/word of the message is read, this flag is cleared by hardware.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>TXLASTF</td>
+<td>RO</td>
+<td>Last written data byte/word flag:<br>
+This flag is set to 1 by hardware to indicate the last data byte/word of the message that must be written to the TX-FIFO (depending on the TXTHRES bit in the R32_I3C_CFGR register). When the last data byte/word of the message is written, this flag is cleared by hardware.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>RXFNEF</td>
+<td>RO</td>
+<td>RX-FIFO not empty flag:<br>
+This flag is set/cleared by hardware to indicate that data bytes must/must not be read from the RX-FIFO.<br>
+Note: Before reading a data byte from the RX-FIFO (reading R32_I3C_RDR, depending on RXTHRES), software must wait for RXFNEF = 1 (through polling or through an enabled interrupt).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>TXFNFF</td>
+<td>RO</td>
+<td>TX-FIFO not full flag:<br>
+This flag is set/cleared by hardware to indicate that data bytes must/must not be written to the TX-FIFO.<br>
+Note: Before writing to the TX-FIFO (writing R32_I3C_TDR, depending on TXTHRES), software must wait for TXFNFF = 1 (through polling or through an enabled interrupt).</td>
+<td>0</td>
+</tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>2</td>
+<td>CFNFF</td>
+<td>RO</td>
+<td>C-FIFO not full flag:<br>
+When I3C is used as master, this flag is set to 1 by hardware to indicate that a control word must be written to the C-FIFO. This flag is cleared by hardware to indicate that no control word should be written to the C-FIFO.<br>
+Note: Before writing to the C-FIFO (writing R32_I3C_CTLR), software must wait for CFNFF = 1 (through polling or through an enabled interrupt).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TXFEF</td>
+<td>RO</td>
+<td>TX-FIFO empty flag:<br>
+This flag is set to 1 by hardware to indicate that the TX-FIFO is empty;<br>
+This flag is cleared by hardware to indicate that the TX-FIFO is not empty.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>0</td>
+<td>CFEF</td>
+<td>RO</td>
+<td>C-FIFO empty flag:<br>
+When used as master:<br>
+This flag is set to 1 by hardware to indicate that the C-FIFO is empty;<br>
+This flag is cleared by hardware to indicate that the C-FIFO is not empty.<br><br>
+When used as slave:<br>
+This flag is set to 1 by hardware to indicate that the R32_I3C_CTLR register does not contain a control word (no IBI/CR/HJ request);<br>
+This flag is cleared by hardware to indicate that the R32_I3C_CTLR register contains a control word (pending IBI/CR/HJ request).<br><br>
+Note: If C-FIFO and TX-FIFO preload is configured (TMODE bit in R32_I3C_CFGR register is 1), software must wait for TXFEF = 1 and CFEF = 1 before starting a new frame transfer.</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.12-i3c-interrupt-enable-register-r32_i3c_intenr">19.4.12 I3C Interrupt Enable Register (R32_I3C_INTENR)</h3>
+
+<p><strong>Offset address:</strong> 0x54</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td>HJIE</td><td colspan="3">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>IBIIE</td><td colspan="3">Reserved</td><td>ERRIE</td><td>RXTGTENDIE</td><td>FCIE</td><td colspan="2">Reserved</td><td>RXFNEIE</td><td>TXFNEIE</td><td>Reserved</td><td>CFNFIE</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:20]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>19</td>
+<td>HJIE</td>
+<td>RW</td>
+<td>Hot-join interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr><td>[18:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>15</td>
+<td>IBIIE</td>
+<td>RW</td>
+<td>IBI request interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr><td>[14:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>11</td>
+<td>ERRIE</td>
+<td>RW</td>
+<td>Error interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>RXTGTENDIE</td>
+<td>RW</td>
+<td>Slave-initiated read end interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>FCIE</td>
+<td>RW</td>
+<td>Frame complete interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr><td>[8:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>5</td>
+<td>RXFNEIE</td>
+<td>RW</td>
+<td>RX-FIFO not empty interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>TXFNEIE</td>
+<td>RW</td>
+<td>TX-FIFO not full interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>2</td>
+<td>CFNFIE</td>
+<td>RW</td>
+<td>C-FIFO not full interrupt enable:<br>
+1: Enable;<br>
+0: Disable.</td>
+<td>0</td>
+</tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.13-i3c-clear-event-register-r32_i3c_cevr">19.4.13 I3C Clear Event Register (R32_I3C_CEVR)</h3>
+
+<p><strong>Offset address:</strong> 0x58</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td>CHJF</td><td colspan="3">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>CIBIF</td><td colspan="3">Reserved</td><td>CERRF</td><td>CRXTGTENDF</td><td>CFCF</td><td colspan="9">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:20]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>19</td>
+<td>CHJF</td>
+<td>WO</td>
+<td>Clear hot-join flag:<br>
+1: Clear HJF;<br>
+0: No effect.</td>
+<td>0</td>
+</tr>
+<tr><td>[18:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>15</td>
+<td>CIBIF</td>
+<td>WO</td>
+<td>Clear IBI request flag:<br>
+1: Clear IBIF;<br>
+0: No effect.</td>
+<td>0</td>
+</tr>
+<tr><td>[14:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>11</td>
+<td>CERRF</td>
+<td>WO</td>
+<td>Clear error flag:<br>
+1: Clear ERRF;<br>
+0: No effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>CRXTGTENDF</td>
+<td>WO</td>
+<td>Clear slave-initiated read end flag:<br>
+1: Clear RXTGTENDF;<br>
+0: No effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>CFCF</td>
+<td>WO</td>
+<td>Clear frame complete flag:<br>
+1: Clear FCF;<br>
+0: No effect.</td>
+<td>0</td>
+</tr>
+<tr><td>[8:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.14-i3c-device-register-0-r32_i3c_devr0">19.4.14 I3C Device Register 0 (R32_I3C_DEVR0)</h3>
+
+<p><strong>Offset address:</strong> 0x60</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="7">DA[6:0]</td><td>DAVAL</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>[7:1]</td>
+<td>DA[6:0]</td>
+<td>RW</td>
+<td>7-bit dynamic address:<br>
+When I3C is used as master, this bit field can be written by software to define its own dynamic address.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>DAVAL</td>
+<td>RW</td>
+<td>Dynamic address valid:<br>
+When I3C is used as master, this bit can be written by software to validate its own dynamic address.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.15-i3c-device-register-x-r32_i3c_devrx-x-1-2-3-4">19.4.15 I3C Device Register x (R32_I3C_DEVRx) (x=1/2/3/4)</h3>
+
+<p><strong>Offset address:</strong> 0x64, 0x68, 0x6C, 0x70</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>DIS</td><td colspan="11">Reserved</td><td>SUSP</td><td>IBIDEN</td><td>Reserved</td><td>IBIACK</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="7">DA[6:0]</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>DIS</td>
+<td>RO</td>
+<td>DA[6:0] write disable:<br>
+1: Disable/lock write operations to DA[7:0] and IBIDEN;<br>
+0: Allow write operations to DA[7:0] and IBIDEN in the R32_I3C_DEVRx register.</td>
+<td>0</td>
+</tr>
+<tr><td>[30:20]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>19</td>
+<td>SUSP</td>
+<td>RW</td>
+<td>Suspend/stop I3C transfer upon receiving IBI:<br>
+1: After receiving an IBI request from slave x, stop I3C transfer and flush C-FIFO and TX-FIFO;<br>
+0: After acknowledging and completing the IBI request from slave x, do not flush C-FIFO and TX-FIFO, and issue a repeated start bit or stop bit depending on whether there is a next control word.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>18</td>
+<td>IBIDEN</td>
+<td>RW</td>
+<td>IBI data enable:<br>
+1: The acknowledged IBI from slave x is followed by a mandatory data byte MDB[7:0];<br>
+0: The acknowledged IBI from slave x has no data byte.</td>
+<td>0</td>
+</tr>
+<tr><td>17</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>16</td>
+<td>IBIACK</td>
+<td>RW</td>
+<td>IBI request acknowledge:<br>
+1: The IBI request from slave x must be ACKed (via the 7-bit dynamic address DA[6:0])<br>
+- The DIS bit field is set to 1 by hardware to protect DA[6:0] from software modification, while the hardware can internally store the current DA[6:0] into the core clock domain.<br>
+- After ACK, the master records the IBI payload data (if any) according to I3C_DEVRx.IBIDEN.<br>
+- Software is notified through the IBI flag (IBIF=1) and/or the corresponding interrupt (if enabled);<br>
+- Regardless of the IBIACK configuration of this device or other devices, all other IBI requests will be NACKed until the IBI request flag (IBIF) and master-role request flag (CRF) are both cleared.<br>
+0: The IBI request from slave x must be NACKed. After NACK, the message continues transfer as initially programmed (the slave has received NACK and can issue another IBI request later).</td>
+<td>0</td>
+</tr>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>[7:1]</td>
+<td>DA[6:0]</td>
+<td>RW</td>
+<td>I3C dynamic address assigned to slave x:<br>
+When I3C is used as master, this bit field must be written by software to store the 7-bit dynamic address sent by the master through the broadcast ENTDAA or direct SETNEWDA CCC acknowledged by slave x.</td>
+<td>0</td>
+</tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="19.4.16-i3c-timing-register-0-r32_i3c_timingr0">19.4.16 I3C Timing Register 0 (R32_I3C_TIMINGR0)</h3>
+
+<p><strong>Offset address:</strong> 0xA0</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">SCLH_I2C[7:0]</td><td colspan="8">SCLL_OD[7:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">SCLH_I3C[7:0]</td><td colspan="8">SCLL_PP[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>SCLH_I2C[7:0]</td>
+<td>RW</td>
+<td>SCL high-level duration for legacy I2C messages, in core clock cycles:<br>
+tSCLH_I2C = (SCLH_I2C + 1) × tHCLK</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>SCLL_OD[7:0]</td>
+<td>RW</td>
+<td>SCL low-level duration for the open-drain phase, for legacy I2C messages and I3C open-drain phase (address phase after start bit, ACK phase during master-initiated messages, and T bit phase during direct/private IBI payload), in core clock cycles:<br>
+tSCLL_OD = (SCLL_OD + 1) × tHCLK</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>SCLH_I3C[7:0]</td>
+<td>RW</td>
+<td>SCL high-level duration for I3C messages (in push-pull and open-drain phases), in core clock cycles:<br>
+tSCLH_I3C = (SCLH_I3C + 1) × tHCLK</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>SCLL_PP[7:0]</td>
+<td>RW</td>
+<td>SCL low-level duration for the I3C push-pull phase, in core clock cycles:<br>
+tSCLL_PP = (SCLL_PP + 1) × tHCLK</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.17-i3c-timing-register-1-r32_i3c_timingr1">19.4.17 I3C Timing Register 1 (R32_I3C_TIMINGR1)</h3>
+
+<p><strong>Offset address:</strong> 0xA4</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="3">Reserved</td><td>SDA_HD</td><td colspan="5">Reserved</td><td colspan="7">FREE[6:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="6">Reserved</td><td colspan="2">ASNCR[1:0]</td><td colspan="8">AVAL[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:29]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>28</td>
+<td>SDA_HD</td>
+<td>RW</td>
+<td>SDA hold time, in core clock cycles.<br>
+SDA hold time = (SDA_HD + 0.5) × tHCLK</td>
+<td>0</td>
+</tr>
+<tr><td>[27:23]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>[22:16]</td>
+<td>FREE[6:0]</td>
+<td>RW</td>
+<td>Core clock cycles used to set some MIPI timings (e.g., bus idle condition time).</td>
+<td>0</td>
+</tr>
+<tr><td>[15:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>[9:8]</td>
+<td>ASNCR[1:0]</td>
+<td>RW</td>
+<td>Active state of the new master:<br>
+The time that must be waited before being accessed as a new slave, see AVAL[7:0].</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>AVAL[7:0]</td>
+<td>RW</td>
+<td>Core clock cycles used to set the 1μs time unit:<br>
+The hardware then uses this time unit to build some internal timers, corresponding to the following MIPI I3C timings:<br>
+When I3C is used as master, the time it stalls the clock must not exceed the maximum stall time (stalling SCL clock low), as follows:<br>
+1. For the first bit of the address assigned during dynamic address assignment: The clock stall time must not exceed the MIPI timing tSTALLDAA = 15ms. This timing is defined as:<br>
+tSTALLDAAmax = (AVAL[7:0] + 1) × 15000 × tHCLK<br>
+2. For the ACK/NACK phase of I3C/I2C transfers, the parity bit of write data transfers, and the transition bit of I3C read transfers: The clock stall time must not exceed the MIPI timing tSTALL = 100μs. This timing is defined as:<br>
+tSTALLmax = (AVAL[7:0] + 1) × 100 × tHCLK</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.18-i3c-timing-register-2-r32_i3c_timingr2">19.4.18 I3C Timing Register 2 (R32_I3C_TIMINGR2)</h3>
+
+<p><strong>Offset address:</strong> 0xA8</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">STALL[7:0]</td><td colspan="4">Reserved</td><td>STALLA</td><td>STALLC</td><td>STALLD</td><td>STALLT</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>[15:8]</td>
+<td>STALL[7:0]</td>
+<td>RW</td>
+<td>Master clock stall time, in core clock cycles:<br>
+tSCLL_STALL = STALL × tHCLK</td>
+<td>0</td>
+</tr>
+<tr><td>[7:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>3</td>
+<td>STALLA</td>
+<td>RW</td>
+<td>Master clock stall enable for ACK phase:<br>
+1: Enable stall;<br>
+0: Disable stall.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>STALLC</td>
+<td>RW</td>
+<td>Master clock stall enable for CCC PAR phase:<br>
+1: Enable stall;<br>
+0: Disable stall.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>STALLD</td>
+<td>RW</td>
+<td>Master clock stall enable for data PAR phase:<br>
+1: Enable stall;<br>
+0: Disable stall.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>STALLT</td>
+<td>RW</td>
+<td>Master clock stall enable for data T bit phase (and ACK/NACK phase of data bytes in legacy I2C read messages):<br>
+1: Enable stall;<br>
+0: Disable stall.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="19.4.19-i3c-get-maximum-data-speed-register-r32_i3c_getmdsr">19.4.19 I3C Get Maximum Data Speed Register (R32_I3C_GETMDSR)</h3>
+
+<p><strong>Offset address:</strong> 0xD0</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>TSCO</td><td colspan="8">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:25]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr>
+<td>24</td>
+<td>TSCO</td>
+<td>RW</td>
+<td>Clock-to-data turnaround time (tSCO):<br>
+1: tSCO > 12ns;<br>
+0: tSCO ≤ 12ns.</td>
+<td>0</td>
+</tr>
+<tr><td>[23:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>

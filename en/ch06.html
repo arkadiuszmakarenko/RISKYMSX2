@@ -1,0 +1,320 @@
+<h1 id="chapter-6-real-time-clock-rtc">Chapter 6: Real-Time Clock (RTC)</h1>
+
+<p>The Real-Time Clock (RTC) is an independent timer module. Its programmable counter can be up to 32 bits. Combined with software, it can implement real-time clock functions, and the counter value can be modified to reconfigure the system's current time and date. The RTC module is located in the backup power domain; system reset and wake-up from Standby mode do not affect it.</p>
+
+<h2 id="6.1-main-features">6.1 Main Features</h2>
+<ul>
+<li>Prescaler factor up to 2<sup>20</sup></li>
+<li>32-bit programmable counter</li>
+<li>Multiple clock sources, interrupts</li>
+<li>Independent reset</li>
+</ul>
+
+<h2 id="6.2-functional-description">6.2 Functional Description</h2>
+
+<h3 id="6.2.1-overview">6.2.1 Overview</h3>
+
+<figure><img src="figures/fig_6_1.png"><figcaption>Figure 6-1: RTC block diagram</figcaption></figure>
+
+<p>As shown in Figure 6-1, the RTC module consists mainly of three parts: the PB1 bus interface, the divider and counter, and the control and status registers. The divider and counter are located in the backup domain and can be powered by VBAT. After RTCCLK enters the divider (RTC_DIV), it is divided to produce TR_CLK. Note that the divider (RTC_DIV) internally is a down-counter; when it underflows, it outputs one TR_CLK and then reloads the preset value from the reload value register (RTC_PSCR). Reading the divider actually reads its real-time value (read only); the prescaler factor should be written to the reload value register (RTC_PSCR). Generally, the TR_CLK period is set to 1 second. TR_CLK triggers a second event and simultaneously increments the main counter (RTC_CNT) by 1. When the main counter increments to match the alarm register value, an alarm event is triggered. When the main counter increments to overflow, an overflow event is triggered. All three events can trigger interrupts, each controlled by a corresponding interrupt enable bit.</p>
+
+<h3 id="6.2.2-reset">6.2.2 Reset</h3>
+
+<p>Due to the special purpose of the real-time clock, its four register groups in the backup domain — prescaler, prescaler reload value, main counter, and alarm — can only be reset by the backup domain reset signal; refer to the RCC backup domain reset section. The control register of the real-time clock is controlled by system reset or power reset.</p>
+
+<h3 id="6.2.3-special-register-read-write-operations">6.2.3 Special Register Read/Write Operations</h3>
+
+<p>Due to the special purpose of the real-time clock, the RTC is independent from the PB1 bus. PB1 reads of the RTC are not necessarily real-time. Reading RTC registers through PB1 must occur after PB1 is started and after one RTC rising edge. This situation may occur after system reset and power reset, or after wake-up from Standby or Stop mode. A convenient approach is to wait for the RSF bit in the control register (CTLR) to be set. Writing to the RTC requires waiting for the previous write operation to finish, and configuration mode must be entered. The specific steps are:</p>
+<ol>
+<li>Query the RTOFF bit until it becomes 1;</li>
+<li>Set the CNF bit to enter configuration mode;</li>
+<li>Perform write operations on one or more RTC registers;</li>
+<li>Clear the CNF bit to exit configuration mode; the PB1 interface begins writing to the RTC registers;</li>
+<li>Query the RTOFF bit until it becomes 1, indicating the write is complete.</li>
+</ol>
+
+<h2 id="6.3-register-description">6.3 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 6-1: RTC-related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_RTC_CTLRH</td><td>0x40002800</td><td>RTC control register high</td><td>0x0000</td></tr>
+<tr><td>R16_RTC_CTLRL</td><td>0x40002804</td><td>RTC control register low</td><td>0x0020</td></tr>
+<tr><td>R16_RTC_PSCRH</td><td>0x40002808</td><td>Prescaler reload value register high</td><td>0x000X</td></tr>
+<tr><td>R16_RTC_PSCRL</td><td>0x4000280C</td><td>Prescaler reload value register low</td><td>0xXXXX</td></tr>
+<tr><td>R16_RTC_DIVH</td><td>0x40002810</td><td>Divider register high</td><td>0x000X</td></tr>
+<tr><td>R16_RTC_DIVL</td><td>0x40002814</td><td>Divider register low</td><td>0xXXXX</td></tr>
+<tr><td>R16_RTC_CNTH</td><td>0x40002818</td><td>RTC counter register high</td><td>0xXXXX</td></tr>
+<tr><td>R16_RTC_CNTL</td><td>0x4000281C</td><td>RTC counter register low</td><td>0xXXXX</td></tr>
+<tr><td>R16_RTC_ALRMH</td><td>0x40002820</td><td>Alarm register high</td><td>0xXXXX</td></tr>
+<tr><td>R16_RTC_ALRML</td><td>0x40002824</td><td>Alarm register low</td><td>0xXXXX</td></tr>
+</tbody>
+</table>
+
+<h3 id="6.3.1-rtc-control-register-high-rtc_ctlrh">6.3.1 RTC Control Register High (RTC_CTLRH)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="13">Reserved</td><td>OWIE</td><td>ALRIE</td><td>SECIE</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:3]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>OWIE</td>
+<td>RW</td>
+<td>Overflow interrupt enable:<br>1: Enable;<br>0: Disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>ALRIE</td>
+<td>RW</td>
+<td>Alarm interrupt enable:<br>1: Enable;<br>0: Disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>SECIE</td>
+<td>RW</td>
+<td>Second interrupt enable:<br>1: Enable;<br>0: Disable.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.2-rtc-control-register-low-rtc_ctlrl">6.3.2 RTC Control Register Low (RTC_CTLRL)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>RTOFF</td><td>CNF</td><td>RSF</td><td>OWF</td><td>ALRF</td><td>SECF</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:6]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>RTOFF</td>
+<td>RO</td>
+<td>RTC operation status indicator, indicating the execution status of the last operation on the RTC. RTC operations must wait for this bit to be 1.<br>1: The last RTC operation has completed;<br>0: The last RTC operation is still in progress.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>CNF</td>
+<td>RW</td>
+<td>Configuration flag. Writing 1 to this bit enters configuration mode, thereby allowing values to be written to the counter (R16_RTC_CNTx), alarm register (R16_RTC_ALRMx), and prescaler reload value register (R16_RTC_PSCRx). The write operation is only executed after this bit is written 1 and then cleared by software:<br>1: Enter configuration mode;<br>0: Exit configuration mode, start updating RTC registers.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>RSF</td>
+<td>RW0</td>
+<td>Register synchronization flag. Before reading or writing the RTC module's prescaler (PSCRx), alarm (ALRMx), and counter (CNTx) registers, this bit must be set by hardware to confirm these registers have been synchronized. When reading/writing these registers, or after PB1 reset or PB1 clock stop, this bit should be cleared first.<br>1: Registers have been synchronized;<br>0: Registers not synchronized.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>OWF</td>
+<td>RW0</td>
+<td>Counter overflow flag. When the 32-bit counter overflows, this bit is set by hardware. If the OWIE bit is set, an overflow interrupt is also generated. This bit can only be cleared by software and cannot be set by software.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>ALRF</td>
+<td>RW0</td>
+<td>Alarm flag. When the counter value reaches the alarm register (ALRMx) value, this bit is set by hardware. If the alarm interrupt enable bit (ALRIE) is set, an alarm interrupt is also generated. This bit can only be cleared by software and cannot be set by software.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>SECF</td>
+<td>RW0</td>
+<td>Second event flag. After the clock passes through the prescaler, each falling edge generated increments the counter by 1 and simultaneously generates a second event; this bit is set. If the second interrupt is enabled (SECIE set), a second interrupt is also generated. This bit can only be cleared by software and cannot be set by software.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.3-prescaler-reload-value-register-high-rtc_pscrh">6.3.3 Prescaler Reload Value Register High (RTC_PSCRH)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td colspan="4">PRL[19:16]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>PRL[19:16]</td>
+<td>WO</td>
+<td>Reload value high.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.4-prescaler-reload-value-register-low-rtc_pscrl">6.3.4 Prescaler Reload Value Register Low (RTC_PSCRL)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">PRL[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>PRL[15:0]</td>
+<td>WO</td>
+<td>Reload value low. The actual prescaler factor is (PRLL[19:0]+1). For example, if the RTC input frequency is 32768 Hz, setting this value to 0x7fff produces a signal with a 1-second period.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.5-divider-register-high-rtc_divh">6.3.5 Divider Register High (RTC_DIVH)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td colspan="4">DIV[19:16]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>DIV[19:16]</td>
+<td>RO</td>
+<td>Divider register high.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.6-divider-register-low-rtc_divl">6.3.6 Divider Register Low (RTC_DIVL)</h3>
+<p><strong>Offset address:</strong> 0x14</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DIV[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>DIV[15:0]</td>
+<td>RO</td>
+<td>Divider register low. DIV is actually a down-counter; each RTC_CLK clock decrements the DIV counter by 1. On underflow, a TR_CLK is output and the value is reloaded from PSCR. DIV is read-only; reading it returns the remaining value of the current divider counter.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.7-rtc-counter-register-high-rtc_cnth">6.3.7 RTC Counter Register High (RTC_CNTH)</h3>
+<p><strong>Offset address:</strong> 0x18</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CNT[31:16]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>CNT[31:16]</td>
+<td>RW</td>
+<td>Counter high.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.8-rtc-counter-register-low-rtc_cntl">6.3.8 RTC Counter Register Low (RTC_CNTL)</h3>
+<p><strong>Offset address:</strong> 0x1C</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">CNT[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>CNT[15:0]</td>
+<td>RW</td>
+<td>Counter low. The core device of the RTC timer, clocked by TR_CLK (period generally set to 1 second). The current time is calculated by reading CNT[31:0]. Writing this value requires entering configuration mode.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.9-alarm-register-high-rtc_alrmh">6.3.9 Alarm Register High (RTC_ALRMH)</h3>
+<p><strong>Offset address:</strong> 0x20</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">ALR[31:16]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>ALR[31:16]</td>
+<td>WO</td>
+<td>Alarm register high.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="6.3.10-alarm-register-low-rtc_alrml">6.3.10 Alarm Register Low (RTC_ALRML)</h3>
+<p><strong>Offset address:</strong> 0x24</p>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">ALR[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:0]</td>
+<td>ALR[15:0]</td>
+<td>WO</td>
+<td>Alarm register low. When the alarm register ALRM[31:0] value matches the counter CNT[31:0] value, an alarm event is generated. Changing this value requires entering configuration mode.</td>
+<td>x</td>
+</tr>
+</tbody>
+</table>

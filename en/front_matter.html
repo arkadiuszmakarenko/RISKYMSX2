@@ -1,0 +1,63 @@
+<!-- Front matter: Introduction and register bit attribute descriptions -->
+<h1>CH32V407 / V467 Application Manual</h1>
+<h2>V1.1</h2>
+
+<h3>Description</h3>
+<p>
+  The CH32V407 is an industrial-grade interconnect microcontroller based on the QingKe RISC-V core,
+  supporting zero-wait operation at up to 200 MHz, and supporting the RVV vector instruction set
+  for accelerating computation or parallel processing applications. The CH32V407 integrates
+  2 sets of USB 2.0 high-speed PHY transceivers (480 Mbps), an Ethernet MAC controller and
+  10/100 Mbps physical-layer transceiver; built-in dual ADC units, dual DAC units, OPA operational
+  amplifiers and other analog resources; provides 2 sets of 24-channel DMA controllers, SDIO,
+  DVP digital video interface, ARGB, LTDC, FSMC, multiple timer groups, 10 USART serial ports,
+  I2C interfaces, I3C interfaces, 3 SPI groups, 2 I2S groups, CAN interfaces and other rich
+  peripheral resources.
+</p>
+<p>
+  The CH32V467 adds 4 MB or 8 MB of on-chip extended PSRAM memory (with DMA support) on top of
+  the CH32V407.
+</p>
+<p>
+  This manual provides detailed usage information for the CH32V407 and V467 chips for user
+  application development.
+  For device characteristics of the CH32V407 series, please refer to the CH32V407DS0 manual.
+</p>
+
+<h3>RISC-V Core Version Overview</h3>
+
+<table class="data-table">
+  <tr>
+    <th>Core</th><th>Version</th><th>Instruction Set</th><th>Hardware Stack Levels</th>
+    <th>Interrupt Nesting Levels</th><th>Fast Interrupt Channels</th>
+    <th>Pipeline Stages</th><th>Vector Table Mode</th><th>Extension Interface</th><th>Debug</th>
+  </tr>
+  <tr>
+    <td>QingKe V3V</td><td>IMACV-X2</td><td>24</td><td>3</td><td>address or instruction</td>
+    <td>supports single/dual-wire</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td>
+  </tr>
+</table>
+
+<p>
+  For information about the RISC-V core, please refer to the QingKe V3 microprocessor manual:
+  <em>QingKeV3_Processor_Manual</em>.
+</p>
+
+<h3>Register Bit Attribute Abbreviations</h3>
+
+<table class="data-table">
+  <tr><th>Attribute</th><th>Description</th></tr>
+  <tr><td>RF</td><td>Read-only, fixed value.</td></tr>
+  <tr><td>RO</td><td>Read-only, changed by hardware.</td></tr>
+  <tr><td>RZ</td><td>Read-only, auto-cleared after read.</td></tr>
+  <tr><td>WO</td><td>Write-only (not readable, read value is indeterminate).</td></tr>
+  <tr><td>WA</td><td>Write-only, writable in security mode.</td></tr>
+  <tr><td>WZ</td><td>Write-only, auto-cleared after write.</td></tr>
+  <tr><td>RW</td><td>Readable, writable.</td></tr>
+  <tr><td>RWA</td><td>Readable, writable in security mode.</td></tr>
+  <tr><td>RW1</td><td>Readable, write 1 effective, write 0 ineffective.</td></tr>
+  <tr><td>RW0</td><td>Readable, write 0 effective, write 1 ineffective.</td></tr>
+  <tr><td>RW1T</td><td>Readable, write 0 ineffective, write 1 toggles.</td></tr>
+  <tr><td>RW1Z</td><td>Readable, write 1 clears the bit, write 0 ineffective.</td></tr>
+  <tr><td>SC</td><td>Self-clearing.</td></tr>
+</table>

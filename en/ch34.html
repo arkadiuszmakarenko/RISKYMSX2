@@ -1,0 +1,384 @@
+<h1 id="chapter-34-pseudo-static-random-access-memory-psram">Chapter 34: Pseudo-Static Random Access Memory (PSRAM)</h1>
+
+<p>The module description in this chapter applies only to the CH32V467 microcontroller product.</p>
+
+<p>The CH32V467 chip, based on the CH32V407, also integrates a 4M or 8M byte extended PSRAM memory. It supports data storage through address and read/write instructions, and supports DMA.</p>
+
+<h2 id="34.1-main-features">34.1 Main Features</h2>
+<ul>
+<li>8-bit hardware width, supports 8-bit, 16-bit, or 32-bit random or block read/write</li>
+<li>Supports up to 300MHz clock rate, supports dual-edge, maximum 600MBps data transfer rate</li>
+<li>Supports write data masking</li>
+<li>Supports high-speed read operations via data strobe</li>
+<li>Supports register-configurable write and read initial latency</li>
+<li>Supports half-sleep mode and deep sleep mode</li>
+</ul>
+
+<h2 id="34.2-register-description">34.2 Register Description</h2>
+
+<h3 id="34.2.1-psram-related-registers">34.2.1 PSRAM Related Registers</h3>
+
+<table class="reg-list">
+<caption>Table 34-1: PSRAM Related Register List</caption>
+<thead>
+<tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+</thead>
+<tbody>
+<tr><td>R32_PSRAM_CTLR</td><td>0x40024400</td><td>PSRAM control register</td><td>0x00000300</td></tr>
+<tr><td>R32_PSRAM_TIMING</td><td>0x40024404</td><td>PSRAM timing register</td><td>0x070C0014</td></tr>
+<tr><td>R32_PSRAM_DATA</td><td>0x40024408</td><td>PSRAM data register</td><td>0x00000000</td></tr>
+<tr><td>R32_PSRAM_ADDR</td><td>0x4002440C</td><td>PSRAM address register</td><td>0x00000000</td></tr>
+<tr><td>R32_PSRAM_CMD0_CFG</td><td>0x40024410</td><td>PSRAM command word 0 configuration register</td><td>0xA0208000</td></tr>
+<tr><td>R32_PSRAM_CMD1_CFG</td><td>0x40024414</td><td>PSRAM command word 1 configuration register</td><td>0xB0FFC040</td></tr>
+<tr><td>R32_PSRAM_DMACR</td><td>0x40024418</td><td>PSRAM DMA control register</td><td>0x00000000</td></tr>
+<tr><td>R32_PSRAM_DATA_NUM</td><td>0x4002441C</td><td>PSRAM data transfer quantity register</td><td>0x00000000</td></tr>
+<tr><td>R32_DMA_MEM_ADDR</td><td>0x40024420</td><td>DMA transfer memory start address register</td><td>0x00000000</td></tr>
+<tr><td>R32_DMA_PSRAM_ADDR</td><td>0x40024424</td><td>DMA transfer PSRAM start address register</td><td>0x00000000</td></tr>
+<tr><td>R32_PSRAM_ISR</td><td>0x40024428</td><td>PSRAM interrupt status register</td><td>0x00000000</td></tr>
+<tr><td>R32_PSRAM_IER</td><td>0x4002442C</td><td>PSRAM interrupt error enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_PSRAM_STATUS</td><td>0x40024430</td><td>PSRAM controller state machine register</td><td>0x00000000</td></tr>
+<tr><td>R32_PSRAM_CECFG</td><td>0x40024434</td><td>PSRAM CE pulse configuration register</td><td>0x000004B0</td></tr>
+<tr><td>R32_PSRAM_LATENCY</td><td>0x40024438</td><td>PSRAM read/write latency register</td><td>0x00050505</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.1-psram-control-register-r32_psram_ctlr">34.2.1.1 PSRAM Control Register (R32_PSRAM_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td><td>EXIT_LPMD</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td colspan="3">CAP_CFG[2:0]</td><td colspan="2">Reserved</td><td>DFIFO</td><td>CFIFO</td><td colspan="4">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>16</td><td>EXIT_LPMD</td><td>RW</td><td>PSRAM exit current low-power state enable:<br>1: Make PSRAM exit current low-power state;<br>0: No behavior.</td><td>0</td></tr>
+<tr><td>[15:11]</td><td>Reserved</td><td>RW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:8]</td><td>CAP_CFG[2:0]</td><td>RW</td><td>PSRAM capacity configuration:<br>001: 32Mb;<br>011: 64Mb;<br>101: 128Mb;<br>111: 256Mb;<br>Others: Reserved.</td><td>0x3</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>RW</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>DFIFO</td><td>RW</td><td>DMA write operation FIFO flush method selection:<br>1: DMA write operation simultaneously clears data in the HB slave interface read cache;<br>0: DMA write operation does not clear data in the HB slave interface read cache.</td><td>0</td></tr>
+<tr><td>4</td><td>CFIFO</td><td>RW</td><td>Read FIFO flush method selection:<br>1: Writing to any PSRAM address will flush the read FIFO;<br>0: Read FIFO is flushed only when the write address matches the address in the read buffer.</td><td>0</td></tr>
+<tr><td>[3:0]</td><td>Reserved</td><td>RW</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.2-psram-timing-register-r32_psram_timing">34.2.1.2 PSRAM Timing Register (R32_PSRAM_TIMING)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">TXLPD[7:0]</td><td colspan="8">TCPH[7:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">TRC[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>TXLPD[7:0]</td><td>RW</td><td>PSRAM_CE_n pulse width sustained when exiting low-power (half-sleep and deep sleep):<br>Tpulse = TXLPD[7:0] * HSI clock period.</td><td>0x07</td></tr>
+<tr><td>[23:16]</td><td>TCPH[7:0]</td><td>RW</td><td>Minimum interval between two consecutive bursts.<br>tCPH = TCPH[7:0] * PSRAM clock period.<br>Example: If PSRAM_CLK is 333M, to satisfy the 32ns tCPH time, this field should be written with a minimum of 12;<br>If PSRAM_CLK is 166M, to satisfy the 22ns tCPH time, this field should be written with a minimum of 4.</td><td>0x0C</td></tr>
+<tr><td>[15:8]</td><td>Reserved</td><td>RW</td><td>Reserved.</td><td>0x00</td></tr>
+<tr><td>[7:0]</td><td>TRC[7:0]</td><td>RW</td><td>Minimum read/write cycle time:<br>T = TRC[7:0] * PSRAM clock period.<br>Example: To satisfy the 60ns tRC_read and tRC_write time, if PSRAM_CLK is 333M, this should be written with a minimum of 0x14;<br>If PSRAM_CLK is 166M, this should be written with a minimum of 0x0A.</td><td>0x14</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.3-psram-data-register-r16_psram_data">34.2.1.3 PSRAM Data Register (R16_PSRAM_DATA)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">RW_HDATA[7:0]</td><td colspan="8">RW_LDATA[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>RW_HDATA[7:0]</td><td>RW</td><td>High byte data written or read out.</td><td>0</td></tr>
+<tr><td>[7:0]</td><td>RW_LDATA[7:0]</td><td>RW</td><td>Low byte data written or read out.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.4-psram-address-register-r32_psram_addr">34.2.1.4 PSRAM Address Register (R32_PSRAM_ADDR)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">MR_ADDR0[7:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">CMD[7:0]</td><td colspan="6">Reserved</td><td>MW</td><td>BUSY</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[23:16]</td><td>MR_ADDR0[7:0]</td><td>RW</td><td>Register 0 address to operate on.</td><td>0</td></tr>
+<tr><td>[15:8]</td><td>CMD[7:0]</td><td>RW</td><td>Command to execute:<br>Read register: 0x40;<br>Write register: 0xC0.</td><td>0</td></tr>
+<tr><td>[7:2]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>1</td><td>MW</td><td>RW</td><td>1: Informs PSRAM that a write operation to the PSRAM register is about to start;<br>0: Informs PSRAM to start a read operation, placing data into the R32_PSRAM_DATA data register.</td><td>0</td></tr>
+<tr><td>0</td><td>BUSY</td><td>RW</td><td>This bit should be read as logic 0 before writing to R32_PSRAM_DATA and R32_PSRAM_ADDR. During PSRAM register access, this bit is set to 1 by the application to indicate that a read or write access is in progress. During a write operation to the PSRAM register, R32_PSRAM_DATA must remain valid until the controller clears this bit. During a read operation to the PSRAM register, R32_PSRAM_DATA remains invalid until the controller clears this bit.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.5-psram-command-word-0-configuration-register-r32_psram_cmd0_cfg">34.2.1.5 PSRAM Command Word 0 Configuration Register (R32_PSRAM_CMD0_CFG)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">SW_LB[7:0]</td><td colspan="8">SR_LB[7:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">SW[7:0]</td><td colspan="8">SR[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>SW_LB[7:0]</td><td>RW</td><td>Configurable synchronous write (linear burst) command.</td><td>0xA0</td></tr>
+<tr><td>[23:16]</td><td>SR_LB[7:0]</td><td>RW</td><td>Configurable synchronous read (linear burst) command.</td><td>0x20</td></tr>
+<tr><td>[15:8]</td><td>SW[7:0]</td><td>RW</td><td>Configurable synchronous write command.</td><td>0x80</td></tr>
+<tr><td>[7:0]</td><td>SR[7:0]</td><td>RW</td><td>Configurable synchronous read command.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.6-psram-command-word-1-configuration-register-r32_psram_cmd1_cfg">34.2.1.6 PSRAM Command Word 1 Configuration Register (R32_PSRAM_CMD1_CFG)</h3>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">REFRESH[7:0]</td><td colspan="8">GLRST[7:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">MREGW[7:0]</td><td colspan="8">MREGR[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>REFRESH[7:0]</td><td>RW</td><td>Configurable refresh command.</td><td>0xB0</td></tr>
+<tr><td>[23:16]</td><td>GLRST[7:0]</td><td>RW</td><td>Configurable global reset command.</td><td>0xFF</td></tr>
+<tr><td>[15:8]</td><td>MREGW[7:0]</td><td>RW</td><td>Configurable register write command.</td><td>0xC0</td></tr>
+<tr><td>[7:0]</td><td>MREGR[7:0]</td><td>RW</td><td>Configurable register read command.</td><td>0x40</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.7-psram-dma-control-register-r32_psram_dmacr">34.2.1.7 PSRAM DMA Control Register (R32_PSRAM_DMACR)</h3>
+
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="4">TOWBL_TOUT[3:0]</td><td colspan="4">DMA_ONEBL[3:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="2">MEMORY_SIZE[1:0]</td><td colspan="5">Reserved</td><td>DAT_DIR</td><td colspan="3">Reserved</td><td>DMAEN</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[23:20]</td><td>TOWBL_TOUT[3:0]</td><td>RW</td><td>Pause time between two bursts, in HCLK units:<br>0000: Transfer without pause;<br>0001: Pause 1 cycle;<br>0010: Pause 2 cycles;<br>…<br>1110: Pause 14 cycles;<br>1111: Pause 15 cycles.</td><td>0</td></tr>
+<tr><td>[19:16]</td><td>DMA_ONEBL[3:0]</td><td>RW</td><td>DMA single burst length:<br>0000: 2;  0001: 4;<br>0010: 6;  0011: 8;<br>Others: 16.</td><td>0</td></tr>
+<tr><td>[15:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[11:10]</td><td>MEMORY_SIZE[1:0]</td><td>RW</td><td>Memory data width:<br>00: Reserved;<br>01: 16-bit;<br>10: 32-bit;<br>11: Reserved.</td><td>0</td></tr>
+<tr><td>[9:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>4</td><td>DAT_DIR</td><td>RW</td><td>Data transfer direction:<br>1: MEM to PSRAM;<br>0: PSRAM to MEM.<br>This bit is set and cleared by software.<br>Note: When DMA enable is turned off, this bit must be cleared simultaneously.</td><td>0</td></tr>
+<tr><td>[3:1]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>DMAEN</td><td>RW</td><td>DMA enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.8-psram-data-transfer-quantity-register-r32_psram_data_num">34.2.1.8 PSRAM Data Transfer Quantity Register (R32_PSRAM_DATA_NUM)</h3>
+
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DATA_NUM[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[15:0]</td><td>DATA_NUM[15:0]</td><td>RW</td><td>Data transfer quantity:<br>Written when the DMAEN bit of the R32_PSRAM_DMACR register is 0; read-only when the DMAEN bit is 1, indicating the remaining number of transfers.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.9-dma-transfer-memory-start-address-register-r32_dma_mem_addr">34.2.1.9 DMA Transfer Memory Start Address Register (R32_DMA_MEM_ADDR)</h3>
+
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">DMA_MEM_ADDR[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DMA_MEM_ADDR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>DMA_MEM_ADDR[31:0]</td><td>RW</td><td>DMA transfer memory start address (single-byte aligned).</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.10-dma-transfer-psram-start-address-register-r32_dma_psram_addr">34.2.1.10 DMA Transfer PSRAM Start Address Register (R32_DMA_PSRAM_ADDR)</h3>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">DMA_PSRAM_ADDR[31:16]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">DMA_PSRAM_ADDR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:0]</td><td>DMA_PSRAM_ADDR[31:0]</td><td>RW</td><td>DMA transfer PSRAM start address (4-byte aligned in 32-bit mode, 2-byte aligned in 16-bit mode).</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.11-psram-interrupt-status-register-r32_psram_isr">34.2.1.11 PSRAM Interrupt Status Register (R32_PSRAM_ISR)</h3>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="11">Reserved</td><td>AEIF</td><td>CENEIF</td><td>DMATF</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>AEIF</td><td>RO</td><td>Address error interrupt flag, address exceeded MEM capacity.</td><td>0</td></tr>
+<tr><td>2</td><td>CENEIF</td><td>RW1Z</td><td>CEM error interrupt flag:<br>1: CEM error interrupt generated;<br>0: No CEM error interrupt generated.</td><td>0</td></tr>
+<tr><td>1</td><td>DMATF</td><td>RW1Z</td><td>DMA bus transfer complete flag:<br>1: DMA bus transfer complete;<br>0: DMA bus transfer not complete.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.12-psram-interrupt-error-enable-register-r32_psram_ier">34.2.1.12 PSRAM Interrupt Error Enable Register (R32_PSRAM_IER)</h3>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>AEIEN</td><td>CENEIEN</td><td>DMATEN</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>AEIEN</td><td>RW</td><td>Address error interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>2</td><td>CENEIEN</td><td>RW</td><td>CEM error interrupt enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>1</td><td>DMATEN</td><td>RW</td><td>DMA bus transfer complete enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.13-psram-controller-state-machine-register-r32_psram_status">34.2.1.13 PSRAM Controller State Machine Register (R32_PSRAM_STATUS)</h3>
+
+<p><strong>Offset address:</strong> 0x30</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="11">Reserved</td><td colspan="5">PSRAM_STATE[4:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[4:0]</td><td>PSRAM_STATE[4:0]</td><td>RO</td><td>PSRAM controller state machine:<br>0000: Idle state;<br>0001: Send command address state;<br>0010: Write register state;<br>0011: Read register state;<br>0100: Write latency state;<br>0101: Reserved;<br>0110: Write data state;<br>0111: Read latency state;<br>1111: Wait for minimum CEM completion state.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.14-psram-ce-pulse-configuration-register-r32_psram_cecfg">34.2.1.14 PSRAM CE Pulse Configuration Register (R32_PSRAM_CECFG)</h3>
+
+<p><strong>Offset address:</strong> 0x34</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td><td>CEPWEN</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">CELPW[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>16</td><td>CEPWEN</td><td>RW</td><td>CE pulse width detection function enable:<br>1: Disable CE pulse width detection function;<br>0: Enable CE pulse width detection function.</td><td>0</td></tr>
+<tr><td>[15:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[11:0]</td><td>CELPW[11:0]</td><td>RW</td><td>Maximum duration of PSRAM_CE_n low pulse (low pulse width), excluding exiting half-sleep:<br>T = CELPW[11:0] * PSRAM clock period.</td><td>0x4B0</td></tr>
+</tbody>
+</table>
+
+<h3 id="34.2.1.15-psram-read-write-latency-register-r32_psram_latency">34.2.1.15 PSRAM Read/Write Latency Register (R32_PSRAM_LATENCY)</h3>
+
+<p><strong>Offset address:</strong> 0x38</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">WLATENCY[7:0]</td><td colspan="8">RLATENCY[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:16]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[15:8]</td><td>WLATENCY[7:0]</td><td>RW</td><td>Write latency, the delay from issuing a write command to write data being valid.</td><td>0x05</td></tr>
+<tr><td>[7:0]</td><td>RLATENCY[7:0]</td><td>RW</td><td>Read latency, the delay from issuing a read command to read data being valid.</td><td>0x05</td></tr>
+</tbody>
+</table>

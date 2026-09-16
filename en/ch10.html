@@ -1,0 +1,1540 @@
+<h1 id="chapter-10-gpio-and-alternate-functions-gpio-afio">Chapter 10: GPIO and Alternate Functions (GPIO/AFIO)</h1>
+
+<p>GPIO ports can be configured into various input or output modes, with built-in, disableable pull-up or pull-down resistors, and can be configured for push-pull or open-drain operation. GPIO ports can also be multiplexed to other functions.</p>
+
+<h2 id="10.1-main-features">10.1 Main Features</h2>
+<p>Each pin of a port can be configured into one of the following modes:</p>
+<ul>
+<li>Floating input</li>
+<li>Pull-up input</li>
+<li>Pull-down input</li>
+<li>Analog input</li>
+<li>Open-drain output</li>
+<li>Push-pull output</li>
+<li>Alternate function input and output</li>
+</ul>
+<p>Many pins have alternate functions; many other peripherals map their output and input channels onto these pins. The specific usage of these multiplexed pins should be referred to in each peripheral's documentation, while whether these pins are multiplexed or remapped is described in this chapter.</p>
+
+<h2 id="10.2-functional-description">10.2 Functional Description</h2>
+
+<h3 id="10.2.1-overview">10.2.1 Overview</h3>
+
+<figure><img src="figures/fig_10_1.png"><figcaption>Figure 10-1: GPIO module basic structure block diagram</figcaption></figure>
+
+<p>As shown in the IO port structure in Figure 10-1, each pin has two protection diodes inside the chip, and the IO port is internally divided into input and output driver modules. The input driver has optional weak pull-up/pull-down resistors and can be connected to analog input peripherals such as AD. If the input goes to a digital peripheral, it must pass through a TTL Schmitt trigger before being connected to the GPIO input data register or other alternate function peripherals. The output driver has a pair of MOS transistors; by configuring whether the upper and lower MOS transistors are enabled, the IO port can be configured as open-drain or push-pull output. The output driver can also be configured to be controlled by GPIO output or by another multiplexed peripheral.</p>
+
+<h3 id="10.2.2-gpio-initialization-function">10.2.2 GPIO Initialization Function</h3>
+
+<p>Immediately after reset, the GPIO port runs in its initial state. At this point, most IO ports are in floating input mode, but some peripheral-related pins such as HSE run in their peripheral alternate function mode. For specific initialization functions, please refer to the pin description related chapters.</p>
+
+<h3 id="10.2.3-external-interrupts">10.2.3 External Interrupts</h3>
+
+<p>All GPIO ports can be configured as external interrupt input channels, but one external interrupt input channel can be mapped to at most one GPIO pin, and the external interrupt channel number must match the GPIO port bit number. For example, PA1 (or PB1, PC1, PD1, PE1, etc.) can only be mapped to EXTI1, and EXTI1 can only accept one of PA1, PB1, PC1, PD1, or PE1 — the mapping is one-to-one in both directions.</p>
+
+<h3 id="10.2.4-alternate-functions">10.2.4 Alternate Functions</h3>
+
+<p>When using alternate functions, note the following:</p>
+<ul>
+<li>To use an input-direction alternate function, the port must be configured as alternate function input mode; the pull-up/pull-down settings can be configured as needed.</li>
+<li>To use an output-direction alternate function, the port must be configured as alternate function output mode; push-pull or open-drain can be configured as needed.</li>
+<li>For bidirectional alternate functions, the port must be configured as alternate function output mode, and the input driver is configured as floating input mode.</li>
+</ul>
+<p>The same IO port may have multiple peripherals multiplexed onto it. To give each peripheral maximum flexibility, the alternate function pins — in addition to the default alternate function pins — can be remapped to other pins to avoid occupied pins.</p>
+
+<h3 id="10.2.5-lock-mechanism">10.2.5 Lock Mechanism</h3>
+
+<p>The lock mechanism can lock the IO port configuration. After a specific write sequence, the selected IO pin configuration is locked and cannot be changed until the next reset.</p>
+
+<h3 id="10.2.6-input-configuration">10.2.6 Input Configuration</h3>
+
+<figure><img src="figures/fig_10_2.png"><figcaption>Figure 10-2: GPIO module input configuration block diagram</figcaption></figure>
+
+<p>When the IO port is configured as input mode, the output driver is disconnected, the input pull-up/pull-down is optional, and the alternate function and analog input are not connected. The data on each IO port is sampled into the input data register at each PB2 clock; reading the corresponding bit of the input data register obtains the logic level of the corresponding pin.</p>
+
+<h3 id="10.2.7-output-configuration">10.2.7 Output Configuration</h3>
+
+<figure><img src="figures/fig_10_3.png"><figcaption>Figure 10-3: GPIO module output configuration block diagram</figcaption></figure>
+
+<p>When the IO port is configured as output mode, the pair of MOS transistors in the output driver can be configured as push-pull or open-drain mode as needed, without using the alternate function. The input driver's pull-up/pull-down resistors are disabled, and the TTL Schmitt trigger is activated. The level appearing on the IO pin will be sampled into the input data register at each PB2 clock, so reading the input data register will return the IO status. In push-pull output mode, accessing the output data register will return the last written value.</p>
+
+<h3 id="10.2.8-alternate-function-configuration">10.2.8 Alternate Function Configuration</h3>
+
+<figure><img src="figures/fig_10_4.png"><figcaption>Figure 10-4: GPIO module structure when used by other peripherals (alternate function)</figcaption></figure>
+
+<p>When the alternate function is enabled, the output driver is enabled and can be configured as open-drain or push-pull mode as needed. The Schmitt trigger is also turned on, and the alternate function input and output lines are connected, but the output data register is disconnected. The level appearing on the IO pin will be sampled into the input data register at each PB2 clock. In open-drain mode, reading the input data register will return the current IO port status; in push-pull mode, reading the output data register will return the last written value.</p>
+
+<h3 id="10.2.9-analog-input-configuration">10.2.9 Analog Input Configuration</h3>
+
+<figure><img src="figures/fig_10_5.png"><figcaption>Figure 10-5: GPIO module configuration as analog input</figcaption></figure>
+
+<p>When analog input is enabled, the output buffer is disconnected, the Schmitt trigger input of the input driver is disabled to prevent current consumption on the IO port, the pull-up/pull-down resistors are disabled, and reading the input data register will always return 0.</p>
+
+<h3 id="10.2.10-gpio-settings-for-peripherals">10.2.10 GPIO Settings for Peripherals</h3>
+
+<p>The following tables recommend the GPIO port configuration for the pins of each peripheral.</p>
+
+<table class="data-table">
+<caption>Table 10-1: Advanced Timer (TIM1/8)</caption>
+<thead><tr><th>TIM1/8</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">TIM1/8_CHx</td><td>Input capture channel x</td><td>Floating input</td></tr>
+<tr><td>Output compare channel x</td><td>Push-pull alternate output</td></tr>
+<tr><td>TIM1/8_CHxN</td><td>Complementary output channel x</td><td>Push-pull alternate output</td></tr>
+<tr><td>TIM1/8_BKIN</td><td>Break input</td><td>Floating input</td></tr>
+<tr><td>TIM1/8_ETR</td><td>External trigger clock input</td><td>Floating input</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-2: General-Purpose Timer (TIM2/3/4/5)</caption>
+<thead><tr><th>TIM2/3/4/5 Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">TIM2/3/4/5_CHx</td><td>Input capture channel x</td><td>Floating input</td></tr>
+<tr><td>Output compare channel x</td><td>Push-pull alternate output</td></tr>
+<tr><td>TIM2/3/4_ETR</td><td>External trigger clock input</td><td>Floating input</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-3: Universal Synchronous/Asynchronous Receiver Transmitter (USART1/2/3/4/5/6/7/8/9/10)</caption>
+<thead><tr><th>USART Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">USARTx_TX</td><td>Full-duplex mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>Half-duplex synchronous mode</td><td>Open-drain alternate output</td></tr>
+<tr><td rowspan="2">USARTx_RX</td><td>Full-duplex mode</td><td>Floating input or pull-up input</td></tr>
+<tr><td>Half-duplex synchronous mode</td><td>Not used</td></tr>
+<tr><td>USARTx_CK</td><td>Synchronous mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>USARTx_RTS</td><td>Hardware flow control</td><td>Push-pull alternate output</td></tr>
+<tr><td>USARTx_CTS</td><td>Hardware flow control</td><td>Floating input or pull-up input</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-4: Serial Peripheral Interface (SPI1/2/3) Module</caption>
+<thead><tr><th>SPI Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">SPIx_SCK</td><td>Master mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>Slave mode</td><td>Floating input</td></tr>
+<tr><td rowspan="2">SPIx_MOSI</td><td>Full-duplex master mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>Full-duplex slave mode</td><td>Floating input or pull-up input</td></tr>
+<tr><td>SPIx_MOSI</td><td>Simple bidirectional data line / master mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>SPIx_MOSI</td><td>Simple bidirectional data line / slave mode</td><td>Not used</td></tr>
+<tr><td rowspan="2">SPIx_MISO</td><td>Full-duplex master mode</td><td>Floating input or pull-up input</td></tr>
+<tr><td>Full-duplex slave mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>SPIx_MISO</td><td>Simple bidirectional data line / master mode</td><td>Not used</td></tr>
+<tr><td>SPIx_MISO</td><td>Simple bidirectional data line / slave mode</td><td>Push-pull alternate output</td></tr>
+<tr><td rowspan="3">SPIx_NSS</td><td>Hardware master or slave mode</td><td>Floating, pull-up, or pull-down input</td></tr>
+<tr><td>Hardware master mode / NSS output enable</td><td>Push-pull alternate output</td></tr>
+<tr><td>Software mode</td><td>Not used</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-5: Built-in Audio Bus (I2S2/3) Module</caption>
+<thead><tr><th>I2S Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">I2Sx_WS</td><td>Master mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>Slave mode</td><td>Floating input</td></tr>
+<tr><td rowspan="2">I2Sx_CK</td><td>Master mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>Slave mode</td><td>Floating input</td></tr>
+<tr><td rowspan="2">I2Sx_SD</td><td>Transmitter</td><td>Push-pull alternate output</td></tr>
+<tr><td>Receiver</td><td>Floating, pull-up, or pull-down input</td></tr>
+<tr><td rowspan="2">I2Sx_MCK</td><td>Master mode</td><td>Push-pull alternate output</td></tr>
+<tr><td>Slave mode</td><td>Not used</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-6: Inter-Integrated Circuit Bus (I2C) Module</caption>
+<thead><tr><th>I2C Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>I2C_SCL</td><td>I2C clock</td><td>Open-drain alternate output</td></tr>
+<tr><td>I2C_SDA</td><td>I2C data</td><td>Open-drain alternate output</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-7: I3C Bus (I3C) Module</caption>
+<thead><tr><th>I3C Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>I3C_SCL</td><td>I3C clock</td><td>Push-pull alternate output</td></tr>
+<tr><td>I3C_SDA</td><td>I3C data</td><td>Push-pull alternate output</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-8: Controller Area Network (CAN) Module</caption>
+<thead><tr><th>CAN Pin</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>CAN1_TX</td><td>Push-pull alternate output</td></tr>
+<tr><td>CAN1_RX</td><td>Floating input or pull-up input</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-9: Digital Video Port (DVP) Module</caption>
+<thead><tr><th>DVP Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>PCLK</td><td>Pixel clock input</td><td>Floating input or pull-up input</td></tr>
+<tr><td>DATA[11:0]</td><td>Pixel data input</td><td>Floating input or pull-up input</td></tr>
+<tr><td>VSYNC</td><td>Frame sync signal input</td><td>Floating input or pull-up input</td></tr>
+<tr><td>HSYNC</td><td>Line sync signal input</td><td>Floating input or pull-up input</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-10: LCD-TFT Display Controller (LTDC) Module</caption>
+<thead><tr><th>LTDC Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>LCD_CLK</td><td>Clock output</td><td>Alternate push-pull output</td></tr>
+<tr><td>LCD_VSYNC</td><td>Vertical sync output</td><td>Alternate push-pull output</td></tr>
+<tr><td>LCD_HSYNC</td><td>Horizontal sync output</td><td>Alternate push-pull output</td></tr>
+<tr><td>LCD_DE</td><td>Data enable output</td><td>Alternate push-pull output</td></tr>
+<tr><td>LCD_R[7:0]</td><td>Data: 8-bit red data output</td><td>Alternate push-pull output</td></tr>
+<tr><td>LCD_G[7:0]</td><td>Data: 8-bit green data output</td><td>Alternate push-pull output</td></tr>
+<tr><td>LCD_B[7:0]</td><td>Data: 8-bit blue data output</td><td>Alternate push-pull output</td></tr>
+</tbody>
+</table>
+<div class="note">Note: The LCD-TFT controller pins must be configured through the user program. Unused pins can be used for other functions. For LTDC output up to 24 bits (RGB888), if using a pixel depth lower than 8bpp to output RGB565 or RGB666 to a 16-bit or 18-bit display, the RGB display data lines must be connected to the MSBs of the LCD-TFT controller RGB data lines. For example, when the LCD-TFT controller is connected to an RGB565 16-bit display, the LCD display's R[4:0], G[4:0], B[4:0] data line pins must be connected to the LCD-TFT controller's LCD_R[7:3], LCD_G[7:3], LCD_B[7:3].</div>
+
+<table class="data-table">
+<caption>Table 10-11: Secure Digital Input Output (SDIO) Module</caption>
+<thead><tr><th>SDIO Pin</th><th>Configuration</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>SDIO_CK</td><td>Clock</td><td>Push-pull alternate output</td></tr>
+<tr><td>SDIO_CMD</td><td>Command</td><td>Push-pull alternate output</td></tr>
+<tr><td>SDIO[D7:D0]</td><td>Data</td><td>Push-pull alternate output</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-12: Flexible Static Memory Controller (FSMC)</caption>
+<thead><tr><th>FSMC Pin</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>FSMC_A[23:16]</td><td>Push-pull alternate output</td></tr>
+<tr><td>FSMC_D[15:0]</td><td>Push-pull alternate output</td></tr>
+<tr><td>FSMC_CK</td><td>Push-pull alternate output</td></tr>
+<tr><td>FSMC_NOE</td><td>Push-pull alternate output</td></tr>
+<tr><td>FSMC_NWE</td><td>Push-pull alternate output</td></tr>
+<tr><td>FSMC_NE1</td><td>Push-pull alternate output</td></tr>
+<tr><td>FSMC_NCE2</td><td>Push-pull alternate output</td></tr>
+<tr><td>FSMC_NWAIT</td><td>Floating input or pull-up input</td></tr>
+<tr><td>FSMC_NBL[1:0]</td><td>Push-pull alternate output</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-13: Analog-to-Digital Converter (ADC) and Digital-to-Analog Converter (DAC)</caption>
+<thead><tr><th>ADC/DAC Pin</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td>ADC/DAC</td><td>Analog input</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-14: Other IO Function Settings</caption>
+<thead><tr><th>Pin</th><th>Function</th><th>GPIO Configuration</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">TAMPER_RTC</td><td>RTC output</td><td>Hardware auto-configured</td></tr>
+<tr><td>Tamper event input</td><td>Hardware auto-configured</td></tr>
+<tr><td>MCO</td><td>Clock output</td><td>Push-pull alternate output</td></tr>
+<tr><td>EXTI</td><td>External interrupt input</td><td>Floating, pull-up, or pull-down input</td></tr>
+</tbody>
+</table>
+
+<h3 id="10.2.11-alternate-function-remapping-gpio-settings">10.2.11 Alternate Function Remapping GPIO Settings</h3>
+
+<h4 id="10.2.11.1-osc32_in-osc32_out-as-gpio-port-pc14-pc15">10.2.11.1 OSC32_IN/OSC32_OUT as GPIO Port PC14/PC15</h4>
+<p>When LSEON=0, the LSE oscillator pins OSC32_IN/OSC32_OUT can be used as GPIO PC14/PC15, respectively. When LSEON=1, they serve as LSE pins.</p>
+
+<h4 id="10.2.11.2-osc_in-osc_out-pins-as-gpio-port-pd0-pd1">10.2.11.2 OSC_IN/OSC_OUT Pins as GPIO Port PD0/PD1</h4>
+<p>OSC_IN/OSC_OUT can be used as GPIO PD0/PD1, configured via remap register 1 (AFIO_PCFR1).</p>
+
+<h4 id="10.2.11.3-timer-alternate-function-remapping">10.2.11.3 Timer Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-15: TIM1 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>TIM1_RM=00 Default</th><th>TIM1_RM=01 Partial</th><th>TIM1_RM=11 Full</th></tr></thead>
+<tbody>
+<tr><td>TIM1_ETR</td><td>PA12</td><td>PA12</td><td>PE7</td></tr>
+<tr><td>TIM1_CH1</td><td>PA8</td><td>PA8</td><td>PE9</td></tr>
+<tr><td>TIM1_CH2</td><td>PA9</td><td>PA9</td><td>PE11</td></tr>
+<tr><td>TIM1_CH3</td><td>PA10</td><td>PA10</td><td>PB8</td></tr>
+<tr><td>TIM1_CH4</td><td>PA11</td><td>PA11</td><td>PA7</td></tr>
+<tr><td>TIM1_BKIN</td><td>PB12</td><td>PA6</td><td>PB10</td></tr>
+<tr><td>TIM1_CH1N</td><td>PB13</td><td>PA7</td><td>PE8</td></tr>
+<tr><td>TIM1_CH2N</td><td>PB14</td><td>PB0</td><td>PE10</td></tr>
+<tr><td>TIM1_CH3N</td><td>PB15</td><td>PB1</td><td>PE12</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-16: TIM2 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>TIM2_RM=00 Default</th><th>TIM2_RM=01 Partial</th><th>TIM2_RM=10 Partial</th><th>TIM2_RM=11 Full</th></tr></thead>
+<tbody>
+<tr><td>TIM2_ETR</td><td>PA0</td><td>PA15</td><td>PA0</td><td>PA15</td></tr>
+<tr><td>TIM2_CH1</td><td>PA0</td><td>PA15</td><td>PA0</td><td>PA15</td></tr>
+<tr><td>TIM2_CH2</td><td>PA1</td><td>PB3</td><td>PA1</td><td>PB3</td></tr>
+<tr><td>TIM2_CH3</td><td>PA2</td><td>PA2</td><td>PB10</td><td>PB10</td></tr>
+<tr><td>TIM2_CH4</td><td>PA3</td><td>PA3</td><td>PB11</td><td>PB11</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-17: TIM3 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>TIM3_RM=00 Default</th><th>TIM3_RM=10 Partial</th><th>TIM3_RM=11 Full</th></tr></thead>
+<tbody>
+<tr><td>TIM3_ETR</td><td>PD2</td><td>PD2</td><td>PD2</td></tr>
+<tr><td>TIM3_CH1</td><td>PA6</td><td>PB4</td><td>PC6</td></tr>
+<tr><td>TIM3_CH2</td><td>PA7</td><td>PB5</td><td>PC7</td></tr>
+<tr><td>TIM3_CH3</td><td>PB0</td><td>PB0</td><td>PC8</td></tr>
+<tr><td>TIM3_CH4</td><td>PB1</td><td>PB1</td><td>PC9</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-18: TIM4 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>TIM4_RM=0 Default</th><th>TIM4_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>TIM4_ETR</td><td>PE0</td><td>PE0</td></tr>
+<tr><td>TIM4_CH1</td><td>PB6</td><td>PD12</td></tr>
+<tr><td>TIM4_CH2</td><td>PB7</td><td>PD13</td></tr>
+<tr><td>TIM4_CH3</td><td>PB8</td><td>PD14</td></tr>
+<tr><td>TIM4_CH4</td><td>PB9</td><td>PD15</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-19: TIM5 Alternate Function Remapping</caption>
+<tbody>
+<tr><td><strong>AF</strong></td><td colspan="3"><strong>Default</strong></td></tr>
+<tr><td>TIM5_CH1</td><td colspan="3">PA0</td></tr>
+<tr><td>TIM5_CH2</td><td colspan="3">PA1</td></tr>
+<tr><td>TIM5_CH3</td><td colspan="3">PA2</td></tr>
+</tbody>
+</table>
+<table class="data-table">
+<thead><tr><th>AF</th><th>TIM5CH4_RM=0 Default</th><th>TIM5CH4_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>TIM5_CH4</td><td>PA3</td><td>LSI internal clock</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-20: TIM8 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>TIM8_RM=0 Default</th><th>TIM8_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>TIM8_ETR</td><td>PA0</td><td>PA0</td></tr>
+<tr><td>TIM8_CH1</td><td>PC6</td><td>PB6</td></tr>
+<tr><td>TIM8_CH2</td><td>PC7</td><td>PB7</td></tr>
+<tr><td>TIM8_CH3</td><td>PC8</td><td>PB8</td></tr>
+<tr><td>TIM8_CH4</td><td>PC9</td><td>PC13</td></tr>
+<tr><td>TIM8_BKIN</td><td>PA6</td><td>PB9</td></tr>
+<tr><td>TIM8_CH1N</td><td>PA7</td><td>PA13</td></tr>
+<tr><td>TIM8_CH2N</td><td>PB0</td><td>PA14</td></tr>
+<tr><td>TIM8_CH3N</td><td>PB1</td><td>PA15</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.4-usart-alternate-function-remapping">10.2.11.4 USART Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-21: USART1 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART1_RM1=0, USART1_RM=0 Default</th><th>USART1_RM1=0, USART1_RM=1 Remap</th><th>USART1_RM1=1, USART1_RM=0 Remap</th><th>USART1_RM1=1, USART1_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>USART1_CK</td><td>PA8</td><td>PA8</td><td>PA10</td><td>PA5</td></tr>
+<tr><td>USART1_TX</td><td>PA9</td><td>PB6</td><td>PB15</td><td>PA6</td></tr>
+<tr><td>USART1_RX</td><td>PA10</td><td>PB7</td><td>PA8</td><td>PA7</td></tr>
+<tr><td>USART1_CTS</td><td>PA11</td><td>PA11</td><td>PA5</td><td>PC4</td></tr>
+<tr><td>USART1_RTS</td><td>PA12</td><td>PA12</td><td>PA9</td><td>PC5</td></tr>
+</tbody>
+</table>
+<div class="note">Note: (1) USART1_RM is AFIO_PCFR1 register bit2, the mapping configuration low bit. (2) USART1_RM1 is AFIO_PCFR2 register bit26, the mapping configuration high bit.</div>
+
+<table class="data-table">
+<caption>Table 10-22: USART2 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART2_RM=0 Default</th><th>USART2_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>USART2_CTS</td><td>PA0</td><td>PD3</td></tr>
+<tr><td>USART2_RTS</td><td>PA1</td><td>PD4</td></tr>
+<tr><td>USART2_TX</td><td>PA2</td><td>PD5</td></tr>
+<tr><td>USART2_RX</td><td>PA3</td><td>PD6</td></tr>
+<tr><td>USART2_CK</td><td>PA4</td><td>PD7</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-23: USART3 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART3_RM=00 Default</th><th>USART3_RM=01 Partial</th><th>USART3_RM=10 Partial</th><th>USART3_RM=11 Full</th></tr></thead>
+<tbody>
+<tr><td>USART3_TX</td><td>PB10</td><td>PC10</td><td>PA13</td><td>PD8</td></tr>
+<tr><td>USART3_RX</td><td>PB11</td><td>PC11</td><td>PA14</td><td>PD9</td></tr>
+<tr><td>USART3_CK</td><td>PB12</td><td>PC12</td><td>PD10</td><td>PD10</td></tr>
+<tr><td>USART3_CTS</td><td>PB13</td><td>PB13</td><td>PD11</td><td>PD11</td></tr>
+<tr><td>USART3_RTS</td><td>PB14</td><td>PB14</td><td>PD12</td><td>PD12</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-24: USART4 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART4_RM=00 Default</th><th>USART4_RM=01 Remap</th><th>USART4_RM=1x Remap</th></tr></thead>
+<tbody>
+<tr><td>USART4_TX</td><td>PC10</td><td>PB0</td><td>PE0</td></tr>
+<tr><td>USART4_RX</td><td>PC11</td><td>PB1</td><td>PE1</td></tr>
+<tr><td>USART4_CK</td><td>PC12</td><td>PB2</td><td>PE12</td></tr>
+<tr><td>USART4_CTS</td><td>PA13</td><td>PC4</td><td>PB8</td></tr>
+<tr><td>USART4_RTS</td><td>PD2</td><td>PC5</td><td>PB9</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-25: USART5 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART5_RM=00 Default</th><th>USART5_RM=01 Remap</th><th>USART5_RM=1x Remap</th></tr></thead>
+<tbody>
+<tr><td>USART5_TX</td><td>PC12</td><td>PB4</td><td>PE8</td></tr>
+<tr><td>USART5_RX</td><td>PD2</td><td>PB5</td><td>PE9</td></tr>
+<tr><td>USART5_CK</td><td>PB5</td><td>PB3</td><td>PB2</td></tr>
+<tr><td>USART5_CTS</td><td>PB3</td><td>PB8</td><td>PB0</td></tr>
+<tr><td>USART5_RTS</td><td>PB4</td><td>PB9</td><td>PB1</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-26: USART6 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART6_RM=00 Default</th><th>USART6_RM=01 Remap</th><th>USART6_RM=10 Remap</th><th>USART6_RM=11 Remap</th></tr></thead>
+<tbody>
+<tr><td>USART6_TX</td><td>PC0</td><td>PB8</td><td>PE10</td><td>PC0</td></tr>
+<tr><td>USART6_RX</td><td>PC1</td><td>PB9</td><td>PE11</td><td>PC1</td></tr>
+<tr><td>USART6_CK</td><td>PB0</td><td>PB5</td><td>PA13</td><td>PA5</td></tr>
+<tr><td>USART6_CTS</td><td>PC2</td><td>PE0</td><td>PA14</td><td>PC2</td></tr>
+<tr><td>USART6_RTS</td><td>PC3</td><td>PE1</td><td>PA15</td><td>PC3</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-27: USART7 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART7_RM=00 Default</th><th>USART7_RM=01 Remap</th><th>USART7_RM=10 Remap</th><th>USART7_RM=11 Remap</th></tr></thead>
+<tbody>
+<tr><td>USART7_TX</td><td>PC2</td><td>PA6</td><td>PA9</td><td>PA9</td></tr>
+<tr><td>USART7_RX</td><td>PC3</td><td>PA7</td><td>PA10</td><td>PA10</td></tr>
+<tr><td>USART7_CK</td><td>PC1</td><td>PB0</td><td>PA8</td><td>PA8</td></tr>
+<tr><td>USART7_CTS</td><td>PC4</td><td>PC4</td><td>PB6</td><td>PC8</td></tr>
+<tr><td>USART7_RTS</td><td>PC5</td><td>PC5</td><td>PB7</td><td>PC9</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-28: USART8 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART8_RM=00 Default</th><th>USART8_RM=01 Remap</th><th>USART8_RM=1x Remap</th></tr></thead>
+<tbody>
+<tr><td>USART8_TX</td><td>PC4</td><td>PA14</td><td>PB15</td></tr>
+<tr><td>USART8_RX</td><td>PC5</td><td>PA15</td><td>PB14</td></tr>
+<tr><td>USART8_CK</td><td>PA7</td><td>PB15</td><td>PB11</td></tr>
+<tr><td>USART8_CTS</td><td>PB0</td><td>PE10</td><td>PB13</td></tr>
+<tr><td>USART8_RTS</td><td>PB1</td><td>PE11</td><td>PB12</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-29: USART9 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART9_RM=00 Default</th><th>USART9_RM=01 Remap</th><th>USART9_RM=1x Remap</th></tr></thead>
+<tbody>
+<tr><td>USART9_TX</td><td>PB1</td><td>PA4</td><td>PE3</td></tr>
+<tr><td>USART9_RX</td><td>PB2</td><td>PA5</td><td>PE4</td></tr>
+<tr><td>USART9_CK</td><td>PD8</td><td>PD8</td><td>PE2</td></tr>
+<tr><td>USART9_CTS</td><td>PE8</td><td>PE8</td><td>PE5</td></tr>
+<tr><td>USART9_RTS</td><td>PE9</td><td>PE9</td><td>PE6</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-30: USART10 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>USART10_RM=00 Default</th><th>USART10_RM=01 Remap</th><th>USART10_RM=1x Remap</th></tr></thead>
+<tbody>
+<tr><td>USART10_TX</td><td>PE0</td><td>PB8</td><td>PD11</td></tr>
+<tr><td>USART10_RX</td><td>PE1</td><td>PB9</td><td>PD12</td></tr>
+<tr><td>USART10_CK</td><td>PE12</td><td>PE12</td><td>PD10</td></tr>
+<tr><td>USART10_CTS</td><td>PC14</td><td>PC14</td><td>PD13</td></tr>
+<tr><td>USART10_RTS</td><td>PC15</td><td>PC15</td><td>PD14</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.5-spi-alternate-function-remapping">10.2.11.5 SPI Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-31: SPI1 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>SPI1_RM=0 Default</th><th>SPI1_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>SPI1_NSS</td><td>PA4</td><td>PA15</td></tr>
+<tr><td>SPI1_SCK</td><td>PA5</td><td>PB3</td></tr>
+<tr><td>SPI1_MISO</td><td>PA6</td><td>PB4</td></tr>
+<tr><td>SPI1_MOSI</td><td>PA7</td><td>PB5</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-32: SPI3 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>SPI3_RM=0 Default</th><th>SPI3_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>SPI3_NSS</td><td>PA15</td><td>PA4</td></tr>
+<tr><td>SPI3_SCK</td><td>PB3</td><td>PC10</td></tr>
+<tr><td>SPI3_MISO</td><td>PB4</td><td>PC11</td></tr>
+<tr><td>SPI3_MOSI</td><td>PB5</td><td>PC12</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-33: I2S3 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>SPI3_RM=0 Default</th><th>SPI3_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>I2S3_WS</td><td>PA15</td><td>PA4</td></tr>
+<tr><td>I2S3_CK</td><td>PB3</td><td>PC10</td></tr>
+<tr><td>I2S3_MCK</td><td>PC7</td><td>PC7</td></tr>
+<tr><td>I2S3_SD</td><td>PB5</td><td>PC12</td></tr>
+</tbody>
+</table>
+<div class="note">Note: When the I2SMOD bit of the SPI_I2S_CFGR register is set to 1, I2S mode is selected.</div>
+
+<h4 id="10.2.11.6-i2c-alternate-function-remapping">10.2.11.6 I2C Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-34: I2C Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>I2C_RM=0 Default</th><th>I2C_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>I2C_SCL</td><td>PB6</td><td>PB8</td></tr>
+<tr><td>I2C_SDA</td><td>PB7</td><td>PB9</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.7-can-alternate-function-remapping">10.2.11.7 CAN Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-35: CAN1 Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>CAN1_RM=00 Default</th><th>CAN1_RM=10 Remap</th><th>CAN1_RM=11 Remap</th></tr></thead>
+<tbody>
+<tr><td>CAN1_RX</td><td>PA11</td><td>PB8</td><td>PD0</td></tr>
+<tr><td>CAN1_TX</td><td>PA12</td><td>PB9</td><td>PD1</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.8-adc-alternate-function-remapping">10.2.11.8 ADC Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-36: ADC1 External Trigger Injected Conversion Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>ADC1_ETRGINJ_RM=0 Default</th><th>ADC1_ETRGINJ_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>ADC1 external trigger injected conversion</td><td>ADC1 external trigger injected conversion connected to EXTI15</td><td>ADC1 external trigger injected conversion connected to TIM8_CH4</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-37: ADC1 External Trigger Regular Conversion Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>ADC1_ETRGREG_RM=0 Default</th><th>ADC1_ETRGREG_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>ADC1 external trigger regular conversion</td><td>ADC1 external trigger regular conversion connected to EXTI11</td><td>ADC1 external trigger regular conversion connected to TIM8_TRGO</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-38: ADC2 External Trigger Injected Conversion Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>ADC2_ETRGINJ_RM=0 Default</th><th>ADC2_ETRGINJ_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>ADC2 external trigger injected conversion</td><td>ADC2 external trigger injected conversion connected to EXTI15</td><td>ADC2 external trigger injected conversion connected to TIM8_CH4</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 10-39: ADC2 External Trigger Regular Conversion Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>ADC2_ETRGREG_RM=0 Default</th><th>ADC2_ETRGREG_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>ADC2 external trigger regular conversion</td><td>ADC2 external trigger regular conversion connected to EXTI11</td><td>ADC2 external trigger regular conversion connected to TIM8_TRGO</td></tr>
+</tbody>
+</table>
+<div class="note">Note: ADC1 remapping is only supported on products that have TIM8. For details, see the relevant datasheet.</div>
+
+<h4 id="10.2.11.9-fsmc-alternate-function-remapping">10.2.11.9 FSMC Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-40: FSMC Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>FSMCEN=0 Default</th><th>FSMCEN=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>NBL[0]</td><td>PE0</td><td>PE0</td></tr>
+<tr><td>NBL[1]</td><td>PE1</td><td>PE1</td></tr>
+<tr><td>CLK</td><td>PD3</td><td>PD3</td></tr>
+<tr><td>NOE</td><td>PD4</td><td>PD4</td></tr>
+<tr><td>NWE</td><td>PD5</td><td>PD5</td></tr>
+<tr><td>NWAIT</td><td>PD6</td><td>PD6</td></tr>
+<tr><td>NE1/NCE2</td><td>PD7</td><td>PD7</td></tr>
+<tr><td>NADV</td><td>PB7</td><td>PB7</td></tr>
+<tr><td>A16</td><td>PD11</td><td>PD11</td></tr>
+<tr><td>A17</td><td>PD12</td><td>PD12</td></tr>
+<tr><td>A18</td><td>PD13</td><td>PD13</td></tr>
+<tr><td>A19</td><td>PE3</td><td>PE3</td></tr>
+<tr><td>A20</td><td>PE4</td><td>PE4</td></tr>
+<tr><td>A21</td><td>PE5</td><td>PE5</td></tr>
+<tr><td>A22</td><td>PE6</td><td>PE6</td></tr>
+<tr><td>A23</td><td>PE2</td><td>PE2</td></tr>
+<tr><td>D0</td><td>PD14</td><td>PD14</td></tr>
+<tr><td>D1</td><td>PD15</td><td>PD15</td></tr>
+<tr><td>D2</td><td>PD0</td><td>PD0</td></tr>
+<tr><td>D3</td><td>PD1</td><td>PD1</td></tr>
+<tr><td>D4</td><td>PE7</td><td>PC4</td></tr>
+<tr><td>D5</td><td>PE8</td><td>PE8</td></tr>
+<tr><td>D6</td><td>PE9</td><td>PE9</td></tr>
+<tr><td>D7</td><td>PE10</td><td>PE10</td></tr>
+<tr><td>D8</td><td>PE11</td><td>PE11</td></tr>
+<tr><td>D9</td><td>PB11</td><td>PB11</td></tr>
+<tr><td>D10</td><td>PB12</td><td>PB12</td></tr>
+<tr><td>D11</td><td>PB13</td><td>PB13</td></tr>
+<tr><td>D12</td><td>PB14</td><td>PB14</td></tr>
+<tr><td>D13</td><td>PD8</td><td>PD8</td></tr>
+<tr><td>D14</td><td>PD9</td><td>PD9</td></tr>
+<tr><td>D15</td><td>PD10</td><td>PD10</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.10-fsmc_nadv-alternate-function-remapping">10.2.11.10 FSMC_NADV Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-41: FSMC_NADV Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>FSMCEN=1 Default</th><th>FSMCEN=1 & USBHS2EN=1 & RB_UD_RST_SIE=0</th></tr></thead>
+<tbody>
+<tr><td>FSMC_NADV</td><td>PB7</td><td>PD2</td></tr>
+</tbody>
+</table>
+<div class="note">Note: (1) When FSMC_NADV=1, the FSMC_NADV output is disabled.</div>
+
+<h4 id="10.2.11.11-dvp-alternate-function-remapping">10.2.11.11 DVP Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-42: DVP Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>DVPEN=1, DVP_RM=0 Default</th><th>DVPEN=1 & USBHS1EN=1 & RB_UD_RST_SIE=0</th><th>DVP_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>PCLK</td><td>PA6</td><td>PA6</td><td>PA6</td></tr>
+<tr><td>HSYNC</td><td>PA4</td><td>PA4</td><td>PA4</td></tr>
+<tr><td>VSYNC</td><td>PA5</td><td>PA5</td><td>PA5</td></tr>
+<tr><td>D0</td><td>PA9</td><td>PA9</td><td>PA9</td></tr>
+<tr><td>D1</td><td>PA10</td><td>PA10</td><td>PA10</td></tr>
+<tr><td>D2</td><td>PC8</td><td>PC8</td><td>PA8</td></tr>
+<tr><td>D3</td><td>PC9</td><td>PC9</td><td>PB4</td></tr>
+<tr><td>D4</td><td>PC11</td><td>PC11</td><td>PC11</td></tr>
+<tr><td>D5</td><td>PB6</td><td>PB3</td><td>PB3</td></tr>
+<tr><td>D6</td><td>PB8</td><td>PB8</td><td>PB8</td></tr>
+<tr><td>D7</td><td>PB9</td><td>PB9</td><td>PB9</td></tr>
+<tr><td>D8</td><td>PC10</td><td>PC10</td><td>PC10</td></tr>
+<tr><td>D9</td><td>PC12</td><td>PC12</td><td>PC12</td></tr>
+<tr><td>D10</td><td>PD6</td><td>PD6</td><td>PB5</td></tr>
+<tr><td>D11</td><td>PD2</td><td>PD2</td><td>PD2</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.12-sdio-alternate-function-remapping">10.2.11.12 SDIO Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-43: SDIO Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>SDIO_RM=0 Default</th><th>SDIOEN=1 & ETHMACEN=1</th><th>SDIO_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>CK</td><td>PC12</td><td>PC12</td><td>PC12</td></tr>
+<tr><td>CMD</td><td>PD2</td><td>PD2</td><td>PD2</td></tr>
+<tr><td>SD0</td><td>PC8</td><td>PB14</td><td>PB14</td></tr>
+<tr><td>SD1</td><td>PC9</td><td>PB15</td><td>PB15</td></tr>
+<tr><td>SD2</td><td>PC10</td><td>PC10</td><td>PC10</td></tr>
+<tr><td>SD3</td><td>PC11</td><td>PC11</td><td>PC11</td></tr>
+<tr><td>SD4</td><td>PB8</td><td>PB8</td><td>PB8</td></tr>
+<tr><td>SD5</td><td>PB9</td><td>PB9</td><td>PB9</td></tr>
+<tr><td>SD6</td><td>PC6</td><td>PC6</td><td>PA9</td></tr>
+<tr><td>SD7</td><td>PC7</td><td>PC7</td><td>PA10</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.13-i3c-alternate-function-remapping">10.2.11.13 I3C Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-44: I3C Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>I3C_RM=0 Default</th><th>I3C_RM=1 Default</th></tr></thead>
+<tbody>
+<tr><td>I3C_SCL</td><td>PB10</td><td>PB4</td></tr>
+<tr><td>I3C_SDA</td><td>PB11</td><td>PB5</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.2.11.14-ltdc-alternate-function-remapping">10.2.11.14 LTDC Alternate Function Remapping</h4>
+
+<table class="data-table">
+<caption>Table 10-45: LTDC Alternate Function Remapping</caption>
+<thead><tr><th>AF</th><th>LTDC_RM=0 Default</th><th>LTDC_RM=1 Remap</th></tr></thead>
+<tbody>
+<tr><td>CLK</td><td>PE1</td><td>PA10</td></tr>
+<tr><td>HSYNC</td><td>PB4</td><td>PB8</td></tr>
+<tr><td>VSYNC</td><td>PB5</td><td>PB9</td></tr>
+<tr><td>DE</td><td>PE0</td><td>PA9</td></tr>
+<tr><td>R[0]</td><td>PC0</td><td>PC0</td></tr>
+<tr><td>R[1]</td><td>PC1</td><td>PC1</td></tr>
+<tr><td>R[2]</td><td>PC2</td><td>PC2</td></tr>
+<tr><td>R[3]</td><td>PC3</td><td>PC3</td></tr>
+<tr><td>R[4]</td><td>PA1</td><td>PA1</td></tr>
+<tr><td>R[5]</td><td>PA2</td><td>PA2</td></tr>
+<tr><td>R[6]</td><td>PA3</td><td>PA3</td></tr>
+<tr><td>R[7]</td><td>PA7</td><td>PA7</td></tr>
+<tr><td>G[0]</td><td>PC4</td><td>PC4</td></tr>
+<tr><td>G[1]</td><td>PC5</td><td>PC5</td></tr>
+<tr><td>G[2]</td><td>PB0</td><td>PB0</td></tr>
+<tr><td>G[3]</td><td>PB1</td><td>PB1</td></tr>
+<tr><td>G[4]</td><td>PB2</td><td>PB3</td></tr>
+<tr><td>G[5]</td><td>PD8</td><td>PA4</td></tr>
+<tr><td>G[6]</td><td>PB12</td><td>PB12</td></tr>
+<tr><td>G[7]</td><td>PB13</td><td>PB13</td></tr>
+<tr><td>B[0]</td><td>PB14</td><td>PB14</td></tr>
+<tr><td>B[1]</td><td>PB15</td><td>PB15</td></tr>
+<tr><td>B[2]</td><td>PB11</td><td>PB11</td></tr>
+<tr><td>B[3]</td><td>PB10</td><td>PB10</td></tr>
+<tr><td>B[4]</td><td>PA8</td><td>PA8</td></tr>
+<tr><td>B[5]</td><td>PA13</td><td>PA13</td></tr>
+<tr><td>B[6]</td><td>PA14</td><td>PA14</td></tr>
+<tr><td>B[7]</td><td>PA15</td><td>PA15</td></tr>
+</tbody>
+</table>
+
+<h2 id="10.3-register-description">10.3 Register Description</h2>
+
+<h3 id="10.3.1-gpio-register-description">10.3.1 GPIO Register Description</h3>
+
+<p>Unless otherwise specified, GPIO registers must be accessed as word operations (operating on these registers as 32-bit).</p>
+
+<table class="reg-list">
+<caption>Table 10-46: GPIO-related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_GPIOA_CFGLR</td><td>0x40010800</td><td>PA port configuration register low</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOB_CFGLR</td><td>0x40010C00</td><td>PB port configuration register low</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOC_CFGLR</td><td>0x40011000</td><td>PC port configuration register low</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOD_CFGLR</td><td>0x40011400</td><td>PD port configuration register low</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOE_CFGLR</td><td>0x40011800</td><td>PE port configuration register low</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOA_CFGHR</td><td>0x40010804</td><td>PA port configuration register high</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOB_CFGHR</td><td>0x40010C04</td><td>PB port configuration register high</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOC_CFGHR</td><td>0x40011004</td><td>PC port configuration register high</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOD_CFGHR</td><td>0x40011404</td><td>PD port configuration register high</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOE_CFGHR</td><td>0x40011804</td><td>PE port configuration register high</td><td>0x44444444</td></tr>
+<tr><td>R32_GPIOA_INDR</td><td>0x40010808</td><td>PA port input data register</td><td>0x0000XXXX</td></tr>
+<tr><td>R32_GPIOB_INDR</td><td>0x40010C08</td><td>PB port input data register</td><td>0x0000XXXX</td></tr>
+<tr><td>R32_GPIOC_INDR</td><td>0x40011008</td><td>PC port input data register</td><td>0x0000XXXX</td></tr>
+<tr><td>R32_GPIOD_INDR</td><td>0x40011408</td><td>PD port input data register</td><td>0x0000XXXX</td></tr>
+<tr><td>R32_GPIOE_INDR</td><td>0x40011808</td><td>PE port input data register</td><td>0x0000XXXX</td></tr>
+<tr><td>R32_GPIOA_OUTDR</td><td>0x4001080C</td><td>PA port output data register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOB_OUTDR</td><td>0x40010C0C</td><td>PB port output data register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOC_OUTDR</td><td>0x4001100C</td><td>PC port output data register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOD_OUTDR</td><td>0x4001140C</td><td>PD port output data register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOE_OUTDR</td><td>0x4001180C</td><td>PE port output data register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOA_BSHR</td><td>0x40010810</td><td>PA port bit set/reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOB_BSHR</td><td>0x40010C10</td><td>PB port bit set/reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOC_BSHR</td><td>0x40011010</td><td>PC port bit set/reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOD_BSHR</td><td>0x40011410</td><td>PD port bit set/reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOE_BSHR</td><td>0x40011810</td><td>PE port bit set/reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOA_BCR</td><td>0x40010814</td><td>PA port bit reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOB_BCR</td><td>0x40010C14</td><td>PB port bit reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOC_BCR</td><td>0x40011014</td><td>PC port bit reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOD_BCR</td><td>0x40011414</td><td>PD port bit reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOE_BCR</td><td>0x40011814</td><td>PE port bit reset register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOA_LCKR</td><td>0x40010818</td><td>PA port lock configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOB_LCKR</td><td>0x40010C18</td><td>PB port lock configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOC_LCKR</td><td>0x40011018</td><td>PC port lock configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOD_LCKR</td><td>0x40011418</td><td>PD port lock configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_GPIOE_LCKR</td><td>0x40011818</td><td>PE port lock configuration register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.3.1.1-gpio-configuration-register-low-gpiox_cfglr-x-a-b-c-d-e">10.3.1.1 GPIO Configuration Register Low (GPIOx_CFGLR) (x=A/B/C/D/E)</h4>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="2">CNF7[1:0]</td><td colspan="2">MODE7[1:0]</td><td colspan="2">CNF6[1:0]</td><td colspan="2">MODE6[1:0]</td><td colspan="2">CNF5[1:0]</td><td colspan="2">MODE5[1:0]</td><td colspan="2">CNF4[1:0]</td><td colspan="2">MODE4[1:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="2">CNF3[1:0]</td><td colspan="2">MODE3[1:0]</td><td colspan="2">CNF2[1:0]</td><td colspan="2">MODE2[1:0]</td><td colspan="2">CNF1[1:0]</td><td colspan="2">MODE1[1:0]</td><td colspan="2">CNF0[1:0]</td><td colspan="2">MODE0[1:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:30]<br>[27:26]<br>[23:22]<br>[19:18]<br>[15:14]<br>[11:10]<br>[7:6]<br>[3:2]</td>
+<td>CNFy[1:0]</td>
+<td>RW</td>
+<td>(y=0–7), port x configuration bits, used to configure the corresponding port.<br>
+In input mode (MODE=00b):<br>
+00: Analog input mode;<br>
+01: Floating input mode;<br>
+10: Input with pull-up/pull-down.<br>
+11: Reserved.<br>
+In output mode (MODE>00b):<br>
+00: General-purpose push-pull output mode;<br>
+01: General-purpose open-drain output mode;<br>
+10: Alternate function push-pull output mode;<br>
+11: Alternate function open-drain output mode.</td>
+<td>01b</td>
+</tr>
+<tr>
+<td>[29:28]<br>[25:24]<br>[21:20]<br>[17:16]<br>[13:12]<br>[9:8]<br>[5:4]<br>[1:0]</td>
+<td>MODEy[1:0]</td>
+<td>RW</td>
+<td>(y=0–7), port x mode selection bits, used to configure the corresponding port.<br>
+00: Input mode;<br>
+01: Output mode, max speed 10 MHz;<br>
+10: Output mode, max speed 2 MHz;<br>
+11: Output mode, max speed 50 MHz.</td>
+<td>00b</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.1.2-gpio-configuration-register-high-gpiox_cfghr-x-a-b-c-d-e">10.3.1.2 GPIO Configuration Register High (GPIOx_CFGHR) (x=A/B/C/D/E)</h4>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="2">CNF15[1:0]</td><td colspan="2">MODE15[1:0]</td><td colspan="2">CNF14[1:0]</td><td colspan="2">MODE14[1:0]</td><td colspan="2">CNF13[1:0]</td><td colspan="2">MODE13[1:0]</td><td colspan="2">CNF12[1:0]</td><td colspan="2">MODE12[1:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="2">CNF11[1:0]</td><td colspan="2">MODE11[1:0]</td><td colspan="2">CNF10[1:0]</td><td colspan="2">MODE10[1:0]</td><td colspan="2">CNF9[1:0]</td><td colspan="2">MODE9[1:0]</td><td colspan="2">CNF8[1:0]</td><td colspan="2">MODE8[1:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:30]<br>[27:26]<br>[23:22]<br>[19:18]<br>[15:14]<br>[11:10]<br>[7:6]<br>[3:2]</td>
+<td>CNFy[1:0]</td>
+<td>RW</td>
+<td>(y=8–15), port x configuration bits, used to configure the corresponding port.<br>
+In input mode (MODE=00b):<br>
+00: Analog input mode;<br>
+01: Floating input mode;<br>
+10: Input with pull-up/pull-down.<br>
+11: Reserved.<br>
+In output mode (MODE>00b):<br>
+00: General-purpose push-pull output mode;<br>
+01: General-purpose open-drain output mode;<br>
+10: Alternate function push-pull output mode;<br>
+11: Alternate function open-drain output mode.</td>
+<td>01b</td>
+</tr>
+<tr>
+<td>[29:28]<br>[25:24]<br>[21:20]<br>[17:16]<br>[13:12]<br>[9:8]<br>[5:4]<br>[1:0]</td>
+<td>MODEy[1:0]</td>
+<td>RW</td>
+<td>(y=8–15), port x mode bits, used to configure the corresponding port.<br>
+00: Input mode;<br>
+01: Output mode, max speed 10 MHz;<br>
+10: Output mode, max speed 2 MHz;<br>
+11: Output mode, max speed 50 MHz.</td>
+<td>00b</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.1.3-port-input-data-register-gpiox_indr-x-a-b-c-d-e">10.3.1.3 Port Input Data Register (GPIOx_INDR) (x=A/B/C/D/E)</h4>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>IDR15</td><td>IDR14</td><td>IDR13</td><td>IDR12</td><td>IDR11</td><td>IDR10</td><td>IDR9</td><td>IDR8</td><td>IDR7</td><td>IDR6</td><td>IDR5</td><td>IDR4</td><td>IDR3</td><td>IDR2</td><td>IDR1</td><td>IDR0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>IDRy</td>
+<td>RO</td>
+<td>(y=0–15), port input data. These bits are read-only and can only be read as 16-bit values. The read value is the high/low state of the corresponding pin.</td>
+<td>X</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.1.4-port-output-data-register-gpiox_outdr-x-a-b-c-d-e">10.3.1.4 Port Output Data Register (GPIOx_OUTDR) (x=A/B/C/D/E)</h4>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>ODR15</td><td>ODR14</td><td>ODR13</td><td>ODR12</td><td>ODR11</td><td>ODR10</td><td>ODR9</td><td>ODR8</td><td>ODR7</td><td>ODR6</td><td>ODR5</td><td>ODR4</td><td>ODR3</td><td>ODR2</td><td>ODR1</td><td>ODR0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>ODRy</td>
+<td>RW</td>
+<td>For output mode:<br>(y=0–15), port output data. This data can only be accessed as 16-bit. The IO port outputs the value of this register.<br>For input mode with pull-up/pull-down:<br>1: Pull-up input;<br>0: Pull-down input.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.1.5-port-bit-set-reset-register-gpiox_bshr-x-a-b-c-d-e">10.3.1.5 Port Bit Set/Reset Register (GPIOx_BSHR) (x=A/B/C/D/E)</h4>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>BR15</td><td>BR14</td><td>BR13</td><td>BR12</td><td>BR11</td><td>BR10</td><td>BR9</td><td>BR8</td><td>BR7</td><td>BR6</td><td>BR5</td><td>BR4</td><td>BR3</td><td>BR2</td><td>BR1</td><td>BR0</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>BS15</td><td>BS14</td><td>BS13</td><td>BS12</td><td>BS11</td><td>BS10</td><td>BS9</td><td>BS8</td><td>BS7</td><td>BS6</td><td>BS5</td><td>BS4</td><td>BS3</td><td>BS2</td><td>BS1</td><td>BS0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>BRy</td>
+<td>WO</td>
+<td>(y=0–15), setting these bits clears the corresponding OUTDR bit; writing 0 has no effect. These bits can only be accessed as 16-bit. If both BR and BS bits are set simultaneously, the BS bit takes effect.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>BSy</td>
+<td>WO</td>
+<td>(y=0–15), setting these bits sets the corresponding OUTDR bit; writing 0 has no effect. These bits can only be accessed as 16-bit. If both BR and BS bits are set simultaneously, the BS bit takes effect.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.1.6-port-bit-reset-register-gpiox_bcr-x-a-b-c-d-e">10.3.1.6 Port Bit Reset Register (GPIOx_BCR) (x=A/B/C/D/E)</h4>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16"></td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>BR15</td><td>BR14</td><td>BR13</td><td>BR12</td><td>BR11</td><td>BR10</td><td>BR9</td><td>BR8</td><td>BR7</td><td>BR6</td><td>BR5</td><td>BR4</td><td>BR3</td><td>BR2</td><td>BR1</td><td>BR0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>BRy</td>
+<td>WO</td>
+<td>(y=0–15), setting these bits clears the corresponding OUTDR bit; writing 0 has no effect. These bits can only be accessed as 16-bit.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.1.7-lock-configuration-register-gpiox_lckr-x-a-b-c-d-e">10.3.1.7 Lock Configuration Register (GPIOx_LCKR) (x=A/B/C/D/E)</h4>
+
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>LCKK</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>LCK15</td><td>LCK14</td><td>LCK13</td><td>LCK12</td><td>LCK11</td><td>LCK10</td><td>LCK9</td><td>LCK8</td><td>LCK7</td><td>LCK6</td><td>LCK5</td><td>LCK4</td><td>LCK3</td><td>LCK2</td><td>LCK1</td><td>LCK0</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:17]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>LCKK</td>
+<td>RW</td>
+<td>Lock key. It can be written via a specific sequence to activate the lock, but can be read at any time. When read as 0, the lock is not active; when read as 1, the lock is active. The lock key write sequence is: write 1 – write 0 – write 1 – read 0 – read 1. The last step is not required but can be used to confirm the lock key has been activated. Any error during the write sequence will not activate the lock, and the LCK[15:0] value cannot be changed during the write sequence. Once the lock is active, the port configuration can only be changed after the next reset.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>LCKy</td>
+<td>RW</td>
+<td>(y=0–15), when these bits are 1, the corresponding port configuration is locked. These bits can only be changed before LCKK is locked. The locked configuration refers to the configuration registers GPIOx_CFGLR and GPIOx_CFGHR.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<div class="note">Note: After a LOCK sequence has been executed on the corresponding port bits, the port bit configuration cannot be changed until the next system reset.</div>
+
+<h3 id="10.3.2-afio-registers">10.3.2 AFIO Registers</h3>
+
+<p>Unless otherwise specified, AFIO registers must be accessed as word operations (operating on these registers as 32-bit).</p>
+
+<table class="reg-list">
+<caption>Table 10-47: AFIO-related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_AFIO_ECR</td><td>0x40010000</td><td>Event control register</td><td>0x00000000</td></tr>
+<tr><td>R32_AFIO_PCFR1</td><td>0x40010004</td><td>Remap register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_AFIO_EXTICR1</td><td>0x40010008</td><td>External interrupt configuration register 1</td><td>0x00000000</td></tr>
+<tr><td>R32_AFIO_EXTICR2</td><td>0x4001000C</td><td>External interrupt configuration register 2</td><td>0x00000000</td></tr>
+<tr><td>R32_AFIO_EXTICR3</td><td>0x40010010</td><td>External interrupt configuration register 3</td><td>0x00000000</td></tr>
+<tr><td>R32_AFIO_EXTICR4</td><td>0x40010014</td><td>External interrupt configuration register 4</td><td>0x00000000</td></tr>
+<tr><td>R32_AFIO_PCFR2</td><td>0x4001001C</td><td>Remap register 2</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h4 id="10.3.2.1-event-control-register-afio_ecr">10.3.2.1 Event Control Register (AFIO_ECR)</h4>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>EVOE</td><td colspan="3">PORT[2:0]</td><td colspan="4">PIN[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>EVOE</td>
+<td>RW</td>
+<td>Event output enable. Setting this bit connects the core's EVENTOUT to the IO port selected by PORT and PIN.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:4]</td>
+<td>PORT[2:0]</td>
+<td>RW</td>
+<td>Used to select the port for the core's EVENTOUT output:<br>000: Select PA port; 001: Select PB port;<br>010: Select PC port; 011: Select PD port;<br>100: Select PE port; Others: Reserved.</td>
+<td>000b</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>PIN[3:0]</td>
+<td>RW</td>
+<td>The value of these bits determines the specific pin number of the port to which the core outputs EVENTOUT. Values 0–15 correspond to pins 0–15 of the selected PORT (Px).</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.2.2-remap-register-1-afio_pcfr1">10.3.2.2 Remap Register 1 (AFIO_PCFR1)</h4>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>ETHPHY_LED_RM</td><td>PTP_PPS_RM</td><td>TIM2ITR1_RM</td><td>SPI3_RM</td><td>Reserved</td><td colspan="3">SW_CFG[2:0]</td><td colspan="3">Reserved</td><td>ADC2_ETRGREG_RM</td><td>ADC2_ETRGINJ_RM</td><td>ADC1_ETRGREG_RM</td><td>ADC1_ETRGINJ_RM</td><td>TIM5CH4_RM</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>PD0PD1_RM</td><td colspan="2">CAN1_RM[1:0]</td><td>TIM4_RM</td><td colspan="2">TIM3_RM[1:0]</td><td colspan="2">TIM2_RM[1:0]</td><td colspan="2">TIM1_RM[1:0]</td><td colspan="2">USART3_RM[1:0]</td><td>USART2_RM</td><td>USART1_RM</td><td>I2C_RM</td><td>SPI1_RM</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>ETHPHY_LED_RM</td>
+<td>RW</td>
+<td>ETHPHY LED remapping:<br>1: LED0:PD14, LED1:PD15;<br>0: LED0:PE8, LED1:PE9.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>PTP_PPS_RM</td>
+<td>RW</td>
+<td>Ethernet PTP PPS remapping:<br>1: PTP PPS output to PB5 pin;<br>0: PTP PPS not output to PB5 pin.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>29</td>
+<td>TIM2ITR1_RM</td>
+<td>RW</td>
+<td>TIM2 internal trigger 1 remapping:<br>1: Reserved;<br>0: Internally connect TIM2_ITR1 to Ethernet PTP output.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>28</td>
+<td>SPI3_RM</td>
+<td>RW</td>
+<td>SPI3 remapping:<br>1: Remap (NSS/PA4, SCK/PC10, MISO/PC11, MOSI/PC12);<br>0: Default (NSS/PA15, SCK/PB3, MISO/PB4, MOSI/PB5).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>27</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[26:24]</td>
+<td>SW_CFG[2:0]</td>
+<td>RW</td>
+<td>These bits configure the IO port for SW function and trace function. SWD (SDI) is the debug interface to access the core. After system reset, it always serves as the SWD port.<br>0xx: Enable SWD (SDI);<br>100: Disable SWD (SDI), use as GPIO function;<br>Others: Invalid.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:21]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>20</td>
+<td>ADC2_ETRGREG_RM</td>
+<td>RW</td>
+<td>ADC2 external trigger regular conversion remapping bit.<br>1: ADC2 external trigger regular conversion connected to TIM8_TRGO;<br>0: ADC2 external trigger regular conversion connected to EXTI11.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>19</td>
+<td>ADC2_ETRGINJ_RM</td>
+<td>RW</td>
+<td>ADC2 external trigger injected conversion remapping bit.<br>1: ADC2 external trigger injected conversion connected to TIM8_CH4;<br>0: ADC2 external trigger injected conversion connected to EXTI15.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>18</td>
+<td>ADC1_ETRGREG_RM</td>
+<td>RW</td>
+<td>ADC1 external trigger regular conversion remapping bit.<br>1: ADC1 external trigger regular conversion connected to TIM8_TRGO;<br>0: ADC1 external trigger regular conversion connected to EXTI11.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>ADC1_ETRGINJ_RM</td>
+<td>RW</td>
+<td>ADC1 external trigger injected conversion remapping bit.<br>1: ADC1 external trigger injected conversion connected to TIM8_CH4;<br>0: ADC1 external trigger injected conversion connected to EXTI15.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>TIM5CH4_RM</td>
+<td>RW</td>
+<td>Timer 5 channel 4 remapping:<br>1: Remap, Timer 5 channel 4 mapped to LSI internal clock;<br>0: Default, Timer 5 channel 4 default mapped to PA3.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>PD0PD1_RM</td>
+<td>RW</td>
+<td>Pin PD0 & PD1 remapping bit; this bit can be read/written by the user. It controls whether the GPIO function of PD0 and PD1 is remapped, i.e., PD0 & PD1 mapped to OSC_IN & OSC_OUT.<br>1: Pins used as GPIO;<br>0: Pins used as crystal oscillator pins.<br>Note: For LQFP100 package, since PD0 and PD1 are inherently function pins, there is no need for software remapping.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:13]</td>
+<td>CAN1_RM[1:0]</td>
+<td>RW</td>
+<td>CAN1 alternate function remapping bits; these bits can be read/written by the user. Controls the remapping of CAN1_RX and CAN1_TX:<br>00: CAN1_RX mapped to PA11, CAN1_TX mapped to PA12;<br>10: CAN1_RX mapped to PB8, CAN1_TX mapped to PB9;<br>01: Reserved;<br>11: CAN1_RX mapped to PD0, CAN1_TX mapped to PD1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>TIM4_RM</td>
+<td>RW</td>
+<td>Timer 4 remapping bit; this bit can be read/written by the user. It controls the remapping of Timer 4 channels 1–4 on the GPIO port:<br>1: Remap (ETR/PE0, CH1/PD12, CH2/PD13, CH3/PD14, CH4/PD15);<br>0: Default (ETR/PE0, CH1/PB6, CH2/PB7, CH3/PB8, CH4/PB9).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:10]</td>
+<td>TIM3_RM[1:0]</td>
+<td>RW</td>
+<td>Timer 3 remapping bits; these bits can be read/written by the user. They control the remapping of Timer 3 channels 1–4 on the GPIO port:<br>00: Default (ETR/PD2, CH1/PA6, CH2/PA7, CH3/PB0, CH4/PB1);<br>01: Reserved;<br>10: Partial remap (ETR/PD2, CH1/PB4, CH2/PB5, CH3/PB0, CH4/PB1);<br>11: Full remap (ETR/PD2, CH1/PC6, CH2/PC7, CH3/PC8, CH4/PC9).<br>Note: Remapping does not affect TIM3_ETR on PD2.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:8]</td>
+<td>TIM2_RM[1:0]</td>
+<td>RW</td>
+<td>Timer 2 remapping bits. These bits can be read/written by the user. They control the mapping of Timer 2 channels 1–4 and external trigger (ETR) on the GPIO port:<br>00: Default (ETR/PA0, CH1/PA0, CH2/PA1, CH3/PA2, CH4/PA3);<br>01: Partial remap (ETR/PA15, CH1/PA15, CH2/PB3, CH3/PA2, CH4/PA3);<br>10: Partial remap (ETR/PA0, CH1/PA0, CH2/PA1, CH3/PB10, CH4/PB11);<br>11: Full remap (ETR/PA15, CH1/PA15, CH2/PB3, CH3/PB10, CH4/PB11).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:6]</td>
+<td>TIM1_RM[1:0]</td>
+<td>RW</td>
+<td>Timer 1 remapping bits. These bits can be read/written by the user. They control the mapping of Timer 1 channels 1–4, 1N–3N, external trigger (ETR), and break input (BKIN) on the GPIO port:<br>00: Default (ETR/PA12, CH1/PA8, CH2/PA9, CH3/PA10, CH4/PA11, BKIN/PB12, CH1N/PB13, CH2N/PB14, CH3N/PB15);<br>01: Partial remap (ETR/PA12, CH1/PA8, CH2/PA9, CH3/PA10, CH4/PA11, BKIN/PA6, CH1N/PA7, CH2N/PB0, CH3N/PB1);<br>10: Reserved;<br>11: Full remap (ETR/PE7, CH1/PE9, CH2/PE11, CH3/PB8, CH4/PA7, BKIN/PB10, CH1N/PE8, CH2N/PE10, CH3N/PE12).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[5:4]</td>
+<td>USART3_RM[1:0]</td>
+<td>RW</td>
+<td>USART3 remapping bits; these bits can be read/written by the user. They control the mapping of USART3 CTS, RTS, CK, TX, and RX alternate functions on the GPIO port:<br>00: Default (TX/PB10, RX/PB11, CK/PB12, CTS/PB13, RTS/PB14);<br>01: Partial remap (TX/PC10, RX/PC11, CK/PC12, CTS/PB13, RTS/PB14);<br>10: Partial remap (TX/PA13, RX/PA14, CK/PD10, CTS/PD11, RTS/PD12);<br>11: Full remap (TX/PD8, RX/PD9, CK/PD10, CTS/PD11, RTS/PD12).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>USART2_RM</td>
+<td>RW</td>
+<td>USART2 remapping bit. This bit can be read/written by the user. It controls the mapping of USART2 CTS, RTS, CK, TX, and RX alternate functions on the GPIO port:<br>1: Remap (CTS/PD3, RTS/PD4, TX/PD5, RX/PD6, CK/PD7);<br>0: Default (CTS/PA0, RTS/PA1, TX/PA2, RX/PA3, CK/PA4).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>USART1_RM</td>
+<td>RW</td>
+<td>USART1 mapping configuration low bit (used together with AFIO_PCFR2 register bit26 USART1_RM1).<br>00: Default (CK/PA8, TX/PA9, RX/PA10, CTS/PA11, RTS/PA12);<br>01: Remap (CK/PA8, TX/PB6, RX/PB7, CTS/PA11, RTS/PA12);<br>10: Remap (CK/PA10, TX/PB15, RX/PA8, CTS/PA5, RTS/PA9);<br>11: Remap (CK/PA5, TX/PA6, RX/PA7, CTS/PC4, RTS/PC5).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>I2C_RM</td>
+<td>RW</td>
+<td>I2C remapping. This bit can be read/written by the user. It controls the mapping of I2C SCL and SDA alternate functions on the GPIO port:<br>1: Remap (SCL/PB8, SDA/PB9);<br>0: Default (SCL/PB6, SDA/PB7).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>SPI1_RM</td>
+<td>RW</td>
+<td>SPI1 remapping. This bit can be read/written by the user. It controls the mapping of SPI1 NSS, SCK, MISO, and MOSI alternate functions on the GPIO port:<br>1: Remap (NSS/PA15, SCK/PB3, MISO/PB4, MOSI/PB5);<br>0: Default (NSS/PA4, SCK/PA5, MISO/PA6, MOSI/PA7).</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.2.3-external-interrupt-configuration-register-1-afio_exticr1">10.3.2.3 External Interrupt Configuration Register 1 (AFIO_EXTICR1)</h4>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">EXTI3[3:0]</td><td colspan="4">EXTI2[3:0]</td><td colspan="4">EXTI1[3:0]</td><td colspan="4">EXTI0[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:12]<br>[11:8]<br>[7:4]<br>[3:0]</td>
+<td>EXTIx[3:0]</td>
+<td>RW</td>
+<td>(x=0–3), external interrupt input pin configuration bits. Used to determine which port pin the external interrupt pin is mapped to:<br>0000: PA port pin x;<br>0001: PB port pin x;<br>0010: PC port pin x;<br>0011: PD port pin x;<br>0100: PE port pin x;<br>Others: Reserved.</td>
+<td>0000b</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.2.4-external-interrupt-configuration-register-2-afio_exticr2">10.3.2.4 External Interrupt Configuration Register 2 (AFIO_EXTICR2)</h4>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">EXTI7[3:0]</td><td colspan="4">EXTI6[3:0]</td><td colspan="4">EXTI5[3:0]</td><td colspan="4">EXTI4[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:12]<br>[11:8]<br>[7:4]<br>[3:0]</td>
+<td>EXTIx[3:0]</td>
+<td>RW</td>
+<td>(x=4–7), external interrupt input pin configuration bits. Used to determine which port pin the external interrupt pin is mapped to:<br>0000: PA port pin x;<br>0001: PB port pin x;<br>0010: PC port pin x;<br>0011: PD port pin x;<br>0100: PE port pin x;<br>Others: Reserved.</td>
+<td>0000b</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.2.5-external-interrupt-configuration-register-3-afio_exticr3">10.3.2.5 External Interrupt Configuration Register 3 (AFIO_EXTICR3)</h4>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">EXTI11[3:0]</td><td colspan="4">EXTI10[3:0]</td><td colspan="4">EXTI9[3:0]</td><td colspan="4">EXTI8[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:12]<br>[11:8]<br>[7:4]<br>[3:0]</td>
+<td>EXTIx[3:0]</td>
+<td>RW</td>
+<td>(x=8–11), external interrupt input pin configuration bits. Used to determine which port pin the external interrupt pin is mapped to:<br>0000: PA port pin x;<br>0001: PB port pin x;<br>0010: PC port pin x;<br>0011: PD port pin x;<br>0100: PE port pin x;<br>Others: Reserved.</td>
+<td>0000b</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.2.6-external-interrupt-configuration-register-4-afio_exticr4">10.3.2.6 External Interrupt Configuration Register 4 (AFIO_EXTICR4)</h4>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">EXTI15[3:0]</td><td colspan="4">EXTI14[3:0]</td><td colspan="4">EXTI13[3:0]</td><td colspan="4">EXTI12[3:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:12]<br>[11:8]<br>[7:4]<br>[3:0]</td>
+<td>EXTIx[3:0]</td>
+<td>RW</td>
+<td>(x=12–15), external interrupt input pin configuration bits. Used to determine which port pin the external interrupt pin is mapped to:<br>0000: PA port pin x;<br>0001: PB port pin x;<br>0010: PC port pin x;<br>0011: PD port pin x;<br>0100: PE port pin x;<br>Others: Reserved.</td>
+<td>0000b</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="10.3.2.7-remap-register-2-afio_pcfr2">10.3.2.7 Remap Register 2 (AFIO_PCFR2)</h4>
+
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="2">USART10_RM</td><td colspan="2">USART9_RM</td><td>Reserved</td><td>USART1_RM1</td><td colspan="2">USART8_RM[1:0]</td><td colspan="2">USART7_RM[1:0]</td><td colspan="2">USART6_RM[1:0]</td><td colspan="2">USART5_RM[1:0]</td><td colspan="2">USART4_RM[1:0]</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>I3C_RM</td><td>DVP_RM</td><td>SDIO_RM</td><td>LTDC_RM</td><td>FSMC_NADV</td><td colspan="7">Reserved</td><td>TIM8_RM</td><td>Reserved</td><td>FSMC_RM</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:30]</td>
+<td>USART10_RM</td>
+<td>RW</td>
+<td>USART10 remapping:<br>00: Default (CK/PE12, TX/PE0, RX/PE1, CTS/PC14, RTS/PC15);<br>01: Remap (CK/PE12, TX/PB8, RX/PB9, CTS/PC14, RTS/PC15);<br>1x: Remap (CK/PD10, TX/PD11, RX/PD12, CTS/PD13, RTS/PD14).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:28]</td>
+<td>USART9_RM</td>
+<td>RW</td>
+<td>USART9 remapping:<br>00: Default (CK/PD8, TX/PB1, RX/PB2, CTS/PE8, RTS/PE9);<br>01: Remap (CK/PD8, TX/PA4, RX/PA5, CTS/PE8, RTS/PE9);<br>1x: Remap (CK/PE2, TX/PE3, RX/PE4, CTS/PE5, RTS/PE6).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>27</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>26</td>
+<td>USART1_RM1</td>
+<td>RW</td>
+<td>USART1 mapping configuration high bit (used together with AFIO_PCFR1 register bit2 USART1_RM).<br>00: Default (CK/PA8, TX/PA9, RX/PA10, CTS/PA11, RTS/PA12);<br>01: Remap (CK/PA8, TX/PB6, RX/PB7, CTS/PA11, RTS/PA12);<br>10: Remap (CK/PA10, TX/PB15, RX/PA8, CTS/PA5, RTS/PA9);<br>11: Remap (CK/PA5, TX/PA6, RX/PA7, CTS/PC4, RTS/PC5).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[25:24]</td>
+<td>USART8_RM[1:0]</td>
+<td>RW</td>
+<td>USART8 remapping:<br>00: Default (TX/PC4, RX/PC5, CK/PA7, CTS/PB0, RTS/PB1);<br>01: Remap (TX/PA14, RX/PA15, CK/PB15, CTS/PE10, RTS/PE11);<br>1x: Remap (TX/PB15, RX/PB14, CK/PB11, CTS/PB13, RTS/PB12).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:22]</td>
+<td>USART7_RM[1:0]</td>
+<td>RW</td>
+<td>USART7 remapping:<br>00: Default (TX/PC2, RX/PC3, CK/PC1, CTS/PC4, RTS/PC5);<br>01: Remap (TX/PA6, RX/PA7, CK/PB0, CTS/PC4, RTS/PC5);<br>10: Remap (TX/PA9, RX/PA10, CK/PA8, CTS/PB6, RTS/PB7);<br>11: Remap (TX/PA9, RX/PA10, CK/PA8, CTS/PC8, RTS/PC9).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[21:20]</td>
+<td>USART6_RM[1:0]</td>
+<td>RW</td>
+<td>USART6 remapping:<br>00: Default (TX/PC0, RX/PC1, CK/PB0, CTS/PC2, RTS/PC3);<br>01: Remap (TX/PB8, RX/PB9, CK/PB5, CTS/PE0, RTS/PE1);<br>10: Remap (TX/PE10, RX/PE11, CK/PA13, CTS/PA14, RTS/PA15);<br>11: Remap (TX/PC0, RX/PC1, CK/PA5, CTS/PC2, RTS/PC3).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:18]</td>
+<td>USART5_RM[1:0]</td>
+<td>RW</td>
+<td>USART5 remapping:<br>00: Default (TX/PC12, RX/PD2, CK/PB5, CTS/PB3, RTS/PB4);<br>01: Remap (TX/PB4, RX/PB5, CK/PB3, CTS/PB8, RTS/PB9);<br>1x: Remap (TX/PE8, RX/PE9, CK/PB2, CTS/PB0, RTS/PB1).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[17:16]</td>
+<td>USART4_RM[1:0]</td>
+<td>RW</td>
+<td>UART4 remapping:<br>00: Default (TX/PC10, RX/PC11, CK/PC12, CTS/PA13, RTS/PD2);<br>01: Remap (TX/PB0, RX/PB1, CK/PB2, CTS/PC4, RTS/PC5);<br>1x: Remap (TX/PE0, RX/PE1, CK/PE12, CTS/PB8, RTS/PB9).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Reserved</td>
+<td>RW</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>I3C_RM</td>
+<td>RW</td>
+<td>I3C remapping:<br>1: Remap (SCL/PB4, SDA/PB5);<br>0: Default (SCL/PB10, SDA/PB11).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>DVP_RM</td>
+<td>RW</td>
+<td>DVP remapping:<br>1: Remap (PCLK/PE0, HSYNC/PE1, VSYNC/PD3, D0/PD4, D1/PD5, D2/PD6, D3/PD7, D4/PB7, D5/PD11, D6/PD12, D7/PD13, D8/PE3, D9/PE4, D10/PE5, D11/PE6);<br>0: Default (PCLK/PA6, HSYNC/PA4, VSYNC/PA5, D0/PA9, D1/PA10, D2/PC8, D3/PC9, D4/PC11, D5/PB6, D6/PB8, D7/PB9, D8/PC10, D9/PC12, D10/PD6, D11/PD2).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>SDIO_RM</td>
+<td>RW</td>
+<td>SDIO remapping:<br>1: Remap (CK/PC12, CMD/PD2, SD0/PB14, SD1/PB15, SD2/PC10, SD3/PC11, SD4/PB8, SD5/PB9, SD6/PA9, SD7/PA10);<br>0: Default (CK/PC12, CMD/PD2, SD0/PC8, SD1/PC9, SD2/PC10, SD3/PC11, SD4/PB8, SD5/PB9, SD6/PC6, SD7/PC7).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>LTDC_RM</td>
+<td>RW</td>
+<td>LTDC remapping:<br>1: Remap (CLK/PA10, HSYNC/PB8, VSYNC/PB9, DE/PA9, R[0]/PC0, R[1]/PC1, R[2]/PC2, R[3]/PC3, R[4]/PA1, R[5]/PA2, R[6]/PA3, R[7]/PA7, G[0]/PC4, G[1]/PC5, G[2]/PB0, G[3]/PB1, G[4]/PB3, G[5]/PA4, G[6]/PB12, G[7]/PB13, B[0]/PB14, B[1]/PB15, B[2]/PB11, B[3]/PB10, B[4]/PA8, B[5]/PA13, B[6]/PA14, B[7]/PA15);<br>0: Default (CLK/PE1, HSYNC/PB4, VSYNC/PB5, DE/PE0, R[0]/PC0, R[1]/PC1, R[2]/PC2, R[3]/PC3, R[4]/PA1, R[5]/PA2, R[6]/PA3, R[7]/PA7, G[0]/PC4, G[1]/PC5, G[2]/PB0, G[3]/PB1, G[4]/PB2, G[5]/PD8, G[6]/PB12, G[7]/PB13, B[0]/PB14, B[1]/PB15, B[2]/PB11, B[3]/PB10, B[4]/PA8, B[5]/PA13, B[6]/PA14, B[7]/PA15).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>FSMC_NADV</td>
+<td>RW</td>
+<td>FSMC_NADV remapping:<br>1: Disable FSMC NADV output;<br>0: FSMC NADV mapped to PB7.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[9:3]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TIM8_RM</td>
+<td>RW</td>
+<td>TIM8 remapping bit.<br>1: Remap (ETR/PA0, CH1/PB6, CH2/PB7, CH3/PB8, CH4/PC13, BKIN/PB9, CH1N/PA13, CH2N/PA14, CH3N/PA15);<br>0: Default (ETR/PA0, CH1/PC6, CH2/PC7, CH3/PC8, CH4/PC9, BKIN/PA6, CH1N/PA7, CH2N/PB0, CH3N/PB1).</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Reserved</td>
+<td>RW</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>FSMC_RM</td>
+<td>RW</td>
+<td>FSMC remapping:<br>1: Remap (NBL[0]/PE0, NBL[1]/PE1, CLK/PD3, NOE/PD4, NWE/PD5, NWAIT/PD6, NE1/NCE2/PD7, NADV/PB7, A16/PD11, A17/PD12, A18/PD13, A19/PE3, A20/PE4, A21/PE5, A22/PE6, A23/PE2, D0/PD14, D1/PD15, D2/PD0, D3/PD1, D4/PC4, D5/PE8, D6/PE9, D7/PE10, D8/PE11, D9/PB11, D10/PB12, D11/PB13, D12/PB14, D13/PD8, D14/PD9, D15/PD10);<br>0: Default (NBL[0]/PE0, NBL[1]/PE1, CLK/PD3, NOE/PD4, NWE/PD5, NWAIT/PD6, NE1/NCE2/PD7, NADV/PB7, A16/PD11, A17/PD12, A18/PD13, A19/PE3, A20/PE4, A21/PE5, A22/PE6, A23/PE2, D0/PD14, D1/PD15, D2/PD0, D3/PD1, D4/PE7, D5/PE8, D6/PE9, D7/PE10, D8/PE11, D9/PB11, D10/PB12, D11/PB13, D12/PB14, D13/PD8, D14/PD9, D15/PD10).</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

@@ -1,0 +1,841 @@
+<h1 id="chapter-13-digital-to-analog-conversion-dac">Chapter 13: Digital-to-Analog Conversion (DAC)</h1>
+
+<p>The Digital-to-Analog Conversion module (DAC) contains two 12-bit voltage-output digital-to-analog converters (DAC) that convert two digital signals into two analog voltage signals and output them. It supports independent or simultaneous conversion of dual DAC channels, 12-bit data left-aligned or right-aligned, 12-bit or 8-bit data, and external event-triggered conversion. It can generate triangle waves and noise, and supports DMA functionality.</p>
+
+<h2 id="13.1-main-features">13.1 Main Features</h2>
+<ul>
+<li>2 DAC converters, each corresponding to one output channel</li>
+<li>Triangle wave and noise waveform generators</li>
+<li>Configurable 8-bit or 12-bit output</li>
+<li>12-bit data left-aligned or right-aligned</li>
+<li>Simultaneous or independent conversion of dual DAC channels</li>
+<li>DMA support</li>
+<li>Multiple trigger events</li>
+</ul>
+
+<h2 id="13.2-functional-description">13.2 Functional Description</h2>
+
+<h3 id="13.2.1-dac-module-structure">13.2.1 DAC Module Structure</h3>
+
+<figure><img src="figures/fig_13_1.png"><figcaption>Figure 13-1: DAC module block diagram</figcaption></figure>
+
+<h3 id="13.2.2-dac-channel-configuration">13.2.2 DAC Channel Configuration</h3>
+
+<h4 id="13.2.2.1-enabling-the-dac">13.2.2.1 Enabling the DAC</h4>
+
+<p>Setting the ENx bit in the DAC_CTLR register to 1 enables the analog power supply to DAC channel x. After a startup time, DAC channel x is enabled. The DAC contains two analog output channels, which can output simultaneously or independently.</p>
+<div class="note">Note: To avoid parasitic interference and additional power consumption, the pin corresponding to the DAC channel should be configured as analog input (AIN) mode in advance.</div>
+
+<h4 id="13.2.2.2-enabling-the-output-buffer">13.2.2.2 Enabling the Output Buffer</h4>
+
+<p>The DAC integrates an output buffer that can be used to reduce output impedance and increase driving capability to directly drive external loads. Each DAC channel output buffer can be enabled or disabled by setting the BOFFx bit in the DAC_CTLR register.</p>
+
+<h4 id="13.2.2.3-data-format">13.2.2.3 Data Format</h4>
+
+<p>In single DAC channel mode, the data formats include 8-bit right-aligned, 12-bit left-aligned, and 12-bit right-aligned.</p>
+<p>In 8-bit right-aligned mode, data is written to DAC_R8BDHRx[7:0], and the module loads (after 1 PB1 clock cycle) the left-shifted data into the data output register DAC_DORx[11:4].</p>
+<p>In 12-bit right-aligned mode, data is written to DAC_R12BDHRx[11:0], and the module loads (after 1 PB1 clock cycle) the right-aligned data into the data output register DAC_DORx[11:0].</p>
+<p>In 12-bit left-aligned mode, data is written to DAC_L12BDHRx[15:4], and after corresponding shifting, the module loads (after 1 PB1 clock cycle) the left-aligned data into the data output register DAC_DORx[11:0].</p>
+
+<figure><img src="figures/fig_13_2.png"><figcaption>Figure 13-2: Single-channel data format</figcaption></figure>
+
+<p>In dual DAC channel mode, there are also three formats: 8-bit right-aligned, 12-bit left-aligned, and 12-bit right-aligned.</p>
+<p>In 8-bit right-aligned mode, data is written to DAC_RD8BDHR[7:0], and the module loads (after 1 PB1 clock cycle) bits[7:0] shifted into DAC_DOR1[11:4], and bits[15:8] shifted into DAC_DOR2[11:4].</p>
+<p>In 12-bit left-aligned mode, data is written to DAC_LD12BDHR[31:0], and the module loads (after 1 PB1 clock cycle) bits[15:4] shifted into DAC_DOR1[11:0], and bits[31:20] shifted into DAC_DOR2[11:0].</p>
+<p>In 12-bit right-aligned mode, data is written to DAC_RD12BDHR[31:0], and the module loads (after 1 PB1 clock cycle) bits[11:0] into DAC_DOR1[11:0], and bits[27:16] into DAC_DOR2[11:0].</p>
+
+<figure><img src="figures/fig_13_3.png"><figcaption>Figure 13-3: Dual-channel data format</figcaption></figure>
+
+<h4 id="13.2.2.4-dma-function">13.2.2.4 DMA Function</h4>
+
+<p>The DAC channel has DMA functionality. Setting the DMAENx bit in the DAC_CTLR register to 1 enables the DMA function for the corresponding channel. When a trigger event (excluding software trigger) occurs, a DMA request is generated, and then the data in the DAC_DORx register is updated.</p>
+
+<h4 id="13.2.2.5-trigger-event-selection">13.2.2.5 Trigger Event Selection</h4>
+
+<p>DAC conversion can be triggered by the following events. When the TENx bit in the DAC_CTLR register is set to 1, the TSELx[2:0] control bits select a specific trigger event to trigger DAC conversion.</p>
+
+<table class="data-table">
+<caption>Table 13-1: Trigger events</caption>
+<thead><tr><th>Trigger source</th><th>Type</th><th>TSELx[2:0]</th></tr></thead>
+<tbody>
+<tr><td>Timer 6 TRGO event</td><td rowspan="6">Internal signal from on-chip timer</td><td>000</td></tr>
+<tr><td>Timer 8 TRGO event</td><td>001</td></tr>
+<tr><td>Timer 7 TRGO event</td><td>010</td></tr>
+<tr><td>Timer 5 TRGO event</td><td>011</td></tr>
+<tr><td>Timer 2 TRGO event</td><td>100</td></tr>
+<tr><td>Timer 4 TRGO event</td><td>101</td></tr>
+<tr><td>EXTI line 9</td><td>External pin</td><td>110</td></tr>
+<tr><td>SWTRIG (software trigger)</td><td>Software control bit</td><td>111</td></tr>
+</tbody>
+</table>
+
+<p>The DAC interface detects the rising edge from the selected timer TRGO output or external interrupt line 9, and updates the DAC_DORx register with the new value 3 PB1 clock cycles after the trigger.</p>
+<p>If software trigger mode is configured, once the SWTRIG bit is set to 1, a conversion is initiated. The DAC_DORx register is updated with the new value 1 PB1 clock cycle after the trigger, and the hardware automatically clears the SWTRIG bit.</p>
+<div class="note">Note: The TSELx[2:0] bits cannot be changed while ENx is 1.</div>
+
+<h3 id="13.2.3-dac-conversion">13.2.3 DAC Conversion</h3>
+
+<p>The data for the DAC channel comes from the DAC_DORx register, but data cannot be written directly to the DAC_DORx register. Any data output to DAC channel x must be written to the DAC_R12BDHR1, DAC_L12BDHR1, DAC_R12BDHR2, DAC_L12BDHR2, DAC_RD12BDHR, DAC_LD12BDHR, or DAC_RD8BDHR registers. The internal holding register DAC_DHRx obtains the values from the above registers and transfers them to the DAC_DORx register after the corresponding time.</p>
+<p>In non-trigger mode, data written to the DAC_xDHRx register is shifted into the DAC_DORx register after 1 PB1 clock cycle.</p>
+<p>In software trigger mode, the DAC_DORx register is automatically updated 1 PB1 clock cycle after the trigger event rising edge.</p>
+<p>In hardware trigger mode (timer TRGO event or external interrupt line 9 rising edge), the DAC_DORx register is automatically updated 3 PB1 clock cycles after the trigger event.</p>
+<p>After data is loaded into the DAC_DORx register, the output becomes valid after a settling time tSETTLING. The duration of this time varies depending on the power supply voltage and the analog output load.</p>
+<p>The digital input is linearly converted by the DAC to an analog voltage output in the range of 0 to VDD33A. The output voltage on any DAC channel pin satisfies the following relationship:</p>
+<p>DAC output voltage = VDD33A × (DAC_DORx / 4096).</p>
+
+<h3 id="13.2.4-dac-triangle-wave-generator">13.2.4 DAC Triangle Wave Generator</h3>
+
+<p>The module has a built-in triangle wave generator that can superimpose a small-amplitude triangle wave on the base signal. Set the WAVEx[1:0] bits to 10b to select the DAC triangle wave generation function. Set the MAMPx[3:0] bits in the DAC_CTLR register to select the triangle wave amplitude.</p>
+<p>Internally, the system contains a triangle wave counter starting from 0, which increments by 1 after 3 PB1 clock cycles following each trigger event. The counter value is added to the DAC_DHRx register value, overflow bits are discarded, and the result is written to the DAC_DORx register. When the value loaded into the DAC_DORx register is less than the maximum amplitude defined by the MAMPx[3:0] bits, the triangle wave counter increments step by step. Once the set maximum amplitude is reached, the counter begins to decrement. After reaching 0, it begins incrementing again, repeating the cycle. Setting the WAVEx[1:0] bits to '00' resets the triangle wave generation.</p>
+<div class="note">Note:<br>
+1. To generate a triangle wave, the DAC trigger must be enabled, i.e., the TENx bit in the DAC_CTLR register must be set to 1.<br>
+2. The MAMPx[3:0] bits must be set before the DAC is enabled; otherwise, their values cannot be modified.</div>
+
+<figure><img src="figures/fig_13_4.png"><figcaption>Figure 13-4: Triangle wave generation</figcaption></figure>
+
+<h3 id="13.2.5-dac-noise-generator">13.2.5 DAC Noise Generator</h3>
+
+<p>The module has a built-in noise generator that uses a Linear Feedback Shift Register (LFSR) to generate pseudo-noise with varying amplitude. Set the WAVE[1:0] bits to 01b to select the DAC noise generation function. Set the MAMPx[3:0] bits in the DAC_CTLR register to select which part of the LFSR data to mask.</p>
+<p>The LFSR register is preloaded with 0xAAA. According to a specific algorithm, the register value is updated after 3 PB1 clock cycles following each trigger event. Setting the MAMPx[3:0] bits in the DAC_CR register can mask part or all of the LFSR data. The resulting LFSR value is added to the DAC_DHRx value, overflow bits are discarded, and the result is written to the DAC_DORx register. If the LFSR register value is 0x000, a 1 is injected (anti-lock mechanism). Setting the WAVEx[1:0] bits to 00b resets the LFSR waveform generation algorithm.</p>
+<div class="note">Note: To generate noise, the DAC trigger must be enabled, i.e., the TENx bit in the DAC_CTLR register must be set to 1.</div>
+
+<figure><img src="figures/fig_13_5.png"><figcaption>Figure 13-5: LFSR register algorithm</figcaption></figure>
+
+<h2 id="13.3-dual-dac-conversion">13.3 Dual DAC Conversion</h2>
+
+<p>When simultaneous conversion of two DACs is required, for more convenient and efficient operation of the DAC module, the module integrates three dual-DAC-mode data registers: DAC_RD8BDHR, DAC_LD12BDHR, and DAC_RD12BDHR. Operating any one of these registers updates the conversion values of both DACs.</p>
+<p>Dual DAC conversion can be combined with other module registers to achieve 11 different combinations of conversion modes. The values to be converted for both channels must be written into one of the three dual-channel data registers.</p>
+
+<h3 id="13.3.1-same-lfsr-with-different-triggers">13.3.1 Same LFSR with Different Triggers</h3>
+
+<p>Set TENx, TSELx to different values, WAVEx to 0b01, and MAMPx to the same LFSR mask value. When channel 1 trigger event occurs, the channel 1 data register DAC_DHR1 value is added to the LFSR1 counter value with the same mask, delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and LFSR1 is updated. When channel 2 trigger event occurs, the channel 2 data register DAC_DHR2 value is added to the LFSR2 counter value with the same mask, delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and LFSR2 is updated.</p>
+
+<h3 id="13.3.2-different-lfsrs-with-different-triggers">13.3.2 Different LFSRs with Different Triggers</h3>
+
+<p>Set TENx, TSELx to different values, WAVEx to 0b01, and MAMPx to different LFSR mask values. When channel 1 trigger event occurs, the channel 1 data register DAC_DHR1 value is added to the LFSR1 counter value masked by MAMP1[3:0], delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and LFSR1 is updated. When channel 2 trigger event occurs, the channel 2 data register DAC_DHR2 value is added to the LFSR2 counter value masked by MAMP2[3:0], delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and LFSR2 is updated.</p>
+
+<h3 id="13.3.3-same-triangle-wave-with-different-triggers">13.3.3 Same Triangle Wave with Different Triggers</h3>
+
+<p>Set TENx, TSELx to different values, WAVEx to 0b1x, and MAMPx to the same triangle wave amplitude. When channel 1 trigger event occurs, the channel 1 data register DAC_DHR1 value is added to the triangle wave counter value with the same amplitude set by MAMPx, delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and channel 1 triangle wave counter is updated. When channel 2 trigger event occurs, the channel 2 data register DAC_DHR2 value is added to the triangle wave counter value with the same amplitude set by MAMPx, delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and channel 2 triangle wave counter is updated.</p>
+
+<h3 id="13.3.4-different-triangle-waves-with-different-triggers">13.3.4 Different Triangle Waves with Different Triggers</h3>
+
+<p>Set TENx, TSELx to different values, WAVEx to 0b1x, and MAMPx to different triangle wave amplitudes. When channel 1 trigger event occurs, the channel 1 data register DAC_DHR1 value is added to the triangle wave counter value with the amplitude set by MAMP1, delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and channel 1 triangle wave counter is updated. When channel 2 trigger event occurs, the channel 2 data register DAC_DHR2 value is added to the triangle wave counter value with the amplitude set by MAMP2, delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and channel 2 triangle wave counter is updated.</p>
+
+<h3 id="13.3.5-no-waveform-generator-with-different-triggers">13.3.5 No Waveform Generator with Different Triggers</h3>
+
+<p>Set TENx, TSELx to different values to select different trigger sources. When channel 1 trigger event occurs, the channel 1 data register DAC_DHR1 value is delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion. When channel 2 trigger event occurs, the channel 2 data register DAC_DHR2 value is delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion.</p>
+
+<h3 id="13.3.6-both-using-software-trigger">13.3.6 Both Using Software Trigger</h3>
+
+<p>In this configuration, write the conversion values to the dual-channel data registers. After 1 PB1 clock cycle, the data of DAC_DHR1 and DAC_DHR2 are sent to DAC_DOR1 and DAC_DOR2 respectively for conversion.</p>
+
+<h3 id="13.3.7-same-lfsr-with-same-trigger">13.3.7 Same LFSR with Same Trigger</h3>
+
+<p>Set TENx, TSELx to the same value, WAVEx to 0b01, and MAMPx to the same LFSR mask value. When the trigger event occurs, the register DAC_DHR1 value is added to the LFSR1 counter value with the same mask, delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and LFSR1 is updated. Simultaneously, the register DAC_DHR2 value is added to the LFSR2 counter value with the same mask, delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and LFSR2 is updated.</p>
+
+<h3 id="13.3.8-different-lfsrs-with-same-trigger">13.3.8 Different LFSRs with Same Trigger</h3>
+
+<p>Set TENx, TSELx to the same value, WAVEx to 0b01, and MAMPx to different LFSR mask values. When the trigger event occurs, the register DAC_DHR1 value is added to the LFSR1 counter value with different mask values, delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and LFSR1 is updated. Simultaneously, the register DAC_DHR2 value is added to the LFSR2 counter value with different mask values, delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and LFSR2 is updated.</p>
+
+<h3 id="13.3.9-same-triangle-wave-with-same-trigger">13.3.9 Same Triangle Wave with Same Trigger</h3>
+
+<p>Set TENx, TSELx to the same value, WAVEx to 0b1x, and MAMPx to the same triangle wave amplitude. When the trigger event occurs, the register DAC_DHR1 value is added to the counter value with the same triangle wave amplitude, delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and channel 1 triangle wave counter is updated. Simultaneously, the register DAC_DHR2 value is added to the counter value with the same triangle wave amplitude, delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and channel 2 triangle wave counter is updated.</p>
+
+<h3 id="13.3.10-different-triangle-waves-with-same-trigger">13.3.10 Different Triangle Waves with Same Trigger</h3>
+
+<p>Set TENx, TSELx to the same value, WAVEx to 0b1x, and MAMPx to different triangle wave amplitudes. When the trigger event occurs, the register DAC_DHR1 value is added to the triangle wave amplitude counter value set by MAMP1[3:0], delayed 3 PB1 clock cycles, then sent to DAC_DOR1 for conversion, and channel 1 triangle wave counter is updated. Simultaneously, the register DAC_DHR2 value is added to the triangle wave amplitude counter value set by MAMP2[3:0], delayed 3 PB1 clock cycles, then sent to DAC_DOR2 for conversion, and channel 2 triangle wave counter is updated.</p>
+
+<h3 id="13.3.11-no-waveform-generator-with-same-trigger">13.3.11 No Waveform Generator with Same Trigger</h3>
+
+<p>Set TENx, TSELx to the same value. In this configuration, when the trigger event occurs, the register DAC_DHR1 and DAC_DHR2 values are sent to DAC_DOR1 and DAC_DOR2 respectively for DAC conversion after a delay of 3 PB1 clock cycles.</p>
+
+<h2 id="13.4-register-description">13.4 Register Description</h2>
+
+<table class="reg-list">
+<caption>Table 13-2: DAC related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_DAC_CTLR</td><td>0x40007400</td><td>DAC configuration register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_SWTR</td><td>0x40007404</td><td>DAC software trigger register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_R12BDHR1</td><td>0x40007408</td><td>DAC channel 1 right-aligned 12-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_L12BDHR1</td><td>0x4000740C</td><td>DAC channel 1 left-aligned 12-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_R8BDHR1</td><td>0x40007410</td><td>DAC channel 1 right-aligned 8-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_R12BDHR2</td><td>0x40007414</td><td>DAC channel 2 right-aligned 12-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_L12BDHR2</td><td>0x40007418</td><td>DAC channel 2 left-aligned 12-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_R8BDHR2</td><td>0x4000741C</td><td>DAC channel 2 right-aligned 8-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_RD12BDHR</td><td>0x40007420</td><td>Dual-channel right-aligned 12-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_LD12BDHR</td><td>0x40007424</td><td>Dual-channel left-aligned 12-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_RD8BDHR</td><td>0x40007428</td><td>Dual-channel right-aligned 8-bit data holding register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_DOR1</td><td>0x4000742C</td><td>DAC channel 1 data output register</td><td>0x00000000</td></tr>
+<tr><td>R32_DAC_DOR2</td><td>0x40007430</td><td>DAC channel 2 data output register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="13.4.1-dac-configuration-register-dac_ctlr">13.4.1 DAC Configuration Register (DAC_CTLR)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="3">Reserved</td><td>DMAEN2</td><td colspan="4">MAMP2[3:0]</td><td colspan="2">WAVE2[1:0]</td><td colspan="3">TSEL2[2:0]</td><td>TEN2</td><td>BOFF2</td><td>EN2</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="3">Reserved</td><td>DMAEN1</td><td colspan="4">MAMP1[3:0]</td><td colspan="2">WAVE1[1:0]</td><td colspan="3">TSEL1[2:0]</td><td>TEN1</td><td>BOFF1</td><td>EN1</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:29]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>28</td>
+<td>DMAEN2</td>
+<td>RW</td>
+<td>DAC channel 2 DMA enable:<br>
+1: Enable DAC channel 2 DMA function;<br>
+0: Disable DAC channel 2 DMA function.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[27:24]</td>
+<td>MAMP2[3:0]</td>
+<td>RW</td>
+<td>DAC channel 2 mask/amplitude setting. Software sets this field to select the LFSR data mask bits in noise generation mode, or to select the waveform amplitude in triangle wave generation mode:<br>
+0000: Unmask LFSR bit 0 / triangle wave amplitude 1;<br>
+0001: Unmask LFSR bits[1:0] / triangle wave amplitude 3;<br>
+0010: Unmask LFSR bits[2:0] / triangle wave amplitude 7;<br>
+0011: Unmask LFSR bits[3:0] / triangle wave amplitude 15;<br>
+0100: Unmask LFSR bits[4:0] / triangle wave amplitude 31;<br>
+0101: Unmask LFSR bits[5:0] / triangle wave amplitude 63;<br>
+0110: Unmask LFSR bits[6:0] / triangle wave amplitude 127;<br>
+0111: Unmask LFSR bits[7:0] / triangle wave amplitude 255;<br>
+1000: Unmask LFSR bits[8:0] / triangle wave amplitude 511;<br>
+1001: Unmask LFSR bits[9:0] / triangle wave amplitude 1023;<br>
+1010: Unmask LFSR bits[10:0] / triangle wave amplitude 2047;<br>
+≥1011: Unmask LFSR bits[11:0] / triangle wave amplitude 4095.</td>
+<td>0000b</td>
+</tr>
+<tr>
+<td>[23:22]</td>
+<td>WAVE2[1:0]</td>
+<td>RW</td>
+<td>DAC channel 2 noise/triangle wave generation enable:<br>
+00: Disable waveform generator;<br>
+01: Enable noise waveform generator;<br>
+1x: Enable triangle wave waveform generator.</td>
+<td>00b</td>
+</tr>
+<tr>
+<td>[21:19]</td>
+<td>TSEL2[2:0]</td>
+<td>RW</td>
+<td>DAC channel 2 trigger event selection:<br>
+000: TIM6 TRGO event;<br>
+001: TIM8 TRGO event;<br>
+010: TIM7 TRGO event;<br>
+011: TIM5 TRGO event;<br>
+100: TIM2 TRGO event;<br>
+101: TIM4 TRGO event;<br>
+110: External interrupt line 9;<br>
+111: Software trigger;<br>
+Other: Reserved.</td>
+<td>000b</td>
+</tr>
+<tr>
+<td>18</td>
+<td>TEN2</td>
+<td>RW</td>
+<td>DAC channel 2 external trigger mode enable:<br>
+1: Enable DAC channel 2 trigger function. Data written to the DAC_xDHR register is transferred to the DAC_DOR2 register after 3 PB1 clock cycles.<br>
+0: Disable DAC channel 2 trigger function. Data written to the DAC_xDHR register is transferred to the DAC_DOR2 register after 1 PB1 clock cycle.<br>
+Note: If software trigger is selected, the data in DAC_xDHR is transferred to the DAC_DOR2 register after only 1 PB1 clock cycle.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>BOFF2</td>
+<td>RW</td>
+<td>DAC channel 2 output buffer disable control (recommended to enable):<br>
+1: Disable DAC channel 2 output buffer;<br>
+0: Enable DAC channel 2 output buffer.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>EN2</td>
+<td>RW</td>
+<td>DAC channel 2 enable:<br>
+1: Enable DAC channel 2;<br>
+0: Disable DAC channel 2.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:13]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>DMAEN1</td>
+<td>RW</td>
+<td>DAC channel 1 DMA enable:<br>
+1: Enable DAC channel 1 DMA function;<br>
+0: Disable DAC channel 1 DMA function.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:8]</td>
+<td>MAMP1[3:0]</td>
+<td>RW</td>
+<td>DAC channel 1 mask/amplitude setting. Software sets this field to select the LFSR data mask bits in noise generation mode, or to select the waveform amplitude in triangle wave generation mode:<br>
+0000: Unmask LFSR bit 0 / triangle wave amplitude 1;<br>
+0001: Unmask LFSR bits[1:0] / triangle wave amplitude 3;<br>
+0010: Unmask LFSR bits[2:0] / triangle wave amplitude 7;<br>
+0011: Unmask LFSR bits[3:0] / triangle wave amplitude 15;<br>
+0100: Unmask LFSR bits[4:0] / triangle wave amplitude 31;<br>
+0101: Unmask LFSR bits[5:0] / triangle wave amplitude 63;<br>
+0110: Unmask LFSR bits[6:0] / triangle wave amplitude 127;<br>
+0111: Unmask LFSR bits[7:0] / triangle wave amplitude 255;<br>
+1000: Unmask LFSR bits[8:0] / triangle wave amplitude 511;<br>
+1001: Unmask LFSR bits[9:0] / triangle wave amplitude 1023;<br>
+1010: Unmask LFSR bits[10:0] / triangle wave amplitude 2047;<br>
+≥1011: Unmask LFSR bits[11:0] / triangle wave amplitude 4095.</td>
+<td>0000b</td>
+</tr>
+<tr>
+<td>[7:6]</td>
+<td>WAVE1[1:0]</td>
+<td>RW</td>
+<td>DAC channel 1 noise/triangle wave generation enable:<br>
+00: Disable waveform generator;<br>
+01: Enable noise waveform generator;<br>
+1x: Enable triangle wave waveform generator.</td>
+<td>00b</td>
+</tr>
+<tr>
+<td>[5:3]</td>
+<td>TSEL1[2:0]</td>
+<td>RW</td>
+<td>DAC channel 1 trigger event selection:<br>
+000: TIM6 TRGO event;<br>
+001: TIM8 TRGO event;<br>
+010: TIM7 TRGO event;<br>
+011: TIM5 TRGO event;<br>
+100: TIM2 TRGO event;<br>
+101: TIM4 TRGO event;<br>
+110: External interrupt line 9;<br>
+111: Software trigger;<br>
+Other: Reserved.</td>
+<td>000b</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TEN1</td>
+<td>RW</td>
+<td>DAC channel 1 external trigger mode enable:<br>
+1: Enable DAC channel 1 trigger function. Data written to the DAC_xDHR register is transferred to the DAC_DOR1 register after 3 PB1 clock cycles.<br>
+0: Disable DAC channel 1 trigger function. Data written to the DAC_xDHR register is transferred to the DAC_DOR1 register after 1 PB1 clock cycle.<br>
+Note: If software trigger is selected, the data in DAC_xDHR is transferred to the DAC_DOR1 register after only 1 PB1 clock cycle.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>BOFF1</td>
+<td>RW</td>
+<td>DAC channel 1 output buffer disable control (recommended to enable):<br>
+1: Disable DAC channel 1 output buffer;<br>
+0: Enable DAC channel 1 output buffer.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>EN1</td>
+<td>RW</td>
+<td>DAC channel 1 enable:<br>
+1: Enable DAC channel 1;<br>
+0: Disable DAC channel 1.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.2-dac-software-trigger-register-dac_swtr">13.4.2 DAC Software Trigger Register (DAC_SWTR)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr colspan="16"><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="14">Reserved</td><td>SWTRIG2</td><td>SWTRIG1</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:2]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>SWTRIG2</td>
+<td>WO</td>
+<td>DAC channel 2 software trigger control bit:<br>
+1: Enable DAC channel 2 software trigger;<br>
+0: Disable DAC channel 2 software trigger.<br>
+Note: Once the data in DAC_xDHR is transferred to the DAC_DOR2 register (after 1 PB1 clock cycle), this bit is hardware-cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>SWTRIG1</td>
+<td>WO</td>
+<td>DAC channel 1 software trigger control bit:<br>
+1: Enable DAC channel 1 software trigger;<br>
+0: Disable DAC channel 1 software trigger.<br>
+Note: Once the data in DAC_xDHR is transferred to the DAC_DOR1 register (after 1 PB1 clock cycle), this bit is hardware-cleared.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.3-dac-channel-1-right-aligned-12-bit-data-holding-register-dac_r12bdhr1">13.4.3 DAC Channel 1 Right-Aligned 12-Bit Data Holding Register (DAC_R12BDHR1)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">DACC1DHR[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>DACC1DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit right-aligned data for DAC channel 1.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.4-dac-channel-1-left-aligned-12-bit-data-holding-register-dac_l12bdhr1">13.4.4 DAC Channel 1 Left-Aligned 12-Bit Data Holding Register (DAC_L12BDHR1)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">DACC1DHR[11:0]</td><td colspan="4">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:4]</td>
+<td>DACC1DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit left-aligned data for DAC channel 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.5-dac-channel-1-right-aligned-8-bit-data-holding-register-dac_r8bdhr1">13.4.5 DAC Channel 1 Right-Aligned 8-Bit Data Holding Register (DAC_R8BDHR1)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">DACC1DHR[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>DACC1DHR[7:0]</td>
+<td>RW</td>
+<td>8-bit right-aligned data for DAC channel 1.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.6-dac-channel-2-right-aligned-12-bit-data-holding-register-dac_r12bdhr2">13.4.6 DAC Channel 2 Right-Aligned 12-Bit Data Holding Register (DAC_R12BDHR2)</h3>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">DACC2DHR[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>DACC2DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit right-aligned data for DAC channel 2.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.7-dac-channel-2-left-aligned-12-bit-data-holding-register-dac_l12bdhr2">13.4.7 DAC Channel 2 Left-Aligned 12-Bit Data Holding Register (DAC_L12BDHR2)</h3>
+
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">DACC2DHR[11:0]</td><td colspan="4">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:4]</td>
+<td>DACC2DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit left-aligned data for DAC channel 2.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.8-dac-channel-2-right-aligned-8-bit-data-holding-register-dac_r8bdhr2">13.4.8 DAC Channel 2 Right-Aligned 8-Bit Data Holding Register (DAC_R8BDHR2)</h3>
+
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">DACC2DHR[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>DACC2DHR[7:0]</td>
+<td>RW</td>
+<td>8-bit right-aligned data for DAC channel 2.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.9-dac-dual-channel-right-aligned-12-bit-data-holding-register-dac_rd12bdhr">13.4.9 DAC Dual-Channel Right-Aligned 12-Bit Data Holding Register (DAC_RD12BDHR)</h3>
+
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">DACC2DHR[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">DACC1DHR[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:28]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[27:16]</td>
+<td>DACC2DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit right-aligned data for DAC channel 2.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>DACC1DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit right-aligned data for DAC channel 1.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.10-dac-dual-channel-left-aligned-12-bit-data-holding-register-dac_ld12bdhr">13.4.10 DAC Dual-Channel Left-Aligned 12-Bit Data Holding Register (DAC_LD12BDHR)</h3>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="12">DACC2DHR[11:0]</td><td colspan="4">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">DACC1DHR[11:0]</td><td colspan="4">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:20]</td>
+<td>DACC2DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit left-aligned data for DAC channel 2.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:4]</td>
+<td>DACC1DHR[11:0]</td>
+<td>RW</td>
+<td>12-bit left-aligned data for DAC channel 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.11-dac-dual-channel-right-aligned-8-bit-data-holding-register-dac_rd8bdhr">13.4.11 DAC Dual-Channel Right-Aligned 8-Bit Data Holding Register (DAC_RD8BDHR)</h3>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">DACC2DHR[7:0]</td><td colspan="8">DACC1DHR[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:8]</td>
+<td>DACC2DHR[7:0]</td>
+<td>RW</td>
+<td>8-bit right-aligned data for DAC channel 2.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>DACC1DHR[7:0]</td>
+<td>RW</td>
+<td>8-bit right-aligned data for DAC channel 1.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.12-dac-channel-1-data-output-register-dac_dor1">13.4.12 DAC Channel 1 Data Output Register (DAC_DOR1)</h3>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">DACC1DOR[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>DACC1DOR[11:0]</td>
+<td>RO</td>
+<td>DAC channel 1 output data.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="13.4.13-dac-channel-2-data-output-register-dac_dor2">13.4.13 DAC Channel 2 Data Output Register (DAC_DOR2)</h3>
+
+<p><strong>Offset address:</strong> 0x30</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="12">DACC2DOR[11:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[11:0]</td>
+<td>DACC2DOR[11:0]</td>
+<td>RO</td>
+<td>DAC channel 2 output data.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>

@@ -1,0 +1,999 @@
+<h1 id="chapter-22-usb-high-speed-host-device-controller-usbhs">Chapter 22: USB High-Speed Host/Device Controller (USBHS)</h1>
+
+<p>The chip integrates two sets of USB2.0 high-speed controllers with dual roles of host controller and device controller, and a built-in 480Mbps USB-PHY physical layer transceiver. When acting as a host controller, it can support low-speed, full-speed, and high-speed USB devices. When acting as a device controller, it can be flexibly configured to low-speed, full-speed, or high-speed mode to suit various applications.</p>
+
+<h2 id="22.1-usb-function-description">22.1 USB Function Description</h2>
+<ul>
+<li>Supports USB 2.1, USB 2.0, USB 1.1, and USB 1.0 protocol specifications</li>
+<li>Supports USB Host function and USB Device function</li>
+<li>Supports control transfer, bulk transfer, interrupt transfer, and real-time/isochronous transfer</li>
+<li>Provides bus reset, suspend, wake-up, and resume functions</li>
+<li>Host supports high-speed USB HUB</li>
+<li>All non-0 endpoints support up to 1024-byte data packets, with built-in FIFO, supporting interrupt and DMA</li>
+<li>Supports USART serial or I2C pin mapping, also usable for two-wire debug</li>
+</ul>
+
+<h2 id="22.2-register-description">22.2 Register Description</h2>
+<p>USB-related registers are divided into two parts:</p>
+<ul>
+<li>USB high-speed device control registers</li>
+<li>USB high-speed host control registers</li>
+</ul>
+<p>The peripheral base address of the USBHS1 module is: 0x40024000;<br>
+The peripheral base address of the USBHS2 module is: 0x40023400.</p>
+
+<h3 id="22.2.1-device-register-description">22.2.1 Device Register Description</h3>
+
+<table class="reg-list">
+<caption>Table 22-1: USBHS1 Device-Related Register List</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R8_USB_CTRL</td><td>0x40024000</td><td>USBHS control register</td><td>0x07</td></tr>
+<tr><td>R8_USB_BASE_MODE</td><td>0x40024001</td><td>USBHS mode control register</td><td>0x00</td></tr>
+<tr><td>R8_USB_INT_EN</td><td>0x40024002</td><td>USBHS interrupt enable register</td><td>0x00</td></tr>
+<tr><td>R8_USB_DEV_AD</td><td>0x40024003</td><td>USBHS device address register</td><td>0x00</td></tr>
+<tr><td>R8_USB_WAKE_CTRL</td><td>0x40024004</td><td>USBHS remote wakeup register</td><td>0x00</td></tr>
+<tr><td>R8_USB_TEST_MODE</td><td>0x40024005</td><td>USBHS test mode register</td><td>0x00</td></tr>
+<tr><td>R16_USB_LPM_DATA</td><td>0x40024006</td><td>USBHS power management register</td><td>0x8000</td></tr>
+<tr><td>R8_USB_INT_FG</td><td>0x40024008</td><td>USBHS interrupt flag register</td><td>0x00</td></tr>
+<tr><td>R8_USB_INT_ST</td><td>0x40024009</td><td>USBHS interrupt status register</td><td>0x00</td></tr>
+<tr><td>R8_USB_MIS_ST</td><td>0x4002400A</td><td>USBHS miscellaneous status register</td><td>0x00</td></tr>
+<tr><td>R16_USB_FRAME_NO</td><td>0x4002400C</td><td>USBHS frame number register</td><td>0x0000</td></tr>
+<tr><td>R16_USB_BUS</td><td>0x4002400E</td><td>USBHS bus status register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_TX_EN</td><td>0x40024010</td><td>USBHS endpoint transmit enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_RX_EN</td><td>0x40024012</td><td>USBHS endpoint receive enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_T_TOG_AUTO</td><td>0x40024014</td><td>USBHS endpoint transmit auto-toggle enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_R_TOG_AUTO</td><td>0x40024016</td><td>USBHS endpoint receive auto-toggle enable register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP_T_BURST</td><td>0x40024018</td><td>USBHS endpoint transmit burst register</td><td>0x00</td></tr>
+<tr><td>R8_UEP_T_BURST_MODE</td><td>0x40024019</td><td>USBHS endpoint transmit burst mode register</td><td>0x00</td></tr>
+<tr><td>R8_UEP_R_BURST</td><td>0x4002401A</td><td>USBHS endpoint receive burst register</td><td>0x00</td></tr>
+<tr><td>R8_UEP_R_RES_MODE</td><td>0x4002401B</td><td>USBHS endpoint receive response mode register</td><td>0x00</td></tr>
+<tr><td>R32_UEP_AF_MODE</td><td>0x4002401C</td><td>USBHS endpoint multiplex register</td><td>0x00000000</td></tr>
+<tr><td>R32_UEP0_DMA</td><td>0x40024020</td><td>Endpoint 0 buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP1_RX_DMA</td><td>0x40024024</td><td>Endpoint 1 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP2_RX_DMA</td><td>0x40024028</td><td>Endpoint 2 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP3_RX_DMA</td><td>0x4002402C</td><td>Endpoint 3 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP4_RX_DMA</td><td>0x40024030</td><td>Endpoint 4 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP5_RX_DMA</td><td>0x40024034</td><td>Endpoint 5 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP6_RX_DMA</td><td>0x40024038</td><td>Endpoint 6 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP7_RX_DMA</td><td>0x4002403C</td><td>Endpoint 7 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP1_TX_DMA</td><td>0x40024040</td><td>Endpoint 1 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP2_TX_DMA</td><td>0x40024044</td><td>Endpoint 2 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP3_TX_DMA</td><td>0x40024048</td><td>Endpoint 3 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP4_TX_DMA</td><td>0x4002404C</td><td>Endpoint 4 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP5_TX_DMA</td><td>0x40024050</td><td>Endpoint 5 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP6_TX_DMA</td><td>0x40024054</td><td>Endpoint 6 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP7_TX_DMA</td><td>0x40024058</td><td>Endpoint 7 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP0_MAX_LEN</td><td>0x4002405C</td><td>Endpoint 0 max length packet register</td><td>0x000000XX</td></tr>
+<tr><td>R32_UEP1_MAX_LEN</td><td>0x40024060</td><td>Endpoint 1 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP2_MAX_LEN</td><td>0x40024064</td><td>Endpoint 2 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP3_MAX_LEN</td><td>0x40024068</td><td>Endpoint 3 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP4_MAX_LEN</td><td>0x4002406C</td><td>Endpoint 4 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP5_MAX_LEN</td><td>0x40024070</td><td>Endpoint 5 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP6_MAX_LEN</td><td>0x40024074</td><td>Endpoint 6 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP7_MAX_LEN</td><td>0x40024078</td><td>Endpoint 7 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R16_UEP0_RX_LEN</td><td>0x4002407C</td><td>Endpoint 0 receive length register</td><td>0x00XX</td></tr>
+<tr><td>R16_UEP1_RX_LEN</td><td>0x40024080</td><td>Endpoint 1 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP1_R_SIZE</td><td>0x40024082</td><td>Endpoint 1 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP2_RX_LEN</td><td>0x40024084</td><td>Endpoint 2 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP2_R_SIZE</td><td>0x40024086</td><td>Endpoint 2 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP3_RX_LEN</td><td>0x40024088</td><td>Endpoint 3 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP3_R_SIZE</td><td>0x4002408A</td><td>Endpoint 3 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP4_RX_LEN</td><td>0x4002408C</td><td>Endpoint 4 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP4_R_SIZE</td><td>0x4002408E</td><td>Endpoint 4 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP5_RX_LEN</td><td>0x40024090</td><td>Endpoint 5 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP5_R_SIZE</td><td>0x40024092</td><td>Endpoint 5 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP6_RX_LEN</td><td>0x40024094</td><td>Endpoint 6 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP6_R_SIZE</td><td>0x40024096</td><td>Endpoint 6 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP7_RX_LEN</td><td>0x40024098</td><td>Endpoint 7 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP7_R_SIZE</td><td>0x4002409A</td><td>Endpoint 7 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP0_T_LEN</td><td>0x4002409C</td><td>Endpoint 0 transmit length register</td><td>0x00XX</td></tr>
+<tr><td>R8_UEP0_TX_CTRL</td><td>0x4002409E</td><td>Endpoint 0 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP0_RX_CTRL</td><td>0x4002409F</td><td>Endpoint 0 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP1_T_LEN</td><td>0x400240A0</td><td>Endpoint 1 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP1_TX_CTRL</td><td>0x400240A2</td><td>Endpoint 1 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP1_RX_CTRL</td><td>0x400240A3</td><td>Endpoint 1 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP2_T_LEN</td><td>0x400240A4</td><td>Endpoint 2 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP2_TX_CTRL</td><td>0x400240A6</td><td>Endpoint 2 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP2_RX_CTRL</td><td>0x400240A7</td><td>Endpoint 2 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP3_T_LEN</td><td>0x400240A8</td><td>Endpoint 3 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP3_TX_CTRL</td><td>0x400240AA</td><td>Endpoint 3 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP3_RX_CTRL</td><td>0x400240AB</td><td>Endpoint 3 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP4_T_LEN</td><td>0x400240AC</td><td>Endpoint 4 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP4_TX_CTRL</td><td>0x400240AE</td><td>Endpoint 4 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP4_RX_CTRL</td><td>0x400240AF</td><td>Endpoint 4 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP5_T_LEN</td><td>0x400240B0</td><td>Endpoint 5 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP5_TX_CTRL</td><td>0x400240B2</td><td>Endpoint 5 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP5_RX_CTRL</td><td>0x400240B3</td><td>Endpoint 5 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP6_T_LEN</td><td>0x400240B4</td><td>Endpoint 6 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP6_TX_CTRL</td><td>0x400240B6</td><td>Endpoint 6 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP6_RX_CTRL</td><td>0x400240B7</td><td>Endpoint 6 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP7_T_LEN</td><td>0x400240B8</td><td>Endpoint 7 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP7_TX_CTRL</td><td>0x400240BA</td><td>Endpoint 7 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP7_RX_CTRL</td><td>0x400240BB</td><td>Endpoint 7 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP_T_ISO</td><td>0x400240BC</td><td>USBHS endpoint transmit isochronous mode enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_R_ISO</td><td>0x400240BE</td><td>USBHS endpoint receive isochronous mode enable register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 22-2: USBHS2 Device-Related Register List</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R8_USB_CTRL</td><td>0x40023400</td><td>USBHS control register</td><td>0x07</td></tr>
+<tr><td>R8_USB_BASE_MODE</td><td>0x40023401</td><td>USBHS mode control register</td><td>0x00</td></tr>
+<tr><td>R8_USB_INT_EN</td><td>0x40023402</td><td>USBHS interrupt enable register</td><td>0x00</td></tr>
+<tr><td>R8_USB_DEV_AD</td><td>0x40023403</td><td>USBHS device address register</td><td>0x00</td></tr>
+<tr><td>R8_USB_WAKE_CTRL</td><td>0x40023404</td><td>USBHS remote wakeup register</td><td>0x00</td></tr>
+<tr><td>R8_USB_TEST_MODE</td><td>0x40023405</td><td>USBHS test mode register</td><td>0x00</td></tr>
+<tr><td>R16_USB_LPM_DATA</td><td>0x40023406</td><td>USBHS power management register</td><td>0x8000</td></tr>
+<tr><td>R8_USB_INT_FG</td><td>0x40023408</td><td>USBHS interrupt flag register</td><td>0x00</td></tr>
+<tr><td>R8_USB_INT_ST</td><td>0x40023409</td><td>USBHS interrupt status register</td><td>0x00</td></tr>
+<tr><td>R8_USB_MIS_ST</td><td>0x4002340A</td><td>USBHS miscellaneous status register</td><td>0x00</td></tr>
+<tr><td>R16_USB_FRAME_NO</td><td>0x4002340C</td><td>USBHS frame number register</td><td>0x0000</td></tr>
+<tr><td>R16_USB_BUS</td><td>0x4002340E</td><td>USBHS bus status register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_TX_EN</td><td>0x40023410</td><td>USBHS endpoint transmit enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_RX_EN</td><td>0x40023412</td><td>USBHS endpoint receive enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_T_TOG_AUTO</td><td>0x40023414</td><td>USBHS endpoint transmit auto-toggle enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_R_TOG_AUTO</td><td>0x40023416</td><td>USBHS endpoint receive auto-toggle enable register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP_T_BURST</td><td>0x40023418</td><td>USBHS endpoint transmit burst register</td><td>0x00</td></tr>
+<tr><td>R8_UEP_T_BURST_MODE</td><td>0x40023419</td><td>USBHS endpoint transmit burst mode register</td><td>0x00</td></tr>
+<tr><td>R8_UEP_R_BURST</td><td>0x4002341A</td><td>USBHS endpoint receive burst register</td><td>0x00</td></tr>
+<tr><td>R8_UEP_R_RES_MODE</td><td>0x4002341B</td><td>USBHS endpoint receive response mode register</td><td>0x00</td></tr>
+<tr><td>R32_UEP_AF_MODE</td><td>0x4002341C</td><td>USBHS endpoint multiplex register</td><td>0x00000000</td></tr>
+<tr><td>R32_UEP0_DMA</td><td>0x40023420</td><td>Endpoint 0 buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP1_RX_DMA</td><td>0x40023424</td><td>Endpoint 1 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP2_RX_DMA</td><td>0x40023428</td><td>Endpoint 2 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP3_RX_DMA</td><td>0x4002342C</td><td>Endpoint 3 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP4_RX_DMA</td><td>0x40023430</td><td>Endpoint 4 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP5_RX_DMA</td><td>0x40023434</td><td>Endpoint 5 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP6_RX_DMA</td><td>0x40023438</td><td>Endpoint 6 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP7_RX_DMA</td><td>0x4002343C</td><td>Endpoint 7 receive buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP1_TX_DMA</td><td>0x40023440</td><td>Endpoint 1 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP2_TX_DMA</td><td>0x40023444</td><td>Endpoint 2 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP3_TX_DMA</td><td>0x40023448</td><td>Endpoint 3 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP4_TX_DMA</td><td>0x4002344C</td><td>Endpoint 4 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP5_TX_DMA</td><td>0x40023450</td><td>Endpoint 5 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP6_TX_DMA</td><td>0x40023454</td><td>Endpoint 6 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP7_TX_DMA</td><td>0x40023458</td><td>Endpoint 7 transmit buffer start address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UEP0_MAX_LEN</td><td>0x4002345C</td><td>Endpoint 0 max length packet register</td><td>0x000000XX</td></tr>
+<tr><td>R32_UEP1_MAX_LEN</td><td>0x40023460</td><td>Endpoint 1 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP2_MAX_LEN</td><td>0x40023464</td><td>Endpoint 2 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP3_MAX_LEN</td><td>0x40023468</td><td>Endpoint 3 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP4_MAX_LEN</td><td>0x4002346C</td><td>Endpoint 4 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP5_MAX_LEN</td><td>0x40023470</td><td>Endpoint 5 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP6_MAX_LEN</td><td>0x40023474</td><td>Endpoint 6 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UEP7_MAX_LEN</td><td>0x40023478</td><td>Endpoint 7 max length packet register</td><td>0x00000XXX</td></tr>
+<tr><td>R16_UEP0_RX_LEN</td><td>0x4002347C</td><td>Endpoint 0 receive length register</td><td>0x00XX</td></tr>
+<tr><td>R16_UEP1_RX_LEN</td><td>0x40023480</td><td>Endpoint 1 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP1_R_SIZE</td><td>0x40023482</td><td>Endpoint 1 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP2_RX_LEN</td><td>0x40023484</td><td>Endpoint 2 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP2_R_SIZE</td><td>0x40023486</td><td>Endpoint 2 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP3_RX_LEN</td><td>0x40023488</td><td>Endpoint 3 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP3_R_SIZE</td><td>0x4002348A</td><td>Endpoint 3 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP4_RX_LEN</td><td>0x4002348C</td><td>Endpoint 4 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP4_R_SIZE</td><td>0x4002348E</td><td>Endpoint 4 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP5_RX_LEN</td><td>0x40023490</td><td>Endpoint 5 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP5_R_SIZE</td><td>0x40023492</td><td>Endpoint 5 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP6_RX_LEN</td><td>0x40023494</td><td>Endpoint 6 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP6_R_SIZE</td><td>0x40023496</td><td>Endpoint 6 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP7_RX_LEN</td><td>0x40023498</td><td>Endpoint 7 single receive length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP7_R_SIZE</td><td>0x4002349A</td><td>Endpoint 7 total receive data length register</td><td>0xXXXX</td></tr>
+<tr><td>R16_UEP0_T_LEN</td><td>0x4002349C</td><td>Endpoint 0 transmit length register</td><td>0x00XX</td></tr>
+<tr><td>R8_UEP0_TX_CTRL</td><td>0x4002349E</td><td>Endpoint 0 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP0_RX_CTRL</td><td>0x4002349F</td><td>Endpoint 0 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP1_T_LEN</td><td>0x400234A0</td><td>Endpoint 1 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP1_TX_CTRL</td><td>0x400234A2</td><td>Endpoint 1 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP1_RX_CTRL</td><td>0x400234A3</td><td>Endpoint 1 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP2_T_LEN</td><td>0x400234A4</td><td>Endpoint 2 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP2_TX_CTRL</td><td>0x400234A6</td><td>Endpoint 2 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP2_RX_CTRL</td><td>0x400234A7</td><td>Endpoint 2 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP3_T_LEN</td><td>0x400234A8</td><td>Endpoint 3 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP3_TX_CTRL</td><td>0x400234AA</td><td>Endpoint 3 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP3_RX_CTRL</td><td>0x400234AB</td><td>Endpoint 3 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP4_T_LEN</td><td>0x400234AC</td><td>Endpoint 4 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP4_TX_CTRL</td><td>0x400234AE</td><td>Endpoint 4 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP4_RX_CTRL</td><td>0x400234AF</td><td>Endpoint 4 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP5_T_LEN</td><td>0x400234B0</td><td>Endpoint 5 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP5_TX_CTRL</td><td>0x400234B2</td><td>Endpoint 5 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP5_RX_CTRL</td><td>0x400234B3</td><td>Endpoint 5 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP6_T_LEN</td><td>0x400234B4</td><td>Endpoint 6 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP6_TX_CTRL</td><td>0x400234B6</td><td>Endpoint 6 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP6_RX_CTRL</td><td>0x400234B7</td><td>Endpoint 6 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP7_T_LEN</td><td>0x400234B8</td><td>Endpoint 7 transmit length register</td><td>0x0000</td></tr>
+<tr><td>R8_UEP7_TX_CTRL</td><td>0x400234BA</td><td>Endpoint 7 transmit control register</td><td>0x00</td></tr>
+<tr><td>R8_UEP7_RX_CTRL</td><td>0x400234BB</td><td>Endpoint 7 receive control register</td><td>0x00</td></tr>
+<tr><td>R16_UEP_T_ISO</td><td>0x400234BC</td><td>USBHS endpoint transmit isochronous mode enable register</td><td>0x0000</td></tr>
+<tr><td>R16_UEP_R_ISO</td><td>0x400234BE</td><td>USBHS endpoint receive isochronous mode enable register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.1-usbhs-control-register-r8_usb_ctrl">22.2.1.1 USBHS Control Register (R8_USB_CTRL)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UD_LPM_EN</td><td>RW</td><td>LPM enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>6</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UD_DEV_EN</td><td>RW</td><td>USB device enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UD_DMA_EN</td><td>RW</td><td>DMA transfer enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UD_PHY_SUSPENDM</td><td>RW</td><td>USB PHY suspend:<br>1: Normal operation;<br>0: Suspend.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UD_CLR_ALL</td><td>RW</td><td>Clear all interrupt flags:<br>1: Clear USB interrupt flags and FIFO, requires software to clear to 0;<br>0: Do not clear.</td><td>1</td></tr>
+<tr><td>1</td><td>RB_UD_RST_SIE</td><td>RW</td><td>USB protocol processor reset:<br>1: Force reset USB protocol processor (SIE), including endpoint-related registers, requires software to clear to 0;<br>0: No reset.</td><td>1</td></tr>
+<tr><td>0</td><td>RB_UD_RST_LINK</td><td>RW</td><td>LINK layer reset:<br>1: USB Link layer reset;<br>0: No reset.</td><td>1</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.2-usbhs-mode-control-register-r8_usb_base_mode">22.2.1.2 USBHS Mode Control Register (R8_USB_BASE_MODE)</h3>
+<p><strong>Offset address:</strong> 0x01</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:2]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0x0</td></tr>
+<tr><td>[1:0]</td><td>RB_UD_SPEED_TYPE[1:0]</td><td>RW</td><td>Device expected speed mode:<br>00: Full-speed device;<br>01: High-speed device;<br>10: Low-speed device;<br>11: Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.3-usbhs-interrupt-enable-register-r8_usb_int_en">22.2.1.3 USBHS Interrupt Enable Register (R8_USB_INT_EN)</h3>
+<p><strong>Offset address:</strong> 0x02</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UDIE_FIFO_OVER</td><td>RW</td><td>FIFO overflow interrupt:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UDIE_LINK_RDY</td><td>RW</td><td>USB connect interrupt enable:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UDIE_SOF_ACT</td><td>RW</td><td>Receive SOF packet interrupt enable:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UDIE_TRANSFER</td><td>RW</td><td>USB transfer complete interrupt enable:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UDIE_LPM_ACT</td><td>RW</td><td>LPM transfer complete interrupt enable:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UDIE_BUS_SLEEP</td><td>RW</td><td>USB bus sleep interrupt enable:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UDIE_SUSPEND</td><td>RW</td><td>USB bus suspend interrupt enable:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UDIE_BUS_RST</td><td>RW</td><td>USB bus reset interrupt enable:<br>1: Enable interrupt;<br>0: Disable interrupt.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.4-usbhs-device-address-register-r8_usb_dev_ad">22.2.1.4 USBHS Device Address Register (R8_USB_DEV_AD)</h3>
+<p><strong>Offset address:</strong> 0x03</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[6:0]</td><td>RB_UD_DEV_ADDR[6:0]</td><td>RW</td><td>USB device address.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.5-usbhs-remote-wakeup-register-r8_usb_wake_ctrl">22.2.1.5 USBHS Remote Wakeup Register (R8_USB_WAKE_CTRL)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:1]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UD_REMOTE_WKUP</td><td>RW1</td><td>Remote wakeup, hardware auto-clears.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.6-usbhs-test-mode-register-r8_usb_test_mode">22.2.1.6 USBHS Test Mode Register (R8_USB_TEST_MODE)</h3>
+<p><strong>Offset address:</strong> 0x05</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UD_TEST_EN</td><td>RW</td><td>Test mode enable.</td><td>0</td></tr>
+<tr><td>[6:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UD_TEST_SE0NAK</td><td>RW</td><td>Test mode, output SE0.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UD_TEST_PKT</td><td>RW</td><td>Test mode, output one packet. DATA0, endpoint 4 data address and length, TOG is DATA0.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UD_TEST_K</td><td>RW</td><td>Test mode, output K.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UD_TEST_J</td><td>RW</td><td>Test mode, output J.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.7-usbhs-power-management-register-r16_usb_lpm_data">22.2.1.7 USBHS Power Management Register (R16_USB_LPM_DATA)</h3>
+<p><strong>Offset address:</strong> 0x06</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>15</td><td>RB_UD_LPM_BUSY</td><td>RW</td><td>Power management busy.</td><td>1</td></tr>
+<tr><td>[14:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>RB_UD_LPM_DATA[10:0]</td><td>RO</td><td>Power management data.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.8-usbhs-interrupt-flag-register-r8_usb_int_fg">22.2.1.8 USBHS Interrupt Flag Register (R8_USB_INT_FG)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UDIF_FIFO_OV</td><td>RW1Z</td><td>FIFO overflow interrupt flag, write 1 to clear.<br>1: FIFO overflow triggered;<br>0: No event.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UDIF_LINK_RDY</td><td>RW1Z</td><td>USB connect interrupt flag, write 1 to clear.<br>1: USB connect event triggered;<br>0: No event.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UDIF_RX_SOF</td><td>RW1Z</td><td>Receive SOF packet interrupt flag, write 1 to clear.<br>1: Receive SOF packet event triggered;<br>0: No event.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UDIF_RTX_ACT</td><td>RO</td><td>USB transfer complete interrupt flag:<br>Receive is cleared by ENDP_R_DONE;<br>Transmit is cleared by ENDP_T_DONE.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UDIF_LPM_ACT</td><td>RW1Z</td><td>LPM transfer complete interrupt flag, write 1 to clear.<br>1: LPM transfer complete event triggered;<br>0: No event.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UDIF_BUS_SLEEP</td><td>RW1Z</td><td>USB bus sleep interrupt flag, write 1 to clear.<br>1: USB bus sleep event triggered;<br>0: No event.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UDIF_SUSPEND</td><td>RW1Z</td><td>USB bus suspend interrupt flag, write 1 to clear.<br>1: USB suspend event triggered;<br>0: No event.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UDIF_BUS_RST</td><td>RW1Z</td><td>USB bus reset interrupt flag, write 1 to clear.<br>1: USB bus reset event triggered;<br>0: No event.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.9-usbhs-interrupt-status-register-r8_usb_int_st">22.2.1.9 USBHS Interrupt Status Register (R8_USB_INT_ST)</h3>
+<p><strong>Offset address:</strong> 0x09</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UDIS_EP_DIR</td><td>RO</td><td>Endpoint data transfer direction:<br>1: Endpoint IN data;<br>0: Endpoint OUT/SETUP data.</td><td>0</td></tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[2:0]</td><td>RB_UDIS_EP_ID_MASK[2:0]</td><td>RO</td><td>Endpoint number where data transfer occurred.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.10-usbhs-miscellaneous-status-register-r8_usb_mis_st">22.2.1.10 USBHS Miscellaneous Status Register (R8_USB_MIS_ST)</h3>
+<p><strong>Offset address:</strong> 0x0A</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UDMS_HS_MOD</td><td>RO</td><td>Whether the host is high-speed.</td><td>0</td></tr>
+<tr><td>[6:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UDMS_SUSP_REQ</td><td>RO</td><td>USB suspend request.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UDMS_SIE_FREE</td><td>RO</td><td>USB idle status.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UDMS_SLEEP</td><td>RO</td><td>USB sleep status.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UDMS_SUSPEND</td><td>RO</td><td>USB suspend status:<br>1: USB bus is in suspend state, no USB activity for a period of time;<br>0: USB bus is in non-suspend state.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UDMS_READY</td><td>RO</td><td>USB connection status.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.11-usbhs-frame-register-r16_usb_frame_no">22.2.1.11 USBHS Frame Register (R16_USB_FRAME_NO)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:13]</td><td>RB_UD_MFRAME_NO[2:0]</td><td>RO</td><td>Received micro-frame number.</td><td>0</td></tr>
+<tr><td>[12:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>RB_UD_FRAME_NO[10:0]</td><td>RO</td><td>Received frame number.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.12-usbhs-bus-status-register-r16_usb_bus">22.2.1.12 USBHS Bus Status Register (R16_USB_BUS)</h3>
+<p><strong>Offset address:</strong> 0x0E</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_USB_DM_ST</td><td>RO</td><td>UDM status.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_USB_DP_ST</td><td>RO</td><td>UDP status.</td><td>0</td></tr>
+<tr><td>1</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_USB_WAKEUP</td><td>RO</td><td>USB wakeup (active high).</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.13-usbhs-endpoint-transmit-enable-register-r16_uep_tx_en">22.2.1.13 USBHS Endpoint Transmit Enable Register (R16_UEP_TX_EN)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>RB_UEP_TX_EN[15:0]</td><td>RW</td><td>Endpoints 0~15 transmit enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.14-usbhs-endpoint-receive-enable-register-r16_uep_rx_en">22.2.1.14 USBHS Endpoint Receive Enable Register (R16_UEP_RX_EN)</h3>
+<p><strong>Offset address:</strong> 0x12</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>RB_UEP_RX_EN[15:0]</td><td>RW</td><td>Endpoints 0~15 receive enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.15-usbhs-endpoint-transmit-auto-toggle-enable-register-r16_uep_t_tog_auto">22.2.1.15 USBHS Endpoint Transmit Auto-Toggle Enable Register (R16_UEP_T_TOG_AUTO)</h3>
+<p><strong>Offset address:</strong> 0x14</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:1]</td><td>RB_UEP_T_TOG_AUTO[7:1]</td><td>RW</td><td>Endpoints 1~7 sync toggle bit auto-toggle enable:<br>1: Auto-toggle after successful data transmission;<br>0: Manual toggle control.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.16-usbhs-endpoint-receive-auto-toggle-enable-register-r16_uep_r_tog_auto">22.2.1.16 USBHS Endpoint Receive Auto-Toggle Enable Register (R16_UEP_R_TOG_AUTO)</h3>
+<p><strong>Offset address:</strong> 0x16</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:1]</td><td>RB_UEP_R_TOG_AUTO[7:1]</td><td>RW</td><td>Endpoints 1~7 sync toggle bit auto-toggle enable:<br>1: Auto-toggle after successful data reception;<br>0: Manual toggle control.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.17-usbhs-endpoint-transmit-burst-register-r8_uep_t_burst">22.2.1.17 USBHS Endpoint Transmit Burst Register (R8_UEP_T_BURST)</h3>
+<p><strong>Offset address:</strong> 0x18</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:0]</td><td>RB_UEP_T_BURST_EN[7:0]</td><td>RW</td><td>Endpoints 0~7 burst transmit enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.18-usbhs-endpoint-transmit-mode-register-r8_uep_t_burst_mode">22.2.1.18 USBHS Endpoint Transmit Mode Register (R8_UEP_T_BURST_MODE)</h3>
+<p><strong>Offset address:</strong> 0x19</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:0]</td><td>RB_UEP_T_BURST_MODE[7:0]</td><td>RW</td><td>Endpoints 0~7 burst transmit mode:<br>1: Do not send 0-length data in burst mode;<br>0: Send 0-length data in burst mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.19-usbhs-endpoint-receive-burst-register-r8_uep_r_burst">22.2.1.19 USBHS Endpoint Receive Burst Register (R8_UEP_R_BURST)</h3>
+<p><strong>Offset address:</strong> 0x1A</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:0]</td><td>RB_UEP_R_BURST_EN[7:0]</td><td>RW</td><td>Endpoints 0~7 burst receive enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.20-usbhs-endpoint-response-mode-register-r8_uep_r_res_mode">22.2.1.20 USBHS Endpoint Response Mode Register (R8_UEP_R_RES_MODE)</h3>
+<p><strong>Offset address:</strong> 0x1B</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:0]</td><td>RB_UEP_R_RES_MODE[7:0]</td><td>RW</td><td>Endpoints 0~7 receive response mode:<br>1: NYET;<br>0: ACK.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.21-usbhs-endpoint-multiplex-register-r32_uep_af_mode">22.2.1.21 USBHS Endpoint Multiplex Register (R32_UEP_AF_MODE)</h3>
+<p><strong>Offset address:</strong> 0x1C</p>
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="6">Reserved</td><td colspan="7">UEP_T_AF[6:0]</td><td colspan="3">Reserved</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:1]</td><td>RB_UEP_T_AF[6:0]</td><td>RW</td><td>Endpoints 1~7 multiplex enable:<br>1: Multiplex to 9-15;<br>0: Multiplex to 1-7.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.22-endpoint-0-buffer-start-address-register-r32_uep0_dma">22.2.1.22 Endpoint 0 Buffer Start Address Register (R32_UEP0_DMA)</h3>
+<p><strong>Offset address:</strong> 0x20</p>
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">UEP0_BUF_DMA[15:0]</td></tr></tbody>
+</table>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[16:0]</td><td>UEP0_BUF_DMA[16:0]</td><td>RW</td><td>Endpoint 0 buffer start address.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.23-endpoint-n-receive-buffer-start-address-register-r32_uepn_rx_dma-n-1-7">22.2.1.23 Endpoint n Receive Buffer Start Address Register (R32_UEPn_RX_DMA) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0x24 + 4*(n-1)</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[16:0]</td><td>UEPn_RX_DMA[16:0]</td><td>RW</td><td>Endpoint n receive buffer start address. The address must be 4-byte aligned.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.24-endpoint-n-transmit-buffer-start-address-register-r32_uepn_tx_dma-n-1-7">22.2.1.24 Endpoint n Transmit Buffer Start Address Register (R32_UEPn_TX_DMA) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0x40 + 4*(n-1)</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[16:0]</td><td>UEPn_TX_DMA[16:0]</td><td>RW</td><td>Endpoint n transmit buffer start address. The address must be 4-byte aligned.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.25-endpoint-0-max-length-packet-register-r32_uep0_max_len">22.2.1.25 Endpoint 0 Max Length Packet Register (R32_UEP0_MAX_LEN)</h3>
+<p><strong>Offset address:</strong> 0x5C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:7]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[6:0]</td><td>UEP0_MAX_LEN[6:0]</td><td>RW</td><td>Maximum limit length that endpoint 0 DMA can offset.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.26-endpoint-n-max-length-packet-register-r32_uepn_max_len-n-1-7">22.2.1.26 Endpoint n Max Length Packet Register (R32_UEPn_MAX_LEN) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0x5C + 4*n</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>UEPn_MAX_LEN[10:0]</td><td>RW</td><td>Maximum limit length that endpoint n DMA can offset.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.27-endpoint-0-receive-length-register-r16_uep0_rx_len">22.2.1.27 Endpoint 0 Receive Length Register (R16_UEP0_RX_LEN)</h3>
+<p><strong>Offset address:</strong> 0x7C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:7]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[6:0]</td><td>UEP0_RX_LEN[6:0]</td><td>RW</td><td>Endpoint 0 received data length.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.28-endpoint-n-single-receive-length-register-r16_uepn_rx_len-n-1-7">22.2.1.28 Endpoint n Single Receive Length Register (R16_UEPn_RX_LEN) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0x80 + 4*(n-1)</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>UEPn_RX_LEN[15:0]</td><td>RW</td><td>Endpoint n single receive data length.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.29-endpoint-n-total-receive-data-length-register-r16_uepn_r_size-n-1-7">22.2.1.29 Endpoint n Total Receive Data Length Register (R16_UEPn_R_SIZE) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0x82 + 4*(n-1)</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>UEPn_R_SIZE[15:0]</td><td>RW</td><td>Endpoint n total received data length.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.30-endpoint-0-transmit-length-register-r16_uep0_t_len">22.2.1.30 Endpoint 0 Transmit Length Register (R16_UEP0_T_LEN)</h3>
+<p><strong>Offset address:</strong> 0x9C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:7]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[6:0]</td><td>UEP0_T_LEN[6:0]</td><td>RW</td><td>Endpoint 0 transmit data length.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.31-endpoint-0-transmit-control-register-r8_uep0_tx_ctrl">22.2.1.31 Endpoint 0 Transmit Control Register (R8_UEP0_TX_CTRL)</h3>
+<p><strong>Offset address:</strong> 0x9E</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UEP_T_DONE</td><td>RW0</td><td>Endpoint 0 transmit complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UEP_T_NAK_ACT</td><td>RW0</td><td>Endpoint 0 transmit NAK complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>[5:3]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UEP_T_TOG_MASK</td><td>RW</td><td>Endpoint 0 transmit expected sync toggle bit:<br>1: DATA1;<br>0: DATA0.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>RB_UEP_T_RES_MASK[1:0]</td><td>RW</td><td>Endpoint 0 transmit response control:<br>00: Respond NAK or busy;<br>01: Respond STALL or error;<br>10: Respond ACK;<br>11: Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.32-endpoint-0-receive-control-register-r8_uep0_rx_ctrl">22.2.1.32 Endpoint 0 Receive Control Register (R8_UEP0_RX_CTRL)</h3>
+<p><strong>Offset address:</strong> 0x9F</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UEP_R_DONE</td><td>RW0</td><td>Endpoint 0 receive complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UEP_R_NAK_ACT</td><td>RW0</td><td>Endpoint 0 receive NAK complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UEP_R_NAK_TOG</td><td>RO</td><td>Endpoint 0 receive returned NAK, data packet type:<br>1: DATA1;<br>0: DATA0.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UEP_R_TOG_MATCH</td><td>RO</td><td>Received sync toggle bit match status with expected sync toggle bit:<br>1: Synced;<br>0: Not synced.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UEP_R_SETUP_IS</td><td>RO</td><td>Whether endpoint 0 received a SETUP transaction.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UEP_R_TOG_MASK</td><td>RW</td><td>Endpoint 0 receive expected sync toggle bit:<br>1: DATA1;<br>0: DATA0.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>RB_UEP_R_RES_MASK[1:0]</td><td>RW</td><td>Endpoint 0 receive response control:<br>00: Respond NAK or busy;<br>01: Respond STALL or error;<br>10: Respond ACK;<br>11: Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.33-endpoint-n-transmit-length-register-r16_uepn_t_len-n-1-7">22.2.1.33 Endpoint n Transmit Length Register (R16_UEPn_T_LEN) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0xA0 + 4*(n-1)</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:0]</td><td>UEPn_T_LEN[15:0]</td><td>RW</td><td>Endpoint n transmit data length.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.34-endpoint-n-transmit-control-register-r8_uepn_tx_ctrl-n-1-7">22.2.1.34 Endpoint n Transmit Control Register (R8_UEPn_TX_CTRL) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0xA2 + 4*(n-1)</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UEP_T_DONE</td><td>RW0</td><td>Endpoint n transmit complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UEP_T_NAK_ACT</td><td>RW0</td><td>Endpoint n transmit NAK complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>[5:4]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>RB_UEP_T_TOG_MASK[1:0]</td><td>RW</td><td>Endpoint n transmit expected sync toggle bit:<br>00: DATA0;<br>01: DATA1;<br>10: DATA2;<br>11: MDATA.<br><div class="note">Note: This bit is configurable in manual mode, not configurable in auto mode.</div></td><td>0</td></tr>
+<tr><td>[1:0]</td><td>RB_UEP_T_RES_MASK[1:0]</td><td>RW</td><td>Endpoint n transmit response control:<br>00: Respond NAK or busy;<br>01: Respond STALL or error;<br>10: Respond ACK;<br>11: Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.35-endpoint-n-receive-control-register-r8_uepn_rx_ctrl-n-1-7">22.2.1.35 Endpoint n Receive Control Register (R8_UEPn_RX_CTRL) (n=1~7)</h3>
+<p><strong>Offset address:</strong> 0xA3 + 4*(n-1)</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UEP_R_DONE</td><td>RW0</td><td>Endpoint n receive complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UEP_R_NAK_ACT</td><td>RW0</td><td>Endpoint n receive NAK complete flag, write 0 to clear.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UEP_R_NAK_TOG</td><td>RO</td><td>Endpoint n receive returned NAK, data packet type:<br>1: DATA1;<br>0: DATA0.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UEP_R_TOG_MATCH</td><td>RO</td><td>Endpoint n received sync toggle bit match status with expected sync toggle bit:<br>1: Synced;<br>0: Not synced.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>RB_UEP_R_TOG_MASK[1:0]</td><td>RW</td><td>Endpoint n receive expected sync toggle bit:<br>00: DATA0;<br>01: DATA1;<br>10: DATA2;<br>11: MDATA.<br><div class="note">Note: This bit is configurable in manual mode, not configurable in auto mode.</div></td><td>0</td></tr>
+<tr><td>[1:0]</td><td>RB_UEP_R_RES_MASK[1:0]</td><td>RW</td><td>Endpoint n receive response control:<br>00: Respond NAK or busy;<br>01: Respond STALL or error;<br>10: Respond ACK;<br>11: Respond ACK (interrupt OUT).</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.36-usb-endpoint-transmit-isochronous-mode-enable-register-r16_uep_t_iso">22.2.1.36 USB Endpoint Transmit Isochronous Mode Enable Register (R16_UEP_T_ISO)</h3>
+<p><strong>Offset address:</strong> 0xBC</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:1]</td><td>RB_UEPn_T_ISO_EN[6:0]</td><td>RW</td><td>Upload endpoint (IN) isochronous mode enable.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.1.37-usb-endpoint-receive-isochronous-mode-enable-register-r16_uep_r_iso">22.2.1.37 USB Endpoint Receive Isochronous Mode Enable Register (R16_UEP_R_ISO)</h3>
+<p><strong>Offset address:</strong> 0xBE</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[7:1]</td><td>RB_UEPn_R_ISO_EN[6:0]</td><td>RW</td><td>Download endpoint (OUT) isochronous mode enable.</td><td>0</td></tr>
+<tr><td>0</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2-host-register-description">22.2.2 Host Register Description</h3>
+
+<table class="reg-list">
+<caption>Table 22-3: USBHS1 Host-Related Register List</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R8_UH_CFG</td><td>0x40023500</td><td>USBHS host configuration register</td><td>0x07</td></tr>
+<tr><td>R8_UH_INT_EN</td><td>0x40023502</td><td>USBHS host interrupt enable register</td><td>0x00</td></tr>
+<tr><td>R8_UH_DEV_AD</td><td>0x40023503</td><td>USBHS host device address register</td><td>0x00</td></tr>
+<tr><td>R32_UH_CONTROL</td><td>0x40023504</td><td>USBHS host control register</td><td>0x00XXXXXX</td></tr>
+<tr><td>R8_UH_INT_FLAG</td><td>0x40023508</td><td>USBHS host interrupt flag register</td><td>0x00</td></tr>
+<tr><td>R8_UH_INT_ST</td><td>0x40023509</td><td>USBHS host interrupt status register</td><td>0xXX</td></tr>
+<tr><td>R8_UH_MIS_ST</td><td>0x4002350A</td><td>USBHS host miscellaneous status register</td><td>0xXX</td></tr>
+<tr><td>R32_UH_LPM_DATA</td><td>0x4002350C</td><td>USBHS host power management data register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_SPLIT_DATA</td><td>0x40023510</td><td>USBHS host SPLIT data register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UH_FRAME</td><td>0x40023514</td><td>USBHS host frame register</td><td>0x00000000</td></tr>
+<tr><td>R32_UH_TX_LEN</td><td>0x40023518</td><td>USBHS host transmit length register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_RX_LEN</td><td>0x4002351C</td><td>USBHS host receive length register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_RX_MAX_LEN</td><td>0x40023520</td><td>USBHS host receive max length register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_RX_DMA</td><td>0x40023524</td><td>DMA receive address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UH_TX_DMA</td><td>0x40023528</td><td>DMA transmit address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UH_PORT_CTRL</td><td>0x4002352C</td><td>USBHS host port control register</td><td>0x0000X000</td></tr>
+<tr><td>R8_UH_PORT_CFG</td><td>0x40023530</td><td>USBHS host port configuration register</td><td>0x00</td></tr>
+<tr><td>R8_UH_PORT_INT_EN</td><td>0x40023532</td><td>USBHS host port interrupt enable register</td><td>0x00</td></tr>
+<tr><td>R8_UH_PORT_TEST_CT</td><td>0x40023533</td><td>USBHS host port test mode register</td><td>0x00</td></tr>
+<tr><td>R16_UH_PORT_ST</td><td>0x40023534</td><td>USBHS host port status register</td><td>0x0010</td></tr>
+<tr><td>R8_UH_PORT_CHG</td><td>0x40023536</td><td>USBHS host port status change register</td><td>0x00</td></tr>
+<tr><td>R32_UH_BC_CTRL</td><td>0x4002353C</td><td>USBHS host BC charging control register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<table class="reg-list">
+<caption>Table 22-4: USBHS2 Host-Related Register List</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R8_UH_CFG</td><td>0x40024100</td><td>USBHS host configuration register</td><td>0x07</td></tr>
+<tr><td>R8_UH_INT_EN</td><td>0x40024102</td><td>USBHS host interrupt enable register</td><td>0x00</td></tr>
+<tr><td>R8_UH_DEV_AD</td><td>0x40024103</td><td>USBHS host device address register</td><td>0x00</td></tr>
+<tr><td>R32_UH_CONTROL</td><td>0x40024104</td><td>USBHS host control register</td><td>0x00XXXXXX</td></tr>
+<tr><td>R8_UH_INT_FLAG</td><td>0x40024108</td><td>USBHS host interrupt flag register</td><td>0x00</td></tr>
+<tr><td>R8_UH_INT_ST</td><td>0x40024109</td><td>USBHS host interrupt status register</td><td>0xXX</td></tr>
+<tr><td>R8_UH_MIS_ST</td><td>0x4002410A</td><td>USBHS host miscellaneous status register</td><td>0xXX</td></tr>
+<tr><td>R32_UH_LPM_DATA</td><td>0x4002410C</td><td>USBHS host power management data register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_SPLIT_DATA</td><td>0x40024110</td><td>USBHS host SPLIT data register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UH_FRAME</td><td>0x40024114</td><td>USBHS host frame register</td><td>0x00000000</td></tr>
+<tr><td>R32_UH_TX_LEN</td><td>0x40024118</td><td>USBHS host transmit length register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_RX_LEN</td><td>0x4002411C</td><td>USBHS host receive length register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_RX_MAX_LEN</td><td>0x40024120</td><td>USBHS host receive max length register</td><td>0x00000XXX</td></tr>
+<tr><td>R32_UH_RX_DMA</td><td>0x40024124</td><td>DMA receive address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UH_TX_DMA</td><td>0x40024128</td><td>DMA transmit address register</td><td>0x000XXXXX</td></tr>
+<tr><td>R32_UH_PORT_CTRL</td><td>0x4002412C</td><td>USBHS host port control register</td><td>0x0000X000</td></tr>
+<tr><td>R8_UH_PORT_CFG</td><td>0x40024130</td><td>USBHS host port configuration register</td><td>0x00</td></tr>
+<tr><td>R8_UH_PORT_INT_EN</td><td>0x40024132</td><td>USBHS host port interrupt enable register</td><td>0x00</td></tr>
+<tr><td>R8_UH_PORT_TEST_CT</td><td>0x40024133</td><td>USBHS host port test mode register</td><td>0x00</td></tr>
+<tr><td>R16_UH_PORT_ST</td><td>0x40024134</td><td>USBHS host port status register</td><td>0x0010</td></tr>
+<tr><td>R8_UH_PORT_CHG</td><td>0x40024136</td><td>USBHS host port status change register</td><td>0x00</td></tr>
+<tr><td>R32_UH_BC_CTRL</td><td>0x4002413C</td><td>USBHS host BC charging control register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.1-usbhs-host-configuration-register-r8_uh_cfg">22.2.2.1 USBHS Host Configuration Register (R8_UH_CFG)</h3>
+<p><strong>Offset address:</strong> 0x00</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UH_LPM_EN</td><td>RW</td><td>LPM enable.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UH_FORCE_FS</td><td>RW</td><td>Force use of USB_FS.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UH_SOF_EN</td><td>RW</td><td>Enable SOF packet transmission.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UH_DMA_EN</td><td>RW</td><td>Enable DMA transmission.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UH_PHY_SUSPENDM</td><td>RW</td><td>PHY suspend.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UH_CLR_ALL</td><td>RW</td><td>Clear interrupt flags and FIFO, requires software to clear to 0.</td><td>1</td></tr>
+<tr><td>1</td><td>RB_UH_RST_SIE</td><td>RW</td><td>USB protocol processor reset, requires software to clear to 0.</td><td>1</td></tr>
+<tr><td>0</td><td>RB_UH_RST_LINK</td><td>RW</td><td>USB connection control module reset.</td><td>1</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.2-usbhs-host-interrupt-enable-register-r8_uh_int_en">22.2.2.2 USBHS Host Interrupt Enable Register (R8_UH_INT_EN)</h3>
+<p><strong>Offset address:</strong> 0x02</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UHIE_FIFO_OVER</td><td>RW</td><td>FIFO overflow interrupt enable.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UHIE_TX_HALT</td><td>RW</td><td>Transmit halt interrupt enable.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UHIE_SOF_ACT</td><td>RW</td><td>SOF packet transmission interrupt enable.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UHIE_TRANSFER</td><td>RW</td><td>USB completion or transfer complete interrupt enable.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UHIE_RESUME_ACT</td><td>RW</td><td>Bus resume interrupt enable.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UHIE_WKUP_ACT</td><td>RW</td><td>Wakeup interrupt enable.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.3-usbhs-host-device-address-register-r8_uh_dev_ad">22.2.2.3 USBHS Host Device Address Register (R8_UH_DEV_AD)</h3>
+<p><strong>Offset address:</strong> 0x03</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:0]</td><td>RB_UH_DEV_ADDR[7:0]</td><td>RW</td><td>Address of the USB device currently being operated.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.4-usbhs-host-control-register-r32_uh_control">22.2.2.4 USBHS Host Control Register (R32_UH_CONTROL)</h3>
+<p><strong>Offset address:</strong> 0x04</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:24]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>23</td><td>RB_UH_RX_NO_RES</td><td>RW</td><td>IN-DATA no response, used for isochronous transfer or high-speed SPLIT packets.</td><td>X</td></tr>
+<tr><td>22</td><td>RB_UH_TX_NO_RES</td><td>RW</td><td>OUT/SETUP-DATA no expected response, used for isochronous transfer or high-speed SPLIT packets.</td><td>X</td></tr>
+<tr><td>21</td><td>RB_UH_RX_NO_DATA</td><td>RW</td><td>No data packet expected after IN token packet, used for high-speed SPLIT packets.</td><td>X</td></tr>
+<tr><td>20</td><td>RB_UH_TX_NO_DATA</td><td>RW</td><td>No data packet after OUT/SETUP token packet, used for high-speed SPLIT packets.</td><td>X</td></tr>
+<tr><td>19</td><td>RB_UH_PRE_PID_EN</td><td>RW</td><td>Low-speed preamble PRE PID enable bit. When the port operates in full-speed and needs to send a low-speed packet (PRE), this bit must be enabled.<br>1: Enable, used to communicate with low-speed USB devices through an external full-speed HUB;<br>0: Disable low-speed preamble packet.</td><td>X</td></tr>
+<tr><td>18</td><td>RB_UH_SPLIT_VALID</td><td>RW</td><td>Send SPLIT packet valid.</td><td>X</td></tr>
+<tr><td>17</td><td>RB_UH_LPM_VALID</td><td>RW</td><td>Send LPM packet valid.</td><td>X</td></tr>
+<tr><td>16</td><td>RB_UH_HOST_ACTION</td><td>RW</td><td>HOST transaction execute enable, this bit is automatically cleared after the transaction completes.</td><td>0</td></tr>
+<tr><td>[15:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>10</td><td>RB_UH_BUF_MODE</td><td>RW</td><td>Data buffer control bit.<br>1: Use R32_UH_RX_DMA for transmit, R32_UH_TX_DMA for receive;<br>0: Use R32_UH_TX_DMA for transmit, R32_UH_RX_DMA for receive.</td><td>X</td></tr>
+<tr><td>[9:8]</td><td>RB_UH_T_TOG_MASK[1:0]</td><td>RW</td><td>Data PID to send:<br>00: PID_DATA0;<br>01: PID_DATA1;<br>10: PID_DATA2;<br>11: PID_MDATA.</td><td>X</td></tr>
+<tr><td>[7:4]</td><td>RB_UH_T_ENDP_MASK[3:0]</td><td>RW</td><td>Host transmit transaction token packet endpoint number.</td><td>X</td></tr>
+<tr><td>[3:0]</td><td>RB_UH_T_TOKEN_MASK[3:0]</td><td>RW</td><td>Host transmit transaction token packet PID.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.5-usbhs-host-interrupt-flag-register-r8_uh_int_flag">22.2.2.5 USBHS Host Interrupt Flag Register (R8_UH_INT_FLAG)</h3>
+<p><strong>Offset address:</strong> 0x08</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UHIF_FIFO_OVER</td><td>RW1Z</td><td>FIFO overflow interrupt flag.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_UHIF_TX_HALT</td><td>RW1Z</td><td>Transmit halt interrupt flag. In host mode, used for data overflow during downstream read, or when transmission is not completed at the EOF2 time point, abort transmission, write 1 to clear.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UHIF_SOF_ACT</td><td>RW1Z</td><td>SOF packet transmission complete interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UHIF_TRANSFER</td><td>RW1Z</td><td>USB transaction transfer complete interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UHIF_RESUME_ACT_IF</td><td>RW1Z</td><td>Bus resume interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UHIF_WKUP_ACT</td><td>RW1Z</td><td>Wakeup interrupt flag, write 1 to clear.</td><td>0</td></tr>
+<tr><td>[1:0]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.6-usbhs-host-interrupt-status-register-r8_uh_int_st">22.2.2.6 USBHS Host Interrupt Status Register (R8_UH_INT_ST)</h3>
+<p><strong>Offset address:</strong> 0x09</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>X</td></tr>
+<tr><td>4</td><td>RB_UHIS_PORT_RX_RESUME</td><td>RW</td><td>This bit being 1 indicates the port received a wakeup signal.</td><td>X</td></tr>
+<tr><td>[3:0]</td><td>RB_UH_R_TOKEN_MASK[3:0]</td><td>RO</td><td>Received PID.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.7-usbhs-host-miscellaneous-status-register-r8_uh_mis_st">22.2.2.7 USBHS Host Miscellaneous Status Register (R8_UH_MIS_ST)</h3>
+<p><strong>Offset address:</strong> 0x0A</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UHMS_BUS_SE0</td><td>RO</td><td>USB bus is SE0.</td><td>X</td></tr>
+<tr><td>6</td><td>RB_UHMS_BUS_J</td><td>RO</td><td>USB bus is J.</td><td>X</td></tr>
+<tr><td>[5:4]</td><td>RB_UHMS_LINESTATE[1:0]</td><td>RO</td><td>PHY Linestate signal.</td><td>X</td></tr>
+<tr><td>3</td><td>RB_UHMS_USB_WAKEUP</td><td>RO</td><td>USB bus wakeup status:<br>1: Bus wakeup in progress;<br>0: Bus wakeup not in progress.</td><td>X</td></tr>
+<tr><td>2</td><td>RB_UHMS_SOF_ACT</td><td>RO</td><td>USB bus SOF packet transmission status bit:<br>1: SOF packet being sent;<br>0: Transmission complete or idle.</td><td>X</td></tr>
+<tr><td>1</td><td>RB_UHMS_SOF_PRE</td><td>RO</td><td>USB bus SOF packet pending status:<br>1: About to send SOF packet;<br>0: No SOF packet to send.</td><td>X</td></tr>
+<tr><td>0</td><td>RB_UHMS_SOF_FREE</td><td>RO</td><td>Port enable status:<br>1: Port enabled;<br>0: Port not enabled.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.8-usbhs-host-power-management-data-register-r32_uh_lpm_data">22.2.2.8 USBHS Host Power Management Data Register (R32_UH_LPM_DATA)</h3>
+<p><strong>Offset address:</strong> 0x0C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>RB_UH_LPM_DATA[10:0]</td><td>RW</td><td>Link power management packet data content.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.9-usbhs-host-split-register-r32_uh_split_data">22.2.2.9 USBHS Host SPLIT Register (R32_UH_SPLIT_DATA)</h3>
+<p><strong>Offset address:</strong> 0x10</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:19]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[18:0]</td><td>RB_UH_SPLIT_DATA[18:0]</td><td>RW</td><td>Host endpoint transmit SPLIT packet data content. From high bit to low bit: ET, E, S, Port, SC, Hub Addr.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.10-usbhs-host-frame-register-r32_uh_frame">22.2.2.10 USBHS Host Frame Register (R32_UH_FRAME)</h3>
+<p><strong>Offset address:</strong> 0x14</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:26]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>25</td><td>RB_UH_SOF_CNT_CLR</td><td>RW</td><td>SOF count clear.</td><td>0</td></tr>
+<tr><td>24</td><td>RB_UH_SOF_CNT_EN</td><td>RW</td><td>SOF count enable.</td><td>0</td></tr>
+<tr><td>[23:19]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[18:16]</td><td>RB_UH_MFRAME_NO[2:0]</td><td>RO</td><td>Micro-frame number of the SOF packet about to be sent.</td><td>0</td></tr>
+<tr><td>[15:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>RB_UH_FRAME_NO[10:0]</td><td>RW</td><td>Frame number of the SOF packet about to be sent.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.11-usbhs-host-transmit-length-register-r32_uh_tx_len">22.2.2.11 USBHS Host Transmit Length Register (R32_UH_TX_LEN)</h3>
+<p><strong>Offset address:</strong> 0x18</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>RB_UH_TX_LEN[10:0]</td><td>RW</td><td>Transmit data length.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.12-usbhs-host-receive-length-register-r32_uh_rx_len">22.2.2.12 USBHS Host Receive Length Register (R32_UH_RX_LEN)</h3>
+<p><strong>Offset address:</strong> 0x1C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>RB_UH_RX_LEN[10:0]</td><td>RW</td><td>Receive data length.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.13-usbhs-host-receive-max-length-register-r32_uh_rx_max_len">22.2.2.13 USBHS Host Receive Max Length Register (R32_UH_RX_MAX_LEN)</h3>
+<p><strong>Offset address:</strong> 0x20</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[10:0]</td><td>RB_UH_RX_MAX_LEN[10:0]</td><td>RW</td><td>Receive max length.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.14-dma-receive-address-register-r32_uh_rx_dma">22.2.2.14 DMA Receive Address Register (R32_UH_RX_DMA)</h3>
+<p><strong>Offset address:</strong> 0x24</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[16:0]</td><td>R32_UH_RX_DMA[16:0]</td><td>RW</td><td>Receive address. The lower two bits are invalid, must be 4-byte aligned.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.15-dma-transmit-address-register-r32_uh_tx_dma">22.2.2.15 DMA Transmit Address Register (R32_UH_TX_DMA)</h3>
+<p><strong>Offset address:</strong> 0x28</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>[16:0]</td><td>R16_UH_TX_DMA[16:0]</td><td>RW</td><td>Transmit address.</td><td>X</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.16-usbhs-host-port-control-register-r32_uh_port_ctrl">22.2.2.16 USBHS Host Port Control Register (R32_UH_PORT_CTRL)</h3>
+<p><strong>Offset address:</strong> 0x2C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:17]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>16</td><td>RB_UH_BUS_RST_LONG</td><td>RW</td><td>Bus reset time selection:<br>1: Long reset;<br>0: Normal reset.</td><td>0</td></tr>
+<tr><td>[15:12]</td><td>RB_UH_PORT_SLEEP_BESL[3:0]</td><td>RW</td><td>Wakeup time control:<br>0000: 125us; &nbsp; 1000: 3ms;<br>0001: 150us; &nbsp; 1001: 4ms;<br>0010: 200us; &nbsp; 1010: 5ms;<br>0011: 300us; &nbsp; 1011: 6ms;<br>0100: 400us; &nbsp; 1100: 7ms;<br>0101: 500us; &nbsp; 1101: 8ms;<br>0110: 1ms; &nbsp;&nbsp;&nbsp; 1110: 9ms;<br>0111: 2ms; &nbsp;&nbsp;&nbsp; 1111: 10ms.</td><td>X</td></tr>
+<tr><td>[11:9]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>8</td><td>RB_UH_CLR_PORT_SLEEP</td><td>WO</td><td>PORT exits SLEEP state (LPM).</td><td>0</td></tr>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UH_CLR_PORT_CONNECT</td><td>WO</td><td>Make the port enter port state.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UH_CLR_PORT_EN</td><td>WO</td><td>PORT exits enabled state and enters DISABLED state.</td><td>0</td></tr>
+<tr><td>3</td><td>RB_UH_SET_PORT_SLEEP</td><td>WO</td><td>PORT enters SLEEP state (LPM).</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UH_CLR_PORT_SUSP</td><td>WO</td><td>PORT exits suspend state.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UH_SET_PORT_SUSP</td><td>WO</td><td>PORT enters suspend state.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UH_SET_PORT_RESET</td><td>WO</td><td>Port sends reset.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.17-usbhs-host-port-configuration-register-r8_uh_port_cfg">22.2.2.17 USBHS Host Port Configuration Register (R8_UH_PORT_CFG)</h3>
+<p><strong>Offset address:</strong> 0x30</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>RB_UH_PD_EN</td><td>RW</td><td>15K resistor pull-down enable in host mode.</td><td>0</td></tr>
+<tr><td>[6:1]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UH_HOST_EN</td><td>RW</td><td>USB port mode selection:<br>1: Port is host mode;<br>0: Port is device mode.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.18-usbhs-host-port-interrupt-enable-register-r8_uh_port_int_en">22.2.2.18 USBHS Host Port Interrupt Enable Register (R8_UH_PORT_INT_EN)</h3>
+<p><strong>Offset address:</strong> 0x32</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UHIE_PORT_SLP</td><td>RW</td><td>Port sleep state change interrupt enable.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UHIE_PORT_RESET</td><td>RW</td><td>Port reset state change interrupt enable.</td><td>0</td></tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UHIE_PORT_SUSP</td><td>RW</td><td>Port suspend state change interrupt enable.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UHIE_PORT_EN</td><td>RW</td><td>Port enable state change interrupt enable.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UHIE_PORT_CONNECT</td><td>RW</td><td>Port connect state change interrupt enable.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.19-usbhs-host-port-test-mode-register-r8_uh_port_test_ct">22.2.2.19 USBHS Host Port Test Mode Register (R8_UH_PORT_TEST_CT)</h3>
+<p><strong>Offset address:</strong> 0x33</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:3]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UH_TEST_FORCE_EN</td><td>RW</td><td>Test mode enable.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UH_TEST_K</td><td>RW</td><td>Test output K.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UH_TEST_J</td><td>RW</td><td>Test output J.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.20-usbhs-host-port-status-register-r16_uh_port_st">22.2.2.20 USBHS Host Port Status Register (R16_UH_PORT_ST)</h3>
+<p><strong>Offset address:</strong> 0x34</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[15:12]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>11</td><td>RB_UHIS_PORT_TEST</td><td>RO</td><td>Whether the port is in test mode.</td><td>0</td></tr>
+<tr><td>10</td><td>RB_UHIS_PORT_HS</td><td>RO</td><td>Whether the port connection speed is high-speed.</td><td>0</td></tr>
+<tr><td>9</td><td>RB_UHIS_PORT_LS</td><td>RO</td><td>Whether the port connection speed is low-speed.</td><td>0</td></tr>
+<tr><td>[8:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UHIS_PORT_SLP</td><td>RO</td><td>Port sleep.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UHIS_PORT_RST</td><td>RO</td><td>Port reset status.</td><td>1</td></tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UHIS_PORT_SUSP</td><td>RO</td><td>Port suspend status.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UHIS_PORT_EN</td><td>RO</td><td>Port enable.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UHIS_PORT_CONNECT</td><td>RO</td><td>Port connection status.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.21-usbhs-host-port-status-change-register-r8_uh_port_chg">22.2.2.21 USBHS Host Port Status Change Register (R8_UH_PORT_CHG)</h3>
+<p><strong>Offset address:</strong> 0x36</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UHIF_PORT_SLP</td><td>RW1Z</td><td>Port sleep state change, write 1 to clear.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UHIF_PORT_RESET</td><td>RW1Z</td><td>Port reset state change, write 1 to clear.</td><td>0</td></tr>
+<tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>2</td><td>RB_UHIF_PORT_SUSP</td><td>RW1Z</td><td>Port suspend state change, write 1 to clear.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UHIF_PORT_EN</td><td>RW1Z</td><td>Port enable state change, write 1 to clear.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UHIF_PORT_CONNECT</td><td>RW1Z</td><td>Port connection state change, write 1 to clear.</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3 id="22.2.2.22-usbhs-host-bc-charging-control-register-r32_uh_bc_ctrl">22.2.2.22 USBHS Host BC Charging Control Register (R32_UH_BC_CTRL)</h3>
+<p><strong>Offset address:</strong> 0x3C</p>
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr><td>[31:11]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>10</td><td>RB_UDM_VSRC_ACT</td><td>RO</td><td>In auto mode, this bit indicates UDM outputs VBC_SRC; otherwise it is controlled by RB_UDM_BC_CMPE.<br><div class="note">Note: This bit is 1 when UDP is higher than VBC_SRC but UDP is not at high level, otherwise it is 0.</div></td><td>0</td></tr>
+<tr><td>9</td><td>RB_UDM_BC_VSRC</td><td>RW</td><td>UDM pin BC protocol source voltage enable:<br>1: UDM pin outputs BC protocol source voltage VBC_SRC;<br>0: Disable output.</td><td>0</td></tr>
+<tr><td>8</td><td>RB_UDP_BC_VSRC</td><td>RW</td><td>UDP pin BC protocol source voltage enable:<br>1: UDP pin outputs BC protocol source voltage VBC_SRC;<br>0: Disable output.</td><td>0</td></tr>
+<tr><td>7</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>6</td><td>RB_BC_AUTO_MODE</td><td>RW</td><td>Auto mode enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>5</td><td>RB_UDM_BC_CMPE</td><td>RW</td><td>UDM pin BC protocol comparator enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>4</td><td>RB_UDP_BC_CMPE</td><td>RW</td><td>UDP pin BC protocol comparator enable:<br>1: Enable;<br>0: Disable.</td><td>0</td></tr>
+<tr><td>[3:2]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+<tr><td>1</td><td>RB_UDM_BC_CMPO</td><td>RO</td><td>UDM pin BC protocol comparator status:<br>1: UDM pin voltage is higher than BC protocol reference value VBC_REF;<br>0: UDM pin voltage is lower than BC protocol reference value VBC_REF.</td><td>0</td></tr>
+<tr><td>0</td><td>RB_UDP_BC_CMPO</td><td>RO</td><td>UDP pin BC protocol comparator status:<br>1: UDP pin voltage is higher than BC protocol reference value VBC_REF;<br>0: UDP pin voltage is lower than BC protocol reference value VBC_REF.</td><td>0</td></tr>
+</tbody>
+</table>

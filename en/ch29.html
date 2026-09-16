@@ -1,0 +1,4330 @@
+<h1 id="chapter-29-ethernet-controller-eth">Chapter 29: Ethernet Controller (ETH)</h1>
+
+<p>The product provides an Ethernet controller (MAC) compliant with the IEEE 802.3-2002 standard, acting as the data link layer, and also integrates a 10 Mbps and 100 Mbps Ethernet PHY physical layer transceiver, supporting speed auto-negotiation, enabling Ethernet communication on a single chip. In application, combined with a TCP/IP protocol stack interface, network products can be developed.</p>
+
+<h2 id="29.1-functional-description">29.1 Functional Description</h2>
+
+<h3 id="29.1.1-mac-features">29.1.1 MAC Features</h3>
+<ul>
+<li>Supports 10M/100M Ethernet</li>
+<li>Supports full-duplex and half-duplex</li>
+<li>Supports automatic insertion of preamble and SFD</li>
+<li>Supports automatic insertion and verification of CRC</li>
+<li>Supports automatic calculation and verification of IP/ICMP/TCP/UDP protocol packet checksums</li>
+<li>Supports transmit frame length control</li>
+<li>Supports transmit inter-frame gap adjustment</li>
+<li>Supports VLAN frames</li>
+<li>Supports perfect address filtering and HASH filtering for receive frame addresses</li>
+<li>Supports transmit frame address filtering</li>
+<li>Supports multicast/broadcast frame receive control</li>
+<li>Supports promiscuous mode</li>
+<li>Supports magic frame and custom wake-up frame to wake up the microcontroller</li>
+<li>Supports a dedicated Ethernet wake-up interrupt entry</li>
+<li>Supports data loopback at the link layer</li>
+</ul>
+
+<h3 id="29.1.2-dma-features">29.1.2 DMA Features</h3>
+<ul>
+<li>Dedicated MAC DMA, minimizing CPU operations</li>
+<li>Supports byte-aligned access to RAM</li>
+<li>Manages transmit/receive buffers using descriptors</li>
+<li>Part of the transmit/receive status is fed back in the descriptors</li>
+<li>Descriptors and buffers not currently in use can be dynamically modified</li>
+<li>Supports manual stop or start</li>
+<li>Supports chained or ring-structured descriptor linking</li>
+<li>Supports multiple interrupt sources including transmit/receive completion interrupts</li>
+</ul>
+
+<h3 id="29.1.3-mmc-module-features">29.1.3 MMC Module Features</h3>
+<ul>
+<li>Supports manual reset, stop, or freeze</li>
+<li>Supports multiple interrupts</li>
+<li>Multiple counters supporting various transmit and receive counting modes</li>
+</ul>
+
+<h3 id="29.1.4-ptp-module-features">29.1.4 PTP Module Features</h3>
+<ul>
+<li>Supports IEEE 1588 protocol</li>
+<li>Supports automatic saving of the current time on transmit and receive</li>
+<li>Built-in 32-bit seconds timer and 32-bit signed sub-seconds timer</li>
+<li>Supports both fine and coarse adjustment for time correction</li>
+<li>Supports one interrupt source</li>
+</ul>
+
+<h3 id="29.1.5-internal-10base-t-100base-tx-physical-layer-features">29.1.5 Internal 10BASE-T/100BASE-TX Physical Layer Features</h3>
+<ul>
+<li>Managed via the SMI interface</li>
+<li>Supports 10BASE-T and 100BASE-TX with auto-negotiation</li>
+<li>Supports power-down mode</li>
+<li>Supports Auto-MDIX to swap TX/RX, automatically identifying positive/negative signal lines</li>
+<li>Supports full-duplex and half-duplex operation</li>
+<li>Supports UTP CAT5E, CAT6 twisted pair cables, supporting up to 120 m transmission distance</li>
+<li>Supports WOL (Wake-on-LAN)</li>
+<li>Supports interrupt functionality</li>
+</ul>
+
+<h3 id="29.1.6-frame-filtering">29.1.6 Frame Filtering</h3>
+
+<p>Using the MAC frame filter, perfect filtering or HASH filtering can be performed on the destination MAC address and source MAC address of received frames, and frames that do not pass filtering can be configured to be discarded, received, or marked in the receive descriptor. For details on this function, refer to the description of the MAC frame filter register (R32_ETH_MACFFR). The MAC has four built-in MAC address registers, of which MAC address register 0 is used by default to store the device's own MAC address, and the remaining three MAC address registers can be used for perfect filtering, comparing against the source or destination address of received frames. When R32_ETH_MACFFR:RA is set, all received frames will be received, but the corresponding status will be marked in the status field of the first word of the descriptor described later. If R32_ETH_MACFFR:PM is set, a similar effect occurs, but the status will not be marked. When R32_ETH_MACFFR:DAIF/SAIF is set, the result is inverted: frames that originally passed filtering will be discarded or marked, while frames that did not pass filtering will be transferred to the buffer in RAM.</p>
+
+<h4 id="29.1.6.1-unicast-filtering">29.1.6.1 Unicast Filtering</h4>
+<p>The MAC uses the HPF bit and the HU bit to determine whether unicast frames are HASH-filtered or perfect-address-filtered.</p>
+
+<h4 id="29.1.6.2-multicast-filtering">29.1.6.2 Multicast Filtering</h4>
+<p>The MAC uses the HPF bit and the HM bit to determine whether unicast frames are HASH-filtered or perfect-address-filtered. When the PAM bit is set, all multicast packets can pass through the filter.</p>
+
+<h4 id="29.1.6.3-broadcast-filtering">29.1.6.3 Broadcast Filtering</h4>
+<p>By setting the BFD bit, the MAC can block all broadcast packets.</p>
+
+<h4 id="29.1.6.4-source-address-filtering-selection">29.1.6.4 Source Address Filtering Selection</h4>
+<p>By setting the AE bit in the MAC address register, that MAC address register is enabled, and setting the SA bit determines whether the MAC address register is used as a source address sample or a destination address sample for comparison.</p>
+
+<h4 id="29.1.6.5-summary">29.1.6.5 Summary</h4>
+<p>The filtering settings for the destination address and source address are shown in Table 29-1 and Table 29-2, respectively.</p>
+
+<table class="data-table">
+<caption>Table 29-1: Acceptance of received frame destination MAC address based on R32_ETH_MACFFR bit settings</caption>
+<thead>
+<tr><th>Frame type</th><th>PM</th><th>HPF</th><th>HU</th><th>DAIF</th><th>HM</th><th>PAM</th><th>Effect</th></tr>
+</thead>
+<tbody>
+<tr><td>Broadcast</td><td>1</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>Pass</td></tr>
+<tr><td>Broadcast</td><td>0</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>Not passed (BFD set)</td></tr>
+<tr><td>Unicast</td><td>1</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>All frames pass</td></tr>
+<tr><td>Unicast</td><td>0</td><td>-</td><td>0</td><td>0</td><td>-</td><td>-</td><td>Pass when perfect filter matches</td></tr>
+<tr><td>Unicast</td><td>0</td><td>-</td><td>0</td><td>1</td><td>-</td><td>-</td><td>Not passed when perfect filter matches</td></tr>
+<tr><td>Unicast</td><td>0</td><td>0</td><td>1</td><td>0</td><td>-</td><td>-</td><td>Pass when HASH filter matches</td></tr>
+<tr><td>Unicast</td><td>0</td><td>0</td><td>1</td><td>1</td><td>-</td><td>-</td><td>Not passed when HASH filter matches</td></tr>
+<tr><td>Unicast</td><td>0</td><td>1</td><td>1</td><td>0</td><td>-</td><td>-</td><td>Pass when perfect filter or HASH filter matches</td></tr>
+<tr><td>Unicast</td><td>0</td><td>1</td><td>1</td><td>1</td><td>-</td><td>-</td><td>Not passed when perfect filter or HASH filter matches</td></tr>
+<tr><td>Multicast</td><td>1</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>Pass</td></tr>
+<tr><td>Multicast</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>1</td><td>Pass</td></tr>
+<tr><td>Multicast</td><td>0</td><td>-</td><td>-</td><td>0</td><td>0</td><td>0</td><td>Pass when perfect filter matches</td></tr>
+<tr><td>Multicast</td><td>0</td><td>0</td><td>-</td><td>0</td><td>1</td><td>0</td><td>Pass when HASH filter matches</td></tr>
+<tr><td>Multicast</td><td>0</td><td>1</td><td>-</td><td>0</td><td>1</td><td>0</td><td>Pass when perfect filter or HASH filter matches</td></tr>
+<tr><td>Multicast</td><td>0</td><td>-</td><td>-</td><td>1</td><td>0</td><td>0</td><td>Not passed when perfect filter matches</td></tr>
+<tr><td>Multicast</td><td>0</td><td>0</td><td>-</td><td>1</td><td>1</td><td>0</td><td>Not passed when HASH filter matches</td></tr>
+<tr><td>Multicast</td><td>0</td><td>1</td><td>-</td><td>1</td><td>1</td><td>0</td><td>Not passed when perfect filter or HASH filter matches</td></tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 29-2: Acceptance of received frame source MAC address based on R32_ETH_MACFFR bit settings</caption>
+<thead>
+<tr><th>Frame type</th><th>RA</th><th>SAIF</th><th>SAF</th><th>Effect</th></tr>
+</thead>
+<tbody>
+<tr><td>Unicast</td><td>1</td><td>-</td><td>-</td><td>All frames pass</td></tr>
+<tr><td>Unicast</td><td>0</td><td>0</td><td>0</td><td>Pass when perfect filter matches; mark but do not discard frames that do not pass</td></tr>
+<tr><td>Unicast</td><td>0</td><td>1</td><td>0</td><td>Not passed when perfect filter matches; mark but do not discard frames that do not pass</td></tr>
+<tr><td>Unicast</td><td>0</td><td>0</td><td>1</td><td>Pass when perfect filter matches; discard frames that do not pass</td></tr>
+<tr><td>Unicast</td><td>0</td><td>1</td><td>1</td><td>Not passed when perfect filter matches; discard frames that do not pass</td></tr>
+</tbody>
+</table>
+
+<div class="note">Note: "-" indicates the bit setting is don't-care.</div>
+
+<h3 id="29.1.7-mmc">29.1.7 MMC</h3>
+
+<p>The Management Counters (MMC) module primarily counts various indicators of frame receive/transmit status and MAC operation status. It can be configured to generate interrupts. In general, the "good" frame receive counter (MMCRGUFCR) can be used to obtain the number of intact frames currently received, the "good" frame transmit counter (MMCTGFCR) can be used to obtain the number of successfully transmitted frames, and the receive CRC error frame counter (MMCRFCECR) can be used to check whether there are frames received with CRC errors.</p>
+
+<p>Users need to understand a concept: what constitutes a "good" frame. Under normal conditions, as long as a frame starts transmission, its frame length meets the requirement (with auto-padding enabled), and automatic CRC calculation is enabled, it is a "good" frame. For a received frame, as long as its CRC is correct, the frame length is within the Ethernet frame length range, the frame length is consistent with the value in the length field (if the length/type field indicates length), or there is no misalignment, it is considered a "good" received frame.</p>
+
+<h3 id="29.1.8-pmt">29.1.8 PMT</h3>
+
+<h4 id="29.1.8.1-overview">29.1.8.1 Overview</h4>
+
+<p>The PMT (Power Management) module's function is mainly to wake up the microcontroller from low-power mode via Ethernet. The Gigabit Ethernet controller supports two types of frames to wake up the system: magic frames and (remote) wake-up frames. When the Ethernet receives these two types of frames, since the microcontroller is in low-power mode, a receive interrupt is not necessarily generated even if the frame is valid. However, if the frame passes the MAC's magic frame and wake-up frame recognition, a PMT interrupt will be generated. The PMT interrupt is independent of the Ethernet interrupt; by querying the PMT control and status register, the type of Ethernet frame that caused the interrupt can be determined.</p>
+
+<h4 id="29.1.8.2-magic-frame">29.1.8.2 Magic Frame</h4>
+
+<p>The magic packet (also known as magic packet) defined by AMD is a commonly used Ethernet frame to wake up a microcontroller. It has a fixed and special frame format: through frame filtering, the target network card can receive it; it can be encapsulated as a broadcast frame, containing 6 consecutive bytes of all-high (0xFF), followed by 16 repetitions of the target network card's MAC address. This combination can exist anywhere in the frame, so the magic frame can be encapsulated as a MAC frame, IP packet, or even a UDP packet. The following is the payload format of a magic frame.</p>
+
+<p>xx xx xx xx xx xx xx xx (preceding data is unrestricted, may even be absent) — ff ff ff ff ff ff<br>
+84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02<br>
+84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02<br>
+84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02 84 c2 e4 01 02 02<br>
+84 c2 e4 01 02 02 xx xx xx xx xx xx (some network cards require a password appended at the end of the magic frame).</p>
+
+<h4 id="29.1.8.3-wake-up-frame">29.1.8.3 Wake-up Frame</h4>
+
+<p>Since the magic frame format has limitations, the (remote) wake-up frame format can be user-defined. Any Ethernet frame that passes through the remote wake-up frame filter register group (ETH_MACRWUFFR) is considered a wake-up frame. Users define wake-up frames that meet their needs by configuring the remote wake-up frame filter register group. Note that the remote wake-up frame filter register group has only one address entry; users can write data into it through 8 consecutive write operations, and read back the previously written data through 8 consecutive read operations.</p>
+
+<p>The structure of the remote wake-up frame filter register group is shown in the table below:</p>
+
+<table class="data-table">
+<caption>Table 29-3: Structure of the remote wake-up frame filter register group</caption>
+<tbody>
+<tr><td>Filter register 0</td><td>Byte mask of filter register 0</td></tr>
+<tr><td>Filter register 1</td><td>Byte mask of filter register 1</td></tr>
+<tr><td>Filter register 2</td><td>Byte mask of filter register 2</td></tr>
+<tr><td>Filter register 3</td><td>Byte mask of filter register 3</td></tr>
+<tr><td>Filter register 4</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Reserved</td><td>Filter 3 command</td><td>Filter 2 command</td><td>Filter 1 command</td><td>Filter 0 command</td></tr>
+<tr><td>Filter register 5</td><td>Filter 3 offset</td><td>Filter 2 offset</td><td>Filter 1 offset</td><td>Filter 0 offset</td></tr>
+<tr><td>Filter register 6</td><td>Filter 1 CRC-16</td><td>Filter 0 CRC-16</td></tr>
+<tr><td>Filter register 7</td><td>Filter 3 CRC-16</td><td>Filter 2 CRC-16</td></tr>
+</tbody>
+</table>
+
+<p>As can be seen from the table above, the four domains — byte mask, command, offset, and filter — work together to determine whether a frame is a remote wake-up frame. In practice, four different frames satisfying the requirements can be configured.</p>
+
+<p>The most significant bit of the 32-bit byte mask must be 0. Bits [30:0] correspond to the first 31 bytes of data as defined by the offset domain. If a bit is set to 1, the corresponding byte participates in the CRC-16 calculation, with a maximum of 31 bytes participating in the calculation.</p>
+
+<p>The most significant bit of the 4-bit command domain indicates the frame type to which it applies: 1 means valid only for multicast addresses, 0 means valid only for unicast addresses. Bits 2 and 1 of the command domain are reserved. Bit 0 is the enable bit; when set high, this group of filters is enabled.</p>
+
+<p>The offset domain indicates how many bytes from the beginning of the frame header to start calculating the CRC-16 value. The minimum value is 12. If the offset domain is 12, CRC-16 calculation starts from the 13th byte (the parameter model uses CRC-16-IBM with default parameters).</p>
+
+<p>The filter stores the user's expected CRC result value. The MAC compares the CRC-16 value it calculates with the value in this domain. If they match, the frame is identified as a (remote) wake-up frame. If the wake-up frame interrupt and PMT interrupt are enabled, a PMT interrupt will also be generated.</p>
+
+<p>Additionally, according to the bit definitions of the PMT control and status register, if the GU bit is set, unicast frames that pass frame filtering will also be considered wake-up frames.</p>
+
+<h3 id="29.1.9-ieee1588-ptp">29.1.9 IEEE1588 PTP</h3>
+
+<h4 id="29.1.9.1-ptp-principle-and-implementation">29.1.9.1 PTP Principle and Implementation</h4>
+
+<p>The IEEE 1588 standard defines a precise protocol for obtaining time, with the goal of achieving time synchronization within 10 microseconds of error. Although the NTP protocol could already achieve time synchronization at the 200-microsecond level, this level was insufficient to meet the time synchronization requirements in industrial automation. Therefore, the Network Precision Clock Synchronization Committee drafted the PTP protocol, which was approved by the IEEE Standards Committee at the end of 2002 as the IEEE 1588 standard.</p>
+
+<p>Implementing the PTP protocol requires both the master and slave to accurately record the times at which the MAC receives and transmits Ethernet frames, which requires both the master and slave to have their own high-precision time counters. Then, master and slave devices supporting PTP perform a time synchronization procedure through which the slave can determine and correct its time difference with the master. The figure below shows the master-slave time synchronization procedure.</p>
+
+<figure><img src="figures/fig_29_1.png"><figcaption>Figure 29-1: IEEE1588 PTP protocol synchronization message timing diagram</figcaption></figure>
+
+<p>The master sends a Sync message to the slave; the slave receives this message and records the local time t2 when the Sync message is received.</p>
+<p>The master sends a Follow_up message to the slave, containing the master time t1 when the master sent the Sync message.</p>
+<p>The slave sends a Delay_Req message to the master; the slave records the send time t3.</p>
+<p>The master sends a Delay_Resp message to the slave, containing the receive time t4 of the Delay_Req message.</p>
+
+<p>In actual use, the master sends a Sync message once every two seconds, and each Sync message can be considered the Follow_up message of the previous Sync message, both carrying the send time of the previous Sync message. Through this process, the slave can determine the network delay time Tdelay from the master network to the slave network, and then calculate the time offset between the master time and the slave time.</p>
+
+<p>$$Tdelay = \frac{(t2-t1) + (t4-t3)}{2}$$</p>
+
+<p>Any time sent by the master minus the offset gives the master's time.</p>
+
+<p>The PTP synchronization procedure is generally implemented using the UDP protocol, though users can also implement it with a custom protocol. PTP is highly dependent on the delay stability of the internal network.</p>
+
+<h4 id="29.1.9.2-local-time-update-and-correction">29.1.9.2 Local Time Update and Correction</h4>
+
+<p>To implement PTP on the master, the device needs a local high-precision time counter, at least accurate to the nanosecond level. The PTP module of the microcontroller's Gigabit Ethernet controller has a 32-bit seconds counter and a 31-bit sub-seconds counter. When the sub-seconds counter overflows, the seconds counter increments, so the local time resolution can reach approximately 0.46 nanoseconds.</p>
+
+<p>Local time can be updated in two ways: coarse adjustment and fine adjustment. In coarse adjustment, the update timing is determined externally. When a time update is needed, the time update bit (PTPTSCR:TSSTU) in the timestamp control register is set, and the microcontroller's PTP module will subtract or add the value of the timestamp update register (TSHUR, TSLUR) to/from the seconds counter and sub-seconds counter. Coarse adjustment is a simpler and more convenient time update mechanism, but with poorer precision.</p>
+
+<p>Fine adjustment is the more commonly used time update method. Its update procedure is as follows:</p>
+
+<figure><img src="figures/fig_29_2.png"><figcaption>Figure 29-2: Procedure for updating time using fine adjustment</figcaption></figure>
+
+<p>Using fine adjustment mode requires a clear understanding of the system main frequency and the fine adjustment procedure. Unlike coarse adjustment, the fine adjustment update event timing is triggered by an overflow of the accumulator (32-bit, not listed in the register list; shown as "Accumulator register" in the figure). The accumulator increments by the value of the addend register (PTPTSAR, shown as "Addend register" in the figure) on every system main clock cycle. Once it overflows, a time update event is generated: the value of the sub-second increment register (PTPSSIR, shown as "Constant value" in the figure) is added to the sub-seconds counter (Subsecond register), completing the time update. When the sub-seconds counter overflows, the seconds counter increments. In practice, the time for one sub-seconds counter increment is 1/(2^31) = 0.46566128730... nanoseconds. The user must ensure that the time for the accumulator to overflow equals the value of the sub-second increment register multiplied by the time for one sub-seconds counter increment.</p>
+
+<p>Local time correction is relatively simple: by setting the time correction bit (PTPTSCR:TSSTI) in the timestamp control register, the seconds counter and sub-seconds counter values will be replaced by the values of the timestamp update counter (TSHUR, TSLUR).</p>
+
+<h3 id="29.1.10-dma-operation">29.1.10 DMA Operation</h3>
+
+<h4 id="29.1.10.1-overview">29.1.10.1 Overview</h4>
+
+<p>The advantage of the Ethernet transceiver is its high speed and large throughput. To maintain this advantage, CPU intervention during the Ethernet frame receive/transmit process must be minimized. This is where the Ethernet transceiver dedicated DMA is used.</p>
+
+<p>The DMA used by Ethernet is 32-bit. It is managed by the CPU through two types of data structures: traditional control and status registers, and receive/transmit descriptors. Since the DMA is 32-bit wide, the base address of the receive/transmit descriptor queue in RAM must be 4-byte aligned. The receive/transmit buffers have no alignment requirement.</p>
+
+<h4 id="29.1.10.2-dma-descriptor">29.1.10.2 DMA Descriptor</h4>
+
+<p>Users typically operate traditional peripherals by writing control bits to registers and reading status registers to obtain the peripheral's status and return information. These registers exist independently of the core, SRAM, and non-volatile memory; they are physically present and can be called "hardware registers." Traditional communication peripherals, such as USART or SPI, have a data register to temporarily store transmitted/received data, and a set of DMA to uniformly save all received data to a specific address space.</p>
+
+<p>However, the Ethernet transceiver, with its extremely high data transfer speed, enormous data throughput, and unique data frame organization, operates differently from traditional communication transceivers. The Ethernet transceiver receives large amounts of data as densely as possible. It must store the received data stream into separate memory spaces in units of frames, autonomously completing receive and transmit operations so that the CPU can read and process this data with minimal operations, freeing the corresponding memory space, and ensuring that the DMA controller and CPU do not conflict over memory access rights. The individual size of the buffer opened in memory to temporarily store Ethernet frames is generally set to the maximum packet length of an Ethernet frame, which IEEE 802.3 specifies as 1518 bytes (including the source/destination hardware address, length/type field, and CRC32 checksum field, totaling 18 bytes). The number of Ethernet frame transmit/receive buffers is determined by the user based on the actual interaction frequency and microcontroller memory resources.</p>
+
+<p>Ethernet frame buffers are organized in a queue-like manner. In the receive direction, Ethernet frames are enqueued as the DMA writes them into memory via the MAC, and dequeued as the CPU reads them. In the transmit direction, Ethernet frames are enqueued as the CPU writes them into memory, and dequeued as the DMA reads them and pushes them into the transmit FIFO. The queue depth is the number of buffers. Unlike ordinary communication peripherals, the start address and number of Ethernet frame buffers are not fixed in a specific register, but are managed by a special type of data structure. This data structure is stored in memory; a single such data structure unit manages one buffer, storing the buffer's start address, length, the settings the DMA controller needs when invoking this buffer, the transmit status written back by the DMA upon transmit completion, and the address of the next such data structure. This data structure serves the role of traditional communication peripheral control/status registers, but is physically located in memory, so it can be called a "software register," formally known as a "DMA descriptor."</p>
+
+<p>DMA descriptors are divided into transmit and receive types, each with a fixed format. The storage structure of DMA descriptors comes in two forms: one is the linked-list form, where the fourth word of each descriptor holds the address of the next descriptor, and the DMA controller reads the next descriptor directly from TDes3/RDes3. The other is the ring structure, where all descriptors must be tightly packed, and the DMA controller takes the next descriptor from the position immediately following the current descriptor. When the DMA controller detects the TER/RER bit set in TDes4/RDes4, it takes the next descriptor from the beginning of the descriptor list. The descriptor array address must be 4-byte aligned, and a single descriptor is 16 bytes in size.</p>
+
+<p>Figure 29-3 describes a buffer allocation scheme for the ring structure and the chained structure, respectively, for reference when users allocate space.</p>
+
+<figure><img src="figures/fig_29_3.png"><figcaption>Figure 29-3: Ring structure and chain structure buffer allocation schemes</figcaption></figure>
+
+<h4 id="29.1.10.3-transmit-dma-descriptor">29.1.10.3 Transmit DMA Descriptor</h4>
+
+<p>Table 29-4 shows the structure of the transmit descriptor.</p>
+
+<table class="data-table">
+<caption>Table 29-4: Structure of the transmit descriptor</caption>
+<thead>
+<tr><th></th><th>31</th><th>30:26</th><th>25</th><th>23:20</th><th>19:18</th><th>17</th><th>16:0</th></tr>
+</thead>
+<tbody>
+<tr><td>TDes0</td><td>OWN (31)</td><td>CTRL (30:26)</td><td>TTSE (25)</td><td>Control (23:20)</td><td>Reserved (19:18)</td><td>TTSS (17)</td><td>Status (16:0)</td></tr>
+<tr><td>TDes1</td><td>Reserved (31:29)</td><td colspan="2">Buffer 2 byte count (28:16)</td><td>Reserved (15:13)</td><td colspan="2">Buffer 1 byte count (12:0)</td></tr>
+<tr><td>TDes2</td><td colspan="7">Buffer 1 address / timestamp low</td></tr>
+<tr><td>TDes3</td><td colspan="7">Buffer 2 address / next descriptor address / timestamp high</td></tr>
+</tbody>
+</table>
+
+<p>As can be seen from the table above, the transmit descriptor consists of four 32-bit words: TDes0, TDes1, TDes2, and TDes3. TDes0 is used for control and returning transmit status, TDes1 indicates the transmit length, TDes2 indicates the transmit buffer location or returns the low part of the transmit timestamp, and TDes3 indicates the address of the second transmit buffer (when TCH is not set) or the address of the next descriptor (when TCH is set). When timestamp is enabled, it returns the high part of the IEEE1588 timestamp after transmission. The descriptions of each 32-bit word are as follows.</p>
+
+<table class="reg-bits">
+<caption>Table 29-5: Bit definitions of TDes0</caption>
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23:22</th><th>21</th><th>20</th><th>19:18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td>OWN</td><td>IC</td><td>LS</td><td>FS</td><td>DC</td><td>DP</td><td>TTE</td><td>Res</td><td>CIC</td><td>TER</td><td>TCH</td><td>Res</td><td>TSS</td><td>IHE</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6:3</th><th>2</th><th>1</th><th>0</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td>ES</td><td>JT</td><td>FF</td><td>IPE</td><td>LCA</td><td>NC</td><td>LCO</td><td>EC</td><td>VF</td><td>CC</td><td>ED</td><td>UF</td><td>DB</td><td></td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-5: TDes0 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>31</td><td>OWN</td><td>R/W</td><td>Descriptor ownership bit. This bit indicates who owns this descriptor. 0: this descriptor is owned by the CPU, which can modify the descriptor's value; 1: this descriptor is owned by the DMA, and the CPU has no permission to modify it. When this bit is 0, after the CPU completes operations on the descriptor and buffer, the CPU sets it to 1. When this bit is 1, after the DMA completes operations on the descriptor and buffer, the DMA automatically writes 0. This completes the handover of descriptor and buffer operations between user software and hardware.</td><td>-</td></tr>
+<tr><td>30</td><td>IC</td><td>R/W</td><td>Transmit completion interrupt enable bit. When set, after the current frame is transmitted, the transmit interrupt flag bit (ETH_DMASR:TS) will be set.</td><td>-</td></tr>
+<tr><td>29</td><td>LS</td><td>R/W</td><td>Last segment indicator. When set, this descriptor's buffer contains the end portion of the frame.</td><td>-</td></tr>
+<tr><td>28</td><td>FS</td><td>R/W</td><td>First segment indicator. When set, this descriptor's buffer contains the beginning portion of the frame.</td><td>-</td></tr>
+<tr><td>27</td><td>DC</td><td>R/W</td><td>Disable automatic CRC calculation. When set, the DMA controller will not calculate the CRC32 checksum of the Ethernet frame, and no value will be appended to the end of the frame. This bit is only valid when the FS bit is set. Additionally, the DP bit setting takes priority over this bit.</td><td>-</td></tr>
+<tr><td>26</td><td>DP</td><td>R/W</td><td>Disable automatic padding. When set, the DMA controller will not add automatic padding for Ethernet frames shorter than 64 bytes. When this bit is 0, the DMA will automatically add padding and CRC checksum for Ethernet frames shorter than 64 bytes, regardless of whether DC is set.</td><td>-</td></tr>
+<tr><td>25</td><td>TTE</td><td>R/W</td><td>Timestamp transmit enable. When ETH_PTPTSCR:TSE is set, setting this bit enables the IEEE1588 timestamp function for the Ethernet frame indicated by the current descriptor. This bit is only valid when FS is set.</td><td>-</td></tr>
+<tr><td>24</td><td>Reserved</td><td>-</td><td>Unused.</td><td>-</td></tr>
+<tr><td>[23:22]</td><td>CIC</td><td>R/W</td><td>Checksum insertion control field. 00: disable checksum insertion; 01: enable IP header checksum calculation and insertion only; 10: reserved; 11: enable IP header checksum and payload checksum calculation and insertion, enable pseudo-header checksum calculation.</td><td>-</td></tr>
+<tr><td>21</td><td>TER</td><td>R/W</td><td>Transmit descriptor end flag. When set by the user, it indicates to the DMA controller that the current transmit descriptor is the last one in the transmit descriptor array. The DMA controller will read the first descriptor in the transmit descriptor array next time.</td><td>-</td></tr>
+<tr><td>20</td><td>TCH</td><td>R/W</td><td>Next descriptor address valid indicator. When set, the second address is the address of the next descriptor rather than the address of the next buffer. When set, the TBS2 field value has no effect. This bit is only valid when FS is set. The TER bit takes priority over this bit.</td><td>-</td></tr>
+<tr><td>[19:18]</td><td>Reserved</td><td>-</td><td>Unused.</td><td>-</td></tr>
+<tr><td>17</td><td>TSS</td><td>R</td><td>Transmit timestamp capture status. The DMA controller sets this bit to indicate that the transmit timestamp has been captured and stored in TDes6 and TDes7.</td><td>-</td></tr>
+<tr><td>16</td><td>IHE</td><td>R</td><td>IP header error status. The DMA controller checks the IP header against the received data: for IPv4, the DMA controller checks whether the header length field is correct; for IPv6, the DMA controller checks whether the header is 40 bytes. Additionally, the IP protocol type must be consistent with the type/length field in the Ethernet frame.</td><td>-</td></tr>
+<tr><td>15</td><td>ES</td><td>R</td><td>Error summary. If an error is encountered during frame transmission, the DMA controller sets this bit. The ES bit is set when any of the following bits is set: UF [TDES0:1] data underflow error; IPE [TDES0:12] IP data error; FF [TDES0:13] frame flush; JT [TDES0:14] jabber timeout; IHE [TDES0:16] IP header error.</td><td>-</td></tr>
+<tr><td>14</td><td>JT</td><td>R</td><td>Jabber timeout. When set, it indicates that a jabber timeout error occurred at the MAC transmit side. This bit is only set when the JD bit (ETH_MACCR:22) is not set.</td><td>-</td></tr>
+<tr><td>13</td><td>FF</td><td>R</td><td>Frame flush. When set, it indicates that the DMA controller flushed the frame from the FIFO due to a CPU command.</td><td>-</td></tr>
+<tr><td>12</td><td>IPE</td><td>R</td><td>IP header error indicator. The MAC compares the total packet length in the IPv4 or IPv6 header of received TCP/UDP/ICMP packets with the actual packet length; if they do not match, this bit is set.</td><td>-</td></tr>
+<tr><td>11</td><td>LCA</td><td>R</td><td>Loss of carrier indicator. When set, it indicates that a carrier was lost during frame transmission, i.e., the CSR signal was in an invalid state. This bit only takes effect in half-duplex mode.</td><td>-</td></tr>
+<tr><td>10</td><td>NC</td><td>R</td><td>No carrier indicator. This bit indicates that the physical layer carrier sense signal was invalid during frame transmission. This bit only takes effect in half-duplex mode.</td><td>-</td></tr>
+<tr><td>9</td><td>LCO</td><td>R</td><td>Late collision indicator. This bit indicates that a collision occurred after the preamble was transmitted. This bit only takes effect in half-duplex mode.</td><td>-</td></tr>
+<tr><td>8</td><td>EC</td><td>R</td><td>Excessive collision indicator. This bit indicates that more than 16 collisions occurred during frame transmission. If the RD bit of MACCR is set, this bit indicates only a single collision. This bit only takes effect in half-duplex mode.</td><td>-</td></tr>
+<tr><td>7</td><td>VF</td><td>R</td><td>VLAN bit. This bit is set when transmitting a VLAN frame.</td><td>-</td></tr>
+<tr><td>[6:3]</td><td>CC</td><td>R</td><td>Collision counter field. This field indicates the number of collisions that occurred during frame transmission. Invalid when EC is set. This field only takes effect in half-duplex mode.</td><td>-</td></tr>
+<tr><td>2</td><td>ED</td><td>R</td><td>Excessive deferral indicator. When set, it indicates that when the DC bit of MACCR is set, frame transmission failed due to deferral exceeding 24288 bits. This bit only takes effect in half-duplex mode.</td><td>-</td></tr>
+<tr><td>1</td><td>UF</td><td>R</td><td>Data underflow error. When the DMA controller finds the buffer empty while fetching data from the specified RAM during transmission, transmission enters a suspended state, and this bit and the relevant bits of the DMASR register are set.</td><td>-</td></tr>
+<tr><td>0</td><td>DB</td><td>R</td><td>Deferral indicator. When set, it indicates that the transmission process failed due to carrier occupation. This bit only takes effect in half-duplex mode.</td><td>-</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<caption>Table 29-6: Bit definitions of TDes1</caption>
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="3">Reserved</td><td colspan="13">TBS2</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="3">Reserved</td><td colspan="13">TBS1</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-6: TDes1 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:29]</td><td>Reserved</td><td>-</td><td>Unused.</td><td>-</td></tr>
+<tr><td>[28:16]</td><td>TBS2</td><td>R/W</td><td>Size of transmit buffer 2.</td><td>-</td></tr>
+<tr><td>[15:13]</td><td>Reserved</td><td>-</td><td>Unused.</td><td>-</td></tr>
+<tr><td>[12:0]</td><td>TBS1</td><td>R/W</td><td>Size of transmit buffer 1.</td><td>-</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<caption>Table 29-7: Bit definitions of TDes2</caption>
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">TBAD1/TTSL</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">TBAD1/TTSL</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-7: TDes2 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:0]</td><td>TBAD1/TTSL</td><td>R/W</td><td>The entire 32 bits of TDes2 are used as a single unit to store the address of transmit buffer 1. In IEEE1588 mode enabled, after transmission is completed, TDes2 is also used to store the timestamp returned by the MAC, and the MAC clears the OWN bit (TDes0:31). This field stores the low 32 bits of the timestamp.</td><td>-</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<caption>Table 29-8: Bit definitions of TDes3</caption>
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">TDAD2/TTSH</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">TDAD2/TTSH</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-8: TDes3 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:0]</td><td>TDAD2/TTSH</td><td>R/W</td><td>This field is used to store the address of the next descriptor. When TCH is not set, this field stores the address of transmit buffer 2. In IEEE1588 mode enabled, after transmission is completed, TDes3 is used to store the timestamp returned by the MAC, and the MAC clears the OWN bit (TDes0:31). This field stores the high 32 bits of the timestamp.</td><td>-</td></tr>
+</tbody>
+</table>
+
+<h4 id="29.1.10.4-receive-dma-descriptor">29.1.10.4 Receive DMA Descriptor</h4>
+
+<table class="data-table">
+<caption>Table 29-9: Structure of the receive descriptor</caption>
+<thead>
+<tr><th></th><th>31</th><th>30:0</th></tr>
+</thead>
+<tbody>
+<tr><td>RDes0</td><td>OWN (31)</td><td>Status (30:0)</td></tr>
+<tr><td>RDes1</td><td>Control (31)</td><td>Reserved (30:29)</td><td>Buffer 2 byte count (28:16)</td><td>RER (15:14)</td><td>13</td><td>Reserved (12:0)</td></tr>
+<tr><td>RDes2</td><td colspan="3">Buffer 1 address, timestamp low</td></tr>
+<tr><td>RDes3</td><td colspan="3">Buffer 2 address, next descriptor address, timestamp high</td></tr>
+</tbody>
+</table>
+
+<p>As can be seen from the figure above, the receive descriptor also consists of four 32-bit words. The first 32-bit word mainly returns the receive status, the second 32-bit word contains the received data length, the third 32-bit word defines the receive buffer address or returns the low part of the timestamp, and the fourth 32-bit word holds the second buffer address (when RCH is not set), the next descriptor address (when RCH is set), or returns the high part of the timestamp.</p>
+
+<p>The meaning of each bit in the receive descriptor words is as follows:</p>
+
+<table class="reg-bits">
+<caption>Table 29-10: Bit definitions of RDes0</caption>
+<thead>
+<tr><th>31</th><th>30</th><th colspan="14">29:16</th></tr>
+</thead>
+<tbody>
+<tr><td>OWN</td><td>AFM</td><td colspan="14">FL</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td>ES</td><td>DE</td><td>SAF</td><td>LE</td><td>OE</td><td>VLAN</td><td>FS</td><td>LS</td><td>IPHCE</td><td>LCO</td><td>PT</td><td>RWT</td><td>RE</td><td>DE</td><td>CE</td><td>PCE</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-10: RDes0 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>31</td><td>OWN</td><td>R/W</td><td>Descriptor ownership bit. This bit indicates who owns this descriptor. 0: this descriptor is owned by the CPU, which can modify the descriptor's value; 1: this descriptor is owned by the DMA, and the CPU has no permission to modify it. When this bit is 0, after the CPU completes operations on the descriptor and buffer, the CPU sets it to 1. When this bit is 1, after the DMA completes operations on the descriptor and buffer, the DMA automatically writes 0. This completes the handover of descriptor and buffer operations between user software and hardware.</td><td>-</td></tr>
+<tr><td>30</td><td>AFM</td><td>R</td><td>Destination address filter fail flag. If the received frame did not pass the MAC's destination address filter, this flag is set.</td><td>-</td></tr>
+<tr><td>[29:16]</td><td>FL</td><td>R</td><td>Frame length field. This field is valid when the ES bit [RDes0:15] is 0. When the LS bit [RDes0:8] is 1, this field indicates the length of the frame received by the DMA controller, including CRC. When the LS bit is 0, this field indicates the cumulative length transferred to memory by the DMA controller so far, in bytes.</td><td>-</td></tr>
+<tr><td>15</td><td>ES</td><td>R</td><td>Error summary. When the MAC detects any of the following errors, it sets this bit: CE [RDes0:1] CRC error; RE [RDes0:3] receive error; RWT [RDes0:4] watchdog timeout; IPHCE [RDes0:7] giant frame (note: when IPHCE is reported, it is necessary to distinguish whether it is a giant frame or an IP header error); OE [RDes0:11] overflow error; DE [RDes0:14] descriptor error.</td><td>-</td></tr>
+<tr><td>14</td><td>DE</td><td>R</td><td>Descriptor error bit. When set, it indicates that the frame could not fit in the buffer indicated by the descriptor and was truncated, and the DMA does not own the next descriptor. This bit is only valid when the LS bit [RDes0:8] is set.</td><td>-</td></tr>
+<tr><td>13</td><td>SAF</td><td>R</td><td>Source address filter fail flag. When set, it indicates that the frame did not pass the MAC's source address filter.</td><td>-</td></tr>
+<tr><td>12</td><td>LE</td><td>R</td><td>Length error bit. When set, it indicates that the actual received frame length does not match the length indicated in the Ethernet type/length field. This bit is only valid when the FT bit [RDes0:5] is set.</td><td>-</td></tr>
+<tr><td>11</td><td>OE</td><td>R</td><td>Overflow error bit. When set, it indicates that the received frame was corrupted due to receive FIFO overflow.</td><td>-</td></tr>
+<tr><td>10</td><td>VLAN</td><td>R</td><td>VLAN tag bit. When set, it indicates that the received frame is a VLAN frame.</td><td>-</td></tr>
+<tr><td>9</td><td>FS</td><td>R</td><td>First descriptor indicator. When set, this descriptor contains the beginning of the frame.</td><td>-</td></tr>
+<tr><td>8</td><td>LS</td><td>R</td><td>Last descriptor indicator. When set, this descriptor contains the end of the frame.</td><td>-</td></tr>
+<tr><td>7</td><td>IPHCE</td><td>R</td><td>IP header checksum error flag. When set, it indicates an error in the IPv4 or IPv6 header. Possible causes: 1. The protocol indicated by the Ethernet frame type/length field does not match the actual IP version; 2. The IP header checksum is incorrect; 3. The length indicated in the IP header is incorrect.</td><td>-</td></tr>
+<tr><td>6</td><td>LCO</td><td>R</td><td>Late collision indicator. When set, it indicates that a late collision occurred. This bit only takes effect in half-duplex mode.</td><td>-</td></tr>
+<tr><td>5</td><td>FT</td><td>R</td><td>Frame type indicator. When 1, the received frame is an Ethernet type-encapsulated frame (RFC 894). When 0, the received frame is an IEEE 802.3 type-encapsulated frame (RFC 1042). When the frame length is less than 14 bytes, this bit is invalid. Note: The special meaning of FT is described in Table 29-11.</td><td>-</td></tr>
+<tr><td>4</td><td>RWT</td><td>R</td><td>Receive watchdog timeout flag. When set, it indicates that a watchdog timeout occurred while receiving the current frame, and the current frame was truncated.</td><td>-</td></tr>
+<tr><td>3</td><td>RE</td><td>R</td><td>Receive error flag. When set, it indicates that the RX_ERR signal was active while RX_DV was valid during frame reception.</td><td>-</td></tr>
+<tr><td>2</td><td>DE</td><td>R</td><td>Dribble bit error. When set, it indicates that the frame received by the MAC has a length that is not an integer multiple of 8 bits, possibly due to missed clock cycles.</td><td>-</td></tr>
+<tr><td>1</td><td>CE</td><td>R</td><td>CRC error. When set, it indicates that the received frame has a CRC checksum error. This bit is only valid when the LS bit [RDes0:8] is set.</td><td>-</td></tr>
+<tr><td>0</td><td>PCE</td><td>R</td><td>Payload checksum error. When set, it indicates that the TCP/UDP/ICMP packet received by the MAC does not match the value indicated in its checksum field.</td><td>-</td></tr>
+</tbody>
+</table>
+
+<p>As can be seen, the MAC's receive process includes a checksum verification mechanism. In fact, the Ethernet frame layer (data link layer), network layer (IPv4/IPv6), and transport layer (TCP/UDP/SCTP) all specify their own data lengths and perform some form of verification on data correctness. Bits 0, 5, and 7 of RDes0 all mention data checksum verification, summarized in the table below.</p>
+
+<table class="data-table">
+<caption>Table 29-11: Relationship between RDes0:7/5/0 values and received frame status</caption>
+<thead>
+<tr><th>RDes0:5 (FT)</th><th>RDes0:7 (IPHCE)</th><th>RDes0:0 (PCE)</th><th>Frame status</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>0</td><td>0</td><td>IP type frame, no IP header or payload checksum errors detected</td></tr>
+<tr><td>1</td><td>0</td><td>1</td><td>IP type frame, payload checksum error</td></tr>
+<tr><td>1</td><td>1</td><td>0</td><td>IP type frame, IP header checksum error</td></tr>
+<tr><td>1</td><td>1</td><td>1</td><td>IP type frame, IP header checksum error, payload checksum error</td></tr>
+<tr><td>0</td><td>0</td><td>0</td><td>IEEE 802.3 type-encapsulated frame (RFC 1042)</td></tr>
+<tr><td>0</td><td>0</td><td>1</td><td>IP type frame, no IP header checksum error detected; payload checksum not checked due to unsupported</td></tr>
+<tr><td>0</td><td>1</td><td>1</td><td>Not an IP type frame (e.g., ARP frame)</td></tr>
+<tr><td>0</td><td>1</td><td>0</td><td>Reserved</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<caption>Table 29-12: Bit definitions of RDes1</caption>
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td>DIC</td><td colspan="2">Reserved</td><td colspan="13">RBS2</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td>RER</td><td>RCH</td><td>Res</td><td colspan="13">RBS1</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-12: RDes1 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>31</td><td>DIC</td><td>R/W</td><td>Disable receive completion interrupt setting.</td><td>-</td></tr>
+<tr><td>[30:29]</td><td>Reserved</td><td>-</td><td>Unused.</td><td>-</td></tr>
+<tr><td>[28:16]</td><td>RBS2</td><td>R/W</td><td>Receive buffer 2 size.</td><td>-</td></tr>
+<tr><td>15</td><td>RER</td><td>R/W</td><td>End of receive descriptor list flag. Indicates that the current descriptor is the last descriptor. The DMA controller returns to the descriptor list base address register (ETH_DMARDLAR) to fetch the next descriptor.</td><td>-</td></tr>
+<tr><td>14</td><td>RCH</td><td>R/W</td><td>Next receive descriptor address valid bit. When set, the last 32-bit word contains the address of the next receive descriptor; otherwise it is the address of the second buffer.</td><td>-</td></tr>
+<tr><td>13</td><td>Reserved</td><td>-</td><td>Unused.</td><td>-</td></tr>
+<tr><td>[12:0]</td><td>RBS1</td><td>R/W</td><td>Receive buffer 1 size.</td><td>-</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<caption>Table 29-13: Bit definitions of RDes2</caption>
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">RBAD1/RTSL</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">RBAD1/RTSL</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-13: RDes2 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:0]</td><td>RBAD/RTSL</td><td>R/W</td><td>The entire 32 bits of RDes2 are used as a single unit to store the receive buffer address. In IEEE1588 mode enabled, after reception is completed, RDes2 is also used to store the timestamp returned by the MAC, and the MAC clears the OWN bit [RDes0:31].</td><td>-</td></tr>
+</tbody>
+</table>
+
+<table class="reg-bits">
+<caption>Table 29-14: Bit definitions of RDes3</caption>
+<thead>
+<tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">RDAD2/RTSH</td></tr>
+</tbody>
+<thead>
+<tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr>
+</thead>
+<tbody>
+<tr><td colspan="16">RDAD2/RTSH</td></tr>
+</tbody>
+</table>
+
+<table class="reg-fields">
+<caption>Table 29-14: RDes3 field descriptions</caption>
+<thead>
+<tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr>
+</thead>
+<tbody>
+<tr><td>[31:0]</td><td>RDAD/RTSH</td><td>R/W</td><td>When RCH is set, this field stores the address of the next descriptor; otherwise it stores the address of the second buffer. In IEEE1588 mode enabled, after reception is completed, RDes3 is used to store the timestamp returned by the MAC, and the MAC clears the OWN bit [RDes0:31]. This field stores the high 32 bits of the timestamp.</td><td>-</td></tr>
+</tbody>
+</table>
+
+<h4 id="29.1.10.5-data-cache-alignment">29.1.10.5 Data Cache Alignment</h4>
+
+<p>Since the transmit/receive buffers and transmit/receive descriptors are both invoked by the DMA controller and physically reside in RAM space, and the DMA is 32-bit, the start address of the transmit/receive descriptor queues must be placed at 4-byte aligned positions. However, this alignment requirement is not mandatory for buffers.</p>
+
+<p>For efficiency, it is most appropriate to receive an entire Ethernet frame in one buffer. Setting the buffer to 1518 bytes can accommodate the maximum standard Ethernet frame, including the source/destination address field, length/type field, data padding field, and CRC checksum field. Note that the maximum frame length of a tagged VLAN frame is 4 bytes longer than a standard Ethernet frame, i.e., 1522 bytes. If the user wants to achieve 4-byte alignment, a buffer can be 1524 bytes.</p>
+
+<h4 id="29.1.10.6-dma-transmit-receive-configuration">29.1.10.6 DMA Transmit/Receive Configuration</h4>
+
+<p>The DMA is responsible for automatically transferring and pushing transmit and receive data. However, if a fatal error is encountered, the DMA will stop operating and update the DMA status register. The user needs to re-initialize the DMA and manually start it to resume operation.</p>
+
+<h5>29.1.10.6.1 Transmit DMA Configuration</h5>
+
+<p>The steps for the DMA controller to establish the operation mechanism are as follows:</p>
+<ol>
+<li>Set up the transmit buffer queue, fill the content to be sent into the transmit buffers. Set up the transmit descriptor queue, fill in all fields and bits of the transmit descriptors, set the OWN bit, and hand over management of the transmit descriptors to the DMA controller. Register the descriptor start address in the DMATDLAR register.</li>
+<li>Set the ST bit (DMAOMR:13) to start the DMA.</li>
+<li>In run mode, the DMA automatically reads the transmit descriptor content and pushes data to the transmit FIFO according to the address and length indicated. After completion, the DMA reads the immediately following next transmit descriptor according to the chained structure for the next transmission. When the DMA controller detects that the OWN bit is not set, resulting in no access to the transmit descriptor, or other normal errors, it terminates the transfer and sets the TBUS bit (DMASR:2) or other bits (for errors not caused by OWN being 0) and the NIS bit (DMASR:16).</li>
+<li>A single frame is not allowed to span multiple descriptors; one frame must be clearly associated with one descriptor and one buffer.</li>
+<li>If the MAC has IEEE1588 PTP mode enabled, after the DMA controller pushes data to the FIFO, the MAC writes the transmit timestamp to TDes2 and TDes3 and resets the OWN bit.</li>
+<li>After transmitting a frame, if the transmit descriptor has enabled the transmit completion interrupt (TDes1:31 set), the DMA controller sets the transmit completion interrupt flag bit (DMASR:0) and then proceeds to fetch the next transmit descriptor.</li>
+</ol>
+
+<p>The figure below shows the default transmit flow.</p>
+
+<figure><img src="figures/fig_29_4.png"><figcaption>Figure 29-4: Transmit flow</figcaption></figure>
+
+<h5>29.1.10.6.2 Receive DMA Configuration</h5>
+
+<p>The steps to establish the DMA receive operation mechanism are as follows:</p>
+<ol>
+<li>Set up the receive buffer queue and descriptor queue, configure all fields and bits of the receive descriptors. Register the descriptor start address in the DMARDLAR register. Set the OWN bit to hand over descriptor usage rights to the DMA controller.</li>
+<li>Set the SR bit to start the receive process.</li>
+<li>While the receive operation mechanism is running, the DMA controller fetches the next descriptor, checks the receive descriptor configuration, and when the FIFO receives the next frame, performs multiple checks such as filtering and identification on the frame content, transfers the frame data to the buffer specified by the descriptor, writes the descriptor status field, fetches the next receive descriptor, and reports the receive completion interrupt. If the frame does not pass filtering, it will be marked or discarded. If the frame has a checksum error, CRC error, or is too short, it will be marked. If the frame is too long, it may be truncated or a receive watchdog timeout error may be reported. If the DMA controller encounters a fatal error such as an unavailable receive descriptor, it will stop the receive process; the user should pay special attention to this.</li>
+<li>The user must enable at least one receive completion interrupt. In the Ethernet interrupt handler, restore the used receive descriptors to standby state to ensure that the receive process can run continuously. The user can pass the pending data buffer address out in the interrupt handler, or handle some exceptional events that interrupt the receive process.</li>
+<li>If PTP timestamp is enabled, when the DMA controller transfers data and writes the descriptor status field, it also writes the current timestamp into the last two words of the descriptor. The user should read out the timestamp promptly and restore the buffer address and next descriptor address originally written in the last two words.</li>
+</ol>
+
+<p>The figure below shows the default receive operation mechanism:</p>
+
+<figure><img src="figures/fig_29_5.png"><figcaption>Figure 29-5: Receive flow</figcaption></figure>
+
+<h3 id="29.1.11-interrupts">29.1.11 Interrupts</h3>
+
+<p>The Ethernet transceiver has two interrupt vectors: one for Ethernet wake-up events and the other for normal transmit/receive events. When a wake-up frame or magic frame is detected, the Ethernet wake-up event is triggered. Normal Ethernet transmit/receive interrupt events include DMA interrupts and ETH interrupts.</p><h2 id="29.2-register-description">29.2 Register Description</h2>
+
+<p>MAC control related register address mapping.</p>
+<p>The physical base address of the MAC control related registers is: 0x4002 8000</p>
+
+<table class="reg-list">
+<caption>Table 29-15: Ethernet transceiver related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_ETH_MACCR</td><td>0x40028000</td><td>MAC control register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACFFR</td><td>0x40028004</td><td>MAC frame filter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACHTHR</td><td>0x40028008</td><td>Hash table register high</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACHTLR</td><td>0x4002800C</td><td>Hash table register low</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACMIIAR</td><td>0x40028010</td><td>MII address register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACMIIDR</td><td>0x40028014</td><td>MII data register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACFCR</td><td>0x40028018</td><td>MAC flow control register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACVLAN</td><td>0x4002801C</td><td>VLAN tag register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACRWUFFR</td><td>0x40028028</td><td>Remote wake-up frame filter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACPMTCSR</td><td>0x4002802C</td><td>PMT control and status register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACSR</td><td>0x40028038</td><td>MAC interrupt status register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACIMR</td><td>0x4002803C</td><td>MAC interrupt mask register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MACA0HR</td><td>0x40028040</td><td>MAC address 0 high 32 bits</td><td>0x8000FFFF</td></tr>
+<tr><td>R32_ETH_MACA0LR</td><td>0x40028044</td><td>MAC address 0 low 32 bits</td><td>0xFFFFFFFF</td></tr>
+<tr><td>R32_ETH_MACA1HR</td><td>0x40028048</td><td>MAC address 1 high 32 bits</td><td>0x0000FFFF</td></tr>
+<tr><td>R32_ETH_MACA1LR</td><td>0x4002804C</td><td>MAC address 1 low 32 bits</td><td>0xFFFFFFFF</td></tr>
+<tr><td>R32_ETH_MACA2HR</td><td>0x40028050</td><td>MAC address 2 high 32 bits</td><td>0x0000FFFF</td></tr>
+<tr><td>R32_ETH_MACA2LR</td><td>0x40028054</td><td>MAC address 2 low 32 bits</td><td>0xFFFFFFFF</td></tr>
+<tr><td>R32_ETH_MACA3HR</td><td>0x40028058</td><td>MAC address 3 high 32 bits</td><td>0x0000FFFF</td></tr>
+<tr><td>R32_ETH_MACA3LR</td><td>0x4002805C</td><td>MAC address 3 low 32 bits</td><td>0xFFFFFFFF</td></tr>
+<tr><td>R32_ETH_PHY_CR</td><td>0x40028080</td><td>PHY configuration register</td><td>0x40000001</td></tr>
+</tbody>
+</table>
+
+<p>MMC control related register address mapping. Note: addresses are non-contiguous.</p>
+<p>The physical base address of the MMC control related registers is: 0x4002 8100</p>
+
+<table class="reg-list">
+<caption>Table 29-16: MMC related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_ETH_MMCCR</td><td>0x40028100</td><td>MMC control register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCRIR</td><td>0x40028104</td><td>MMC receive interrupt register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCTIR</td><td>0x40028108</td><td>MMC transmit interrupt register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCRIMR</td><td>0x4002810C</td><td>MMC receive interrupt mask register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCTIMR</td><td>0x40028110</td><td>MMC transmit interrupt mask register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCTGFSCCR</td><td>0x4002814C</td><td>MMC transmit good frames single collision counter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCTGFMSCCR</td><td>0x40028150</td><td>MMC transmit good frames more than single collision counter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCTGFCR</td><td>0x40028168</td><td>MMC transmit good frames counter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCRFCECR</td><td>0x40028194</td><td>MMC receive CRC error frame counter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCRFAECR</td><td>0x40028198</td><td>MMC receive alignment error frame counter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_STATE</td><td>0x400281A0</td><td>Ethernet state machine register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_MMCRGUFCR</td><td>0x400281C4</td><td>MMC receive good unicast frame counter register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<p>IEEE 1588 (PTP) related register address mapping.</p>
+<p>The physical base address of the IEEE 1588 (PTP) related registers is: 0x4002 8700</p>
+
+<table class="reg-list">
+<caption>Table 29-17: IEEE 1588 (PTP) related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_ETH_PTPTSCR</td><td>0x40028700</td><td>PTP timestamp control register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPSSIR</td><td>0x40028704</td><td>PTP sub-second increment register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPTSHR</td><td>0x40028708</td><td>PTP timestamp register high</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPTSLR</td><td>0x4002870C</td><td>PTP timestamp register low</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPTSHUR</td><td>0x40028710</td><td>PTP timestamp update register high</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPTSLUR</td><td>0x40028714</td><td>PTP timestamp update register low</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPTSAR</td><td>0x40028718</td><td>PTP timestamp addend register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPTTHR</td><td>0x4002871C</td><td>PTP target time register high 32 bits</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_PTPTTLR</td><td>0x40028720</td><td>PTP target time register low 32 bits</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<p>DMA related register address mapping. Note: addresses are non-contiguous.</p>
+<p>The physical base address of the DMA related registers is: 0x4002 9000</p>
+
+<table class="reg-list">
+<caption>Table 29-18: DMA related register list</caption>
+<thead><tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R32_ETH_DMABMR</td><td>0x40029000</td><td>DMA bus mode register</td><td>0x00000001</td></tr>
+<tr><td>R32_ETH_DMATPDR</td><td>0x40029004</td><td>DMA transmit poll demand register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMARPDR</td><td>0x40029008</td><td>DMA receive poll demand register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMARDLAR</td><td>0x4002900C</td><td>DMA receive descriptor list address register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMATDLAR</td><td>0x40029010</td><td>DMA transmit descriptor list address register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMASR</td><td>0x40029014</td><td>DMA status register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMAOMR</td><td>0x40029018</td><td>DMA operation mode register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMAIER</td><td>0x4002901C</td><td>DMA interrupt enable register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMAMFBOCR</td><td>0x40029020</td><td>DMA missed frame and buffer overflow counter register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMACHTDR</td><td>0x40029048</td><td>DMA current transmit descriptor register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMACHRDR</td><td>0x4002904C</td><td>DMA current receive descriptor register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMACHTBAR</td><td>0x40029050</td><td>DMA current transmit buffer address register</td><td>0x00000000</td></tr>
+<tr><td>R32_ETH_DMACHRBAR</td><td>0x40029054</td><td>DMA current receive buffer address register</td><td>0x00000000</td></tr>
+</tbody>
+</table>
+
+<p>The offset addresses of the internal PHY registers are used in the SMI interface. All PHY related registers are configured through the R32_ETH_MACMIIAR and R32_ETH_MACMIIDR registers.</p>
+
+<p>Internal 10M/100M physical layer related register addresses.</p>
+
+<table class="reg-list">
+<caption>Table 29-19: Internal 10M/100M physical layer related register list</caption>
+<thead><tr><th>Name</th><th>Offset Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_BMCR</td><td>0x00</td><td>Basic control register</td><td>0x3100</td></tr>
+<tr><td>R16_BMSR</td><td>0x01</td><td>Basic status register</td><td>0x7849</td></tr>
+<tr><td>R16_PHYIDR1</td><td>0x02</td><td>PHY identifier register 1</td><td>0x7371</td></tr>
+<tr><td>R16_PHYIDR2</td><td>0x03</td><td>PHY identifier register 2</td><td>0x9011</td></tr>
+<tr><td>R16_ETH_ANAR</td><td>0x04</td><td>Auto-negotiation advertisement register</td><td>0x01E1</td></tr>
+<tr><td>R16_ETH_ANALPAR</td><td>0x05</td><td>Auto-negotiation link partner ability register</td><td>0x0001</td></tr>
+<tr><td>R16_ANER</td><td>0x06</td><td>Auto-negotiation expansion register</td><td>0x0004</td></tr>
+<tr><td>R16_PAGE_SEL</td><td>0x1F</td><td>Page selection register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<p>PAGE0 related register addresses.</p>
+
+<table class="reg-list">
+<caption>Table 29-20: PAGE0 related register list</caption>
+<thead><tr><th>Name</th><th>Offset Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_PHY_STATUS1</td><td>0x1A</td><td>PHY status register</td><td>0x0020</td></tr>
+<tr><td>R16_INTERRUPT_IND</td><td>0x1E</td><td>Interrupt indication register</td><td>0x0000</td></tr>
+</tbody>
+</table>
+
+<p>PAGE7 related register addresses.</p>
+
+<table class="reg-list">
+<caption>Table 29-21: PAGE7 related register list</caption>
+<thead><tr><th>Name</th><th>Offset Address</th><th>Description</th><th>Reset Value</th></tr></thead>
+<tbody>
+<tr><td>R16_INTERRUPT_MASK</td><td>0x13</td><td>Interrupt/WOL/LED function register</td><td>0x0030</td></tr>
+</tbody>
+</table>
+
+<h3 id="29.2.1-mac-control-related-registers">29.2.1 MAC Control Related Registers</h3>
+
+<h4 id="29.2.1.1-mac-control-register-r32_eth_maccr">29.2.1.1 MAC Control Register (R32_ETH_MACCR)</h4>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>WD</td><td>JD</td><td colspan="3">Reserved</td><td colspan="3">IFG[2:0]</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>FES</td><td colspan="2">Reserved</td><td>LM</td><td>DM</td><td>IPCO</td><td>Reserved</td><td>APCS</td><td colspan="3">Reserved</td><td>TE</td><td>RE</td><td colspan="2">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:24]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>23</td>
+<td>WD</td>
+<td>RW</td>
+<td>Watchdog setting bit:<br>
+1: MAC disables the watchdog, can receive Ethernet frames up to 16384 bytes;<br>
+0: MAC enables the watchdog, can only receive Ethernet frames up to 2048 bytes; the excess is truncated.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>22</td>
+<td>JD</td>
+<td>RW</td>
+<td>Jabber setting bit:<br>
+1: MAC disables the Jabber timer, can transmit up to 16384 bytes of Ethernet frames;<br>
+0: If the user attempts to transmit Ethernet frames exceeding 2048 bytes, the MAC will disable the transmitter.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[21:20]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:17]</td>
+<td>IFG[2:0]</td>
+<td>RW</td>
+<td>Inter-frame gap setting field. This sets the minimum time gap between two transmitted frames.<br>
+000: 96 bit times;<br>
+001: 88 bit times;<br>
+010: 80 bit times;<br>
+011: 72 bit times;<br>
+100: 64 bit times;<br>
+101: 56 bit times;<br>
+110: 48 bit times;<br>
+111: 40 bit times.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[16:15]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>FES</td>
+<td>RO</td>
+<td>Fast Ethernet. This bit indicates the speed of the Fast Ethernet (MII) mode:<br>
+1: 100 Mbit/s;<br>
+0: 10 Mbit/s.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>DM</td>
+<td>RW</td>
+<td>Duplex mode enable bit:<br>
+Setting this bit enables full-duplex mode, allowing simultaneous transmit and receive.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>IPCO</td>
+<td>RW</td>
+<td>IPv4 checksum offload enable bit:<br>
+1: Enables IPv4 checksum checking; the MAC controller performs checksum verification on TCP, UDP, and ICMP headers;<br>
+0: Disables the receive-side IPv4 checksum verification; the corresponding PCE and PHCE flags are always 0. See the receive descriptor bit definitions.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>RD</td>
+<td>RW</td>
+<td>Retry disable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>APCS</td>
+<td>RW</td>
+<td>Automatic padding & CRC stripping enable bit:<br>
+1: MAC removes Pad/FCS fields from the frame only when the length/type field value is less than or equal to 1500 bytes. If the length/type field value is greater than or equal to 1501 bytes, the frame content is not modified;<br>
+0: MAC does not modify the frame content.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>TE</td>
+<td>RW</td>
+<td>Transmit enable bit:<br>
+1: Enables the MAC transmitter;<br>
+0: After transmitting the current frame, the MAC disables the transmitter and does not transmit any more frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>RE</td>
+<td>RW</td>
+<td>Receive enable bit:<br>
+1: Enables the MAC receiver;<br>
+0: After receiving the current frame, the MAC disables the receiver and does not receive any more frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[1:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.2-mac-frame-filter-register-r32_eth_macffr">29.2.1.2 MAC Frame Filter Register (R32_ETH_MACFFR)</h4>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>RA</td><td colspan="15">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>HPF</td><td>SAF</td><td>SAIF</td><td colspan="2">PCF[1:0]</td><td>BFD</td><td>PAM</td><td>DAIF</td><td>HM</td><td>HU</td><td>PM</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>RA</td>
+<td>RW</td>
+<td>Receive all bit:<br>
+1: MAC forwards all received frames to the receive queue, regardless of whether they pass the filter;<br>
+0: MAC only forwards frames that pass the filter to the receive queue.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[30:11]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>HPF</td>
+<td>RW</td>
+<td>Hash or perfect filter selection bit:<br>
+1: When HM or HU is set, frames matching either the HASH filter or the perfect filter pass the address filter;<br>
+0: When HM or HU is set, only frames matching the HASH filter pass the address filter.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>SAF</td>
+<td>RW</td>
+<td>Source address filter selection bit:<br>
+1: MAC directly discards frames that fail the source MAC address filter;<br>
+0: MAC marks frames that fail the source MAC address filter.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>SAIF</td>
+<td>RW</td>
+<td>Source address filter inverse bit:<br>
+1: If the source address of the received frame matches the source address enabled in the MAC address register, it is considered to have failed the source address filter;<br>
+0: If the source address of the received frame does not match the source address enabled in the MAC address register, it is considered to have failed the source address filter.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:6]</td>
+<td>PCF[1:0]</td>
+<td>RW</td>
+<td>Pass control frames control field.<br>
+00/01: MAC does not forward any control frames to the application;<br>
+10: MAC forwards all control frames to the application, including control frames that fail the address filter;<br>
+11: MAC only forwards control frames that pass the address filter.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>BFD</td>
+<td>RW</td>
+<td>Broadcast frame receive control bit:<br>
+1: Discards all broadcast frames;<br>
+0: Receives all broadcast frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>PAM</td>
+<td>RW</td>
+<td>Pass all multicast frames control bit:<br>
+1: All multicast frames pass the address filter;<br>
+0: Whether multicast frames pass the filter depends on the value of HM.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>DAIF</td>
+<td>RW</td>
+<td>Destination MAC address filter inverse control bit:<br>
+1: For multicast and unicast frames, the filter result is inverted before being applied;<br>
+0: The filter result is applied normally.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>HM</td>
+<td>RW</td>
+<td>Multicast frame filter mode selection bit:<br>
+1: Performs HASH address filtering;<br>
+0: Performs perfect address filtering.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>HU</td>
+<td>RW</td>
+<td>Unicast frame filter mode selection bit:<br>
+1: Performs HASH address filtering;<br>
+0: Performs perfect address filtering.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>PM</td>
+<td>RW</td>
+<td>Promiscuous mode enable bit. All frames pass the address filter without marking the filter result.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.3-hash-table-registers-r32_eth_machthr-r32_eth_machtlr">29.2.1.3 Hash Table Registers (R32_ETH_MACHTHR, R32_ETH_MACHTLR)</h4>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">HTH[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">HTH[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>HTH[31:0]</td>
+<td>RW</td>
+<td>Hash table high 32 bits.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">HTL[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">HTL[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>HTL[31:0]</td>
+<td>RW</td>
+<td>Hash table low 32 bits.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.4-mii-address-register-r32_eth_macmiiar">29.2.1.4 MII Address Register (R32_ETH_MACMIIAR)</h4>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">PA[4:0]</td><td colspan="5">MR[4:0]</td><td>Reserved</td><td colspan="3">CR[2:0]</td><td>MW</td><td>MB</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:11]</td>
+<td>PA[4:0]</td>
+<td>RW</td>
+<td>Physical layer address field. The user writes the physical layer address to be accessed into this field.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[10:6]</td>
+<td>MR[4:0]</td>
+<td>RW</td>
+<td>Physical layer register address field. The user writes the register address to be accessed into this field.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:2]</td>
+<td>CR[2:0]</td>
+<td>RW</td>
+<td>Clock range setting field. The CR clock range options determine the HCLK frequency and are used to determine the MDC clock frequency.<br>
+000: HCLK (60–90 MHz), MDC clock (HCLK/42);<br>
+001: HCLK (90–120 MHz), MDC clock (HCLK/62);<br>
+010: HCLK (20–35 MHz), MDC clock (HCLK/16);<br>
+011: HCLK (35–62 MHz), MDC clock (HCLK/26);<br>
+100: HCLK (150–200 MHz), MDC clock (HCLK/102);<br>
+101: HCLK (120–150 MHz), MDC clock (HCLK/74);<br>
+Others: Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>MW</td>
+<td>RW</td>
+<td>Read/write setting bit:<br>
+1: Write operation to the physical layer;<br>
+0: Read operation to the physical layer.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>MB</td>
+<td>W1</td>
+<td>MII busy flag bit:<br>
+This bit is set by the user, indicating the command for hardware to start a read or write operation. During the read/write, the physical address, register address, and data fields should be kept unchanged. After the hardware clears this bit, the operation is complete.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.5-mii-data-register-r32_eth_macmiidr">29.2.1.5 MII Data Register (R32_ETH_MACMIIDR)</h4>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MD[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>MD[15:0]</td>
+<td>RW</td>
+<td>MII operation data field. This field holds the data to be read from or written to the physical layer via the MII interface.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.6-mac-flow-control-register-r32_eth_macfcr">29.2.1.6 MAC Flow Control Register (R32_ETH_MACFCR)</h4>
+
+<p><strong>Offset address:</strong> 0x18</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">PT[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td>UPFD</td><td>RFCE</td><td>TFCE</td><td>FCB</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:16]</td>
+<td>PT[15:0]</td>
+<td>RW</td>
+<td>Pause time field. This field is used as the value for the pause time field, in units of the time to transmit 64 bytes on the current MII interface.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>UPFD</td>
+<td>RW</td>
+<td>Unicast pause frame detect bit:<br>
+1: MAC also detects whether the pause frame matches the unicast address defined in MAC address register 0;<br>
+0: MAC only receives pause frames with the unique address defined by the protocol specification.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>RFCE</td>
+<td>RW</td>
+<td>Receive flow control enable bit:<br>
+1: MAC parses pause frames and disables the transmitter for a period of time;<br>
+0: MAC does not parse pause frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TFCE</td>
+<td>RW</td>
+<td>Transmit flow control enable bit:<br>
+1: MAC enables transmit flow control and can send pause frames;<br>
+0: MAC disables transmit flow control and does not send pause frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>FCB</td>
+<td>W1</td>
+<td>Flow control busy flag bit. Setting this bit sends a pause frame; it is cleared by hardware after the transmission is complete. When operating on the entire MACFCR register, ensure that the FCB bit is 0.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.7-vlan-tag-register-r32_eth_macvlan">29.2.1.7 VLAN Tag Register (R32_ETH_MACVLAN)</h4>
+
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td><td>VLANT</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">VLANTI[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:17]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>VLANT</td>
+<td>RW</td>
+<td>Tag comparison control bit:<br>
+1: Only the [11:0] bits of bytes 15 and 16 of the VLAN frame are compared with the corresponding bits of the VLANTI field;<br>
+0: All 16 bits of bytes 15 and 16 of the VLAN frame are compared with the VLANTI field.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>VLANTI[15:0]</td>
+<td>RW</td>
+<td>Tag comparison sample field. According to IEEE 802.1, bits [15:13] of the VLAN frame are user priority, [12] is the canonical format indicator, and bits [11:0] are the VLAN identifier field.<br>
+If VLANTI is all zeros, the MAC no longer cares about bytes 15 and 16 of the VLAN frame; when bytes 13 and 14 are 0x8100 (note endianness), the frame is identified as a VLAN frame.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.8-remote-wake-up-frame-filter-register-r32_eth_macrwuffr">29.2.1.8 Remote Wake-Up Frame Filter Register (R32_ETH_MACRWUFFR)</h4>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">RWUFFR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RWUFFR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>RWUFFR[31:0]</td>
+<td>RW</td>
+<td>The wake-up frame filter register is actually eight separate registers. Eight consecutive read operations read all registers, and eight consecutive write operations write to all eight registers. The bit descriptions of these eight registers are shown in the table below.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 29-22: Wake-up frame filter register contents</caption>
+<thead><tr><th>Filter register</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td>Filter register 0</td><td>Byte mask of filter 0</td></tr>
+<tr><td>Filter register 1</td><td>Byte mask of filter 1</td></tr>
+<tr><td>Filter register 2</td><td>Byte mask of filter 2</td></tr>
+<tr><td>Filter register 3</td><td>Byte mask of filter 3</td></tr>
+<tr><td>Filter register 4</td><td>Filter 3 command | Filter 2 command | Filter 1 command | Filter 0 command</td></tr>
+<tr><td>Filter register 5</td><td>Filter 3 offset | Filter 2 offset | Filter 1 offset | Filter 0 offset</td></tr>
+<tr><td>Filter register 6</td><td>Filter 1 CRC-16 | Filter 0 CRC-16</td></tr>
+<tr><td>Filter register 7</td><td>Filter 3 CRC-16 | Filter 2 CRC-16</td></tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.9-pmt-control-and-status-register-r32_eth_macpmtcsr">29.2.1.9 PMT Control and Status Register (R32_ETH_MACPMTCSR)</h4>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>WFFRP</td><td colspan="15">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>GU</td><td>Reserved</td><td>PHYR</td><td>WFR</td><td>MPR</td><td>Reserved</td><td>PHYE</td><td>WFE</td><td>MPE</td><td>PD</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>WFFRP</td>
+<td>W</td>
+<td>Wake-up frame filter register pointer reset. Setting this bit clears all MACRWUFFR registers. This bit is automatically cleared after one clock cycle.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[30:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>GU</td>
+<td>RW</td>
+<td>Global unicast bit. Setting this bit causes the MAC to treat all unicast frames that pass the filter as wake-up frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>PHYR</td>
+<td>RZ</td>
+<td>PHY wake-up frame flag bit. When a PHY wake-up frame is received, this bit is set. Read clears automatically.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>WFR</td>
+<td>RZ</td>
+<td>Wake-up frame received flag bit. When a wake-up frame is received, this bit is set. Read clears automatically.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>MPR</td>
+<td>RZ</td>
+<td>Magic packet received flag bit. When a magic packet is received, this bit is set. Read clears automatically.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>PHYE</td>
+<td>WO</td>
+<td>PHY PMEB enable bit. Setting this bit allows the PHY to generate a PMT event when a wake-up frame is received. This bit always reads as 0.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>WFE</td>
+<td>RW</td>
+<td>Wake-up frame enable bit. Setting this bit allows a PMT event to be generated upon receiving a wake-up frame.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>MPE</td>
+<td>RW</td>
+<td>Magic packet enable bit. Setting this bit allows a PMT event to be generated upon receiving a magic packet.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>PD</td>
+<td>W</td>
+<td>Power-down control bit. Setting this bit causes the MAC to enter power-down mode: all other frames are discarded until the PHY receives a wake-up frame or the MAC receives a wake-up frame or magic packet. After wake-up, the MAC automatically clears this bit. Before setting this bit, PHYE or WFE or MPE must be set.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.10-mac-interrupt-status-register-r32_eth_macsr">29.2.1.10 MAC Interrupt Status Register (R32_ETH_MACSR)</h4>
+
+<p><strong>Offset address:</strong> 0x38</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>TSTS</td><td colspan="2">Reserved</td><td>MMCTS</td><td>MMCRS</td><td>MMCS</td><td>PMTS</td><td colspan="3">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>TSTS</td>
+<td>RZ</td>
+<td>Timestamp trigger interrupt flag bit. When the PTP system clock reaches the set time, this flag bit is set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[8:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>MMCTS</td>
+<td>R</td>
+<td>MMC transmit interrupt flag bit. When any interrupt is generated in the MMCTIR register of the MMC register group, this bit is set. When the MMCTIR register in the MMC register group is all cleared, this bit is also cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>MMCRS</td>
+<td>R</td>
+<td>MMC receive interrupt flag bit. When any interrupt is generated in the MMCRIR register of the MMC register group, this bit is set. When the MMCRIR register in the MMC register group is all cleared, this bit is also cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>MMCS</td>
+<td>R</td>
+<td>MMC status flag bit. When MMCTS or MMCRS is set, this bit is set; when MMCTS and MMCRS are both cleared, this bit is cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>PMTS</td>
+<td>R</td>
+<td>PMT status flag bit. In power-down mode, if the MAC receives a magic packet or wake-up frame that wakes up the MAC, this bit is set; this bit is cleared after clearing the WFR and MPR bits.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[2:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.11-mac-interrupt-mask-register-r32_eth_macimr">29.2.1.11 MAC Interrupt Mask Register (R32_ETH_MACIMR)</h4>
+
+<p><strong>Offset address:</strong> 0x3C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="6">Reserved</td><td>TSTIM</td><td colspan="4">Reserved</td><td>PMTIM</td><td colspan="3">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>TSTIM</td>
+<td>RW</td>
+<td>Timestamp interrupt mask bit. Setting this bit disables timestamp interrupts.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[8:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>PMTIM</td>
+<td>RW</td>
+<td>PMT interrupt mask bit. Setting this bit masks PMT interrupts.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[2:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.12-mac-address-0-high-32-bits-r32_eth_maca0hr">29.2.1.12 MAC Address 0 High 32 Bits (R32_ETH_MACA0HR)</h4>
+
+<p><strong>Offset address:</strong> 0x40</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>MO</td><td colspan="15">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA0H[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>MO</td>
+<td>RO</td>
+<td>Always 1.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>[30:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>MACA0H[15:0]</td>
+<td>RW</td>
+<td>High 16 bits of the MAC address, i.e., bits [47:32].</td>
+<td>0xFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.13-mac-address-0-low-32-bits-r32_eth_maca0lr">29.2.1.13 MAC Address 0 Low 32 Bits (R32_ETH_MACA0LR)</h4>
+
+<p><strong>Offset address:</strong> 0x44</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">MACA0L[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA0L[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>MACA0L[31:0]</td>
+<td>RW</td>
+<td>Low 32 bits of the MAC address, i.e., bits [31:0]. Generally, the address in MAC address register 0 is the MAC's own address.</td>
+<td>0xFFFFFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.14-mac-address-1-high-32-bits-r32_eth_maca1hr">29.2.1.14 MAC Address 1 High 32 Bits (R32_ETH_MACA1HR)</h4>
+
+<p><strong>Offset address:</strong> 0x48</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>AE</td><td>SA</td><td colspan="6">MBC[5:0]</td><td colspan="8">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA1H[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>AE</td>
+<td>RW</td>
+<td>Address filter enable bit:<br>
+1: The address filter uses MAC address 1 for perfect filtering;<br>
+0: The address filter ignores MAC address 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>SA</td>
+<td>RW</td>
+<td>Address role selection bit:<br>
+1: MAC address 1 is used to compare with the source address of received frames;<br>
+0: MAC address 1 is used to compare with the destination address of received frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:24]</td>
+<td>MBC[5:0]</td>
+<td>RW</td>
+<td>Mask byte control field. Each bit of MBC corresponds to masking a byte of MAC address 1, used to prevent a byte of MAC address 1 from participating in the comparison with the source or destination address of received frames.<br>
+R32_ETH_MACA1HR[29] set masks MACA1H[15:8];<br>
+R32_ETH_MACA1HR[28] set masks MACA1H[7:0];<br>
+R32_ETH_MACA1HR[27] set masks MACA1L[31:24];<br>
+R32_ETH_MACA1HR[26] set masks MACA1L[23:16];<br>
+R32_ETH_MACA1HR[25] set masks MACA1L[15:8];<br>
+R32_ETH_MACA1HR[24] set masks MACA1L[7:0].</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>MACA1H[15:0]</td>
+<td>RW</td>
+<td>High 16 bits of the MAC address, i.e., bits [47:32].</td>
+<td>0xFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.15-mac-address-1-low-32-bits-r32_eth_maca1lr">29.2.1.15 MAC Address 1 Low 32 Bits (R32_ETH_MACA1LR)</h4>
+
+<p><strong>Offset address:</strong> 0x4C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">MACA1L[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA1L[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>MACA1L[31:0]</td>
+<td>RW</td>
+<td>Low 32 bits of the MAC address, i.e., bits [31:0].</td>
+<td>0xFFFFFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.16-mac-address-2-high-32-bits-r32_eth_maca2hr">29.2.1.16 MAC Address 2 High 32 Bits (R32_ETH_MACA2HR)</h4>
+
+<p><strong>Offset address:</strong> 0x50</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>AE</td><td>SA</td><td colspan="6">MBC[5:0]</td><td colspan="8">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA2H[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>AE</td>
+<td>RW</td>
+<td>Address filter enable bit:<br>
+1: The address filter uses MAC address 2 for perfect filtering;<br>
+0: The address filter ignores MAC address 2.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>SA</td>
+<td>RW</td>
+<td>Address role selection bit:<br>
+1: MAC address 2 is used to compare with the source address of received frames;<br>
+0: MAC address 2 is used to compare with the destination address of received frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:24]</td>
+<td>MBC[5:0]</td>
+<td>RW</td>
+<td>Mask byte control field. Each bit of MBC corresponds to masking a byte of MAC address 2, used to prevent a byte of MAC address 2 from participating in the comparison with the source or destination address of received frames.<br>
+R32_ETH_MACA2HR[29] set masks MACA2H[15:8];<br>
+R32_ETH_MACA2HR[28] set masks MACA2H[7:0];<br>
+R32_ETH_MACA2HR[27] set masks MACA2L[31:24];<br>
+R32_ETH_MACA2HR[26] set masks MACA2L[23:16];<br>
+R32_ETH_MACA2HR[25] set masks MACA2L[15:8];<br>
+R32_ETH_MACA2HR[24] set masks MACA2L[7:0].</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>MACA2H[15:0]</td>
+<td>RW</td>
+<td>High 16 bits of the MAC address, i.e., bits [47:32].</td>
+<td>0xFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.17-mac-address-2-low-32-bits-r32_eth_maca2lr">29.2.1.17 MAC Address 2 Low 32 Bits (R32_ETH_MACA2LR)</h4>
+
+<p><strong>Offset address:</strong> 0x54</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">MACA2L[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA2L[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>MACA2L[31:0]</td>
+<td>RW</td>
+<td>Low 32 bits of the MAC address, i.e., bits [31:0].</td>
+<td>0xFFFFFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.18-mac-address-3-high-32-bits-r32_eth_maca3hr">29.2.1.18 MAC Address 3 High 32 Bits (R32_ETH_MACA3HR)</h4>
+
+<p><strong>Offset address:</strong> 0x58</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>AE</td><td>SA</td><td colspan="6">MBC[5:0]</td><td colspan="8">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA3H[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>AE</td>
+<td>RW</td>
+<td>Address filter enable bit:<br>
+1: The address filter uses MAC address 3 for perfect filtering;<br>
+0: The address filter ignores MAC address 3.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>SA</td>
+<td>RW</td>
+<td>Address role selection bit:<br>
+1: MAC address 3 is used to compare with the source address of received frames;<br>
+0: MAC address 3 is used to compare with the destination address of received frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[29:24]</td>
+<td>MBC[5:0]</td>
+<td>RW</td>
+<td>Mask byte control field. Each bit of MBC corresponds to masking a byte of MAC address 3, used to prevent a byte of MAC address 3 from participating in the comparison with the source or destination address of received frames.<br>
+R32_ETH_MACA3HR[29] set masks MACA3H[15:8];<br>
+R32_ETH_MACA3HR[28] set masks MACA3H[7:0];<br>
+R32_ETH_MACA3HR[27] set masks MACA2L[31:24];<br>
+R32_ETH_MACA3HR[26] set masks MACA2L[23:16];<br>
+R32_ETH_MACA3HR[25] set masks MACA3L[15:8];<br>
+R32_ETH_MACA3HR[24] set masks MACA3L[7:0].</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[23:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>MACA3H[15:0]</td>
+<td>RW</td>
+<td>High 16 bits of the MAC address, i.e., bits [47:32].</td>
+<td>0xFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.19-mac-address-3-low-32-bits-r32_eth_maca3lr">29.2.1.19 MAC Address 3 Low 32 Bits (R32_ETH_MACA3LR)</h4>
+
+<p><strong>Offset address:</strong> 0x5C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">MACA3L[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MACA3L[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>MACA3L[31:0]</td>
+<td>RW</td>
+<td>Low 32 bits of the MAC address, i.e., bits [31:0].</td>
+<td>0xFFFFFFFF</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.1.20-phy-configuration-register-r32_eth_phy_cr">29.2.1.20 PHY Configuration Register (R32_ETH_PHY_CR)</h4>
+
+<p><strong>Offset address:</strong> 0x80</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>PHY_RSTN</td><td>PHY_PD</td><td colspan="14">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>DUPlEX</td><td>SPEED</td><td>Reserved</td><td>PHYADDR_EN</td><td colspan="2">Reserved</td><td colspan="5">REPHYADDR[4:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>PHY_RSTN</td>
+<td>RW</td>
+<td>Ethernet PHY global reset signal:<br>
+1: Normal operation mode;<br>
+0: Reset the Ethernet PHY.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>30</td>
+<td>PHY_PD</td>
+<td>RW</td>
+<td>In power-down mode, the MAC can access PHY registers through the MDIO interface:<br>
+1: Power-down mode;<br>
+0: Normal operation mode.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>[29:11]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>DUPlEX</td>
+<td>RO</td>
+<td>Link mode selection:<br>
+1: Link is full-duplex;<br>
+0: Link is half-duplex.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>SPEED</td>
+<td>RO</td>
+<td>1: Link is 100M;<br>
+0: Link is 10M.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>PHYADDR_EN</td>
+<td>RW</td>
+<td>Reconfigure PHY address:<br>
+1: bits[4:0] are used as the PHY address;<br>
+0: PHY address defaults to 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:5]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>REPHYADDR[4:0]</td>
+<td>RW</td>
+<td>When bit 7 is 1, bits[4:0] are used as the PHY address.</td>
+<td>0x01</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">Note: (1) When using Ethernet, the PHY reset signal and PD signal must be deasserted first.<br>
+(2) The bits of the R32_ETH_PHY_CR register always read as 0.</div>
+
+<h3 id="29.2.2-mmc-related-registers">29.2.2 MMC Related Registers</h3>
+
+<h4 id="29.2.2.1-mmc-control-register-r32_eth_mmccr">29.2.2.1 MMC Control Register (R32_ETH_MMCCR)</h4>
+
+<p><strong>Offset address:</strong> 0x0100</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="12">Reserved</td><td>MCF</td><td>ROR</td><td>CSR</td><td>CR</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:4]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>MCF</td>
+<td>RW</td>
+<td>Counter freeze control bit. Setting this bit freezes all MMC counter values. Clearing it resumes counting. If ROR is set while frozen, reading any counter causes that counter to be cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>ROR</td>
+<td>RW</td>
+<td>Reset on read control bit. Setting this bit causes the counter value to be cleared after reading any counter.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>CSR</td>
+<td>RW</td>
+<td>Counter stop rollover bit. Setting this bit causes the counter to stop at the maximum value without rolling over to zero.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>CR</td>
+<td>W</td>
+<td>Counter reset control bit. Setting this bit resets all counters. This bit is automatically cleared after one system cycle.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.2-mmc-receive-interrupt-register-r32_eth_mmcrir">29.2.2.2 MMC Receive Interrupt Register (R32_ETH_MMCRIR)</h4>
+
+<p><strong>Offset address:</strong> 0x0104</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="14">Reserved</td><td>RGUFS</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="11">Reserved</td><td>RFCES</td><td colspan="5">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:18]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>RGUFS</td>
+<td>RZ</td>
+<td>Set when the number of received good frames reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[16:6]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>RFCES</td>
+<td>RZ</td>
+<td>Set when the number of received frames with CRC errors reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.3-mmc-transmit-interrupt-register-r32_eth_mmctir">29.2.2.3 MMC Transmit Interrupt Register (R32_ETH_MMCTIR)</h4>
+
+<p><strong>Offset address:</strong> 0x0108</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>TGFS</td><td colspan="5">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>TGFMSCS</td><td>TGFSCS</td><td colspan="14">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:22]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>21</td>
+<td>TGFS</td>
+<td>RZ</td>
+<td>Set when the number of transmitted frames reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[20:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>TGFMSCS</td>
+<td>RW</td>
+<td>In half-duplex mode, set when the counter for frames encountering more than one collision reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>TGFSCS</td>
+<td>RW</td>
+<td>In half-duplex mode, set when the counter for frames encountering only one collision reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.4-mmc-receive-interrupt-mask-register-r32_eth_mmcrimr">29.2.2.4 MMC Receive Interrupt Mask Register (R32_ETH_MMCRIMR)</h4>
+
+<p><strong>Offset address:</strong> 0x010C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="14">Reserved</td><td>RGUFM</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="7">Reserved</td><td>RFAEM</td><td>RFCEM</td><td colspan="5">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:18]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>17</td>
+<td>RGUFM</td>
+<td>RW</td>
+<td>Received good frame half interrupt mask bit. Setting this bit masks the interrupt generated when the received good frame counter value reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[16:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>RFAEM</td>
+<td>RW</td>
+<td>Received alignment error frame half interrupt mask bit. Setting this bit masks the interrupt generated when the received misaligned frame counter value reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>RFCEM</td>
+<td>RW</td>
+<td>Received CRC error frame half interrupt mask bit. Setting this bit masks the interrupt generated when the received CRC error frame counter value reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.5-mmc-transmit-interrupt-mask-register-r32_eth_mmctimr">29.2.2.5 MMC Transmit Interrupt Mask Register (R32_ETH_MMCTIMR)</h4>
+
+<p><strong>Offset address:</strong> 0x0110</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>TGFM</td><td colspan="5">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>TGFMSCM</td><td>TGFSCM</td><td colspan="14">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:22]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>21</td>
+<td>TGFM</td>
+<td>RW</td>
+<td>Transmitted good frame half interrupt mask bit. Setting this bit masks the interrupt generated when the transmitted good frame counter value reaches half.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[20:16]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>TGFMSCM</td>
+<td>RW</td>
+<td>Transmitted good frame multiple collision flag bit.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>TGFSCM</td>
+<td>RW</td>
+<td>Transmitted good frame single collision flag bit.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.6-mmc-transmit-good-frames-single-collision-counter-register-r32_eth_mmctgfsccr">29.2.2.6 MMC Transmit Good Frames Single Collision Counter Register (R32_ETH_MMCTGFSCCR)</h4>
+
+<p><strong>Offset address:</strong> 0x014C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TGFSCCR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TGFSCCR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TGFSCCR[31:0]</td>
+<td>RO</td>
+<td>This field counts the number of transmitted frames that encountered only one collision in half-duplex mode.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.7-mmc-transmit-good-frames-more-than-single-collision-counter-register-r32_eth_mmctgfmsccr">29.2.2.7 MMC Transmit Good Frames More Than Single Collision Counter Register (R32_ETH_MMCTGFMSCCR)</h4>
+
+<p><strong>Offset address:</strong> 0x0150</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TGFMSCCR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TGFMSCCR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TGFMSCCR[31:0]</td>
+<td>RO</td>
+<td>This field counts the number of transmitted frames that encountered more than one collision in half-duplex mode.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.8-mmc-transmit-good-frame-counter-register-r32_eth_mmctgfcr">29.2.2.8 MMC Transmit Good Frame Counter Register (R32_ETH_MMCTGFCR)</h4>
+
+<p><strong>Offset address:</strong> 0x0168</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TGFC[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TGFC[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TGFC[31:0]</td>
+<td>RO</td>
+<td>Counter for correct frames transmitted by the MAC.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.9-mmc-receive-crc-error-frame-counter-register-r32_eth_mmcrfcecr">29.2.2.9 MMC Receive CRC Error Frame Counter Register (R32_ETH_MMCRFCECR)</h4>
+
+<p><strong>Offset address:</strong> 0x0194</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">RFCECR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RFCECR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>RFCECR[31:0]</td>
+<td>RO</td>
+<td>Counter for frames received by the MAC that have CRC errors.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.10-mmc-receive-alignment-error-frame-counter-register-r32_eth_mmcrfaecr">29.2.2.10 MMC Receive Alignment Error Frame Counter Register (R32_ETH_MMCRFAECR)</h4>
+
+<p><strong>Offset address:</strong> 0x0198</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">RFAECR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RFAECR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>RFAECR[31:0]</td>
+<td>RO</td>
+<td>Counter for frames received by the MAC that have alignment errors.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.11-ethernet-state-machine-register-r32_eth_state">29.2.2.11 Ethernet State Machine Register (R32_ETH_STATE)</h4>
+
+<p><strong>Offset address:</strong> 0x01A0</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="4">Reserved</td><td colspan="3">ERX_STATE[2:0]</td><td colspan="5">Reserved</td><td colspan="3">ETX_STATE[2:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:11]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[10:8]</td>
+<td>ERX_STATE[2:0]</td>
+<td>RO</td>
+<td>Ethernet receive state machine:<br>
+000: IDLE;<br>
+001: MAC_ADDR;<br>
+010: RCV_LEN_TYPE;<br>
+011: RCV_DATA;<br>
+100: RCV_FCS_PAD;<br>
+101: RCV_ZZZ;<br>
+Others: Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:3]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[2:0]</td>
+<td>ETX_STATE[2:0]</td>
+<td>RO</td>
+<td>Ethernet transmit state machine:<br>
+000: SHED;<br>
+001: IDLE;<br>
+010: PREAM;<br>
+011: SEND_DATA;<br>
+100: SEND_PAD;<br>
+101: SEND_FCS;<br>
+110: SEND_JAM;<br>
+111: SEND_EEE.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.2.12-mmc-receive-good-unicast-frame-counter-register-r32_eth_mmcrgufcr">29.2.2.12 MMC Receive Good Unicast Frame Counter Register (R32_ETH_MMCRGUFCR)</h4>
+
+<p><strong>Offset address:</strong> 0x01C4</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">RGUFCR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RGUFCR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>RGUFCR[31:0]</td>
+<td>RO</td>
+<td>Number of good unicast frames received by the MAC.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="29.2.3-ieee-1588-ptp-related-registers">29.2.3 IEEE 1588 (PTP) Related Registers</h3>
+
+<h4 id="29.2.3.1-ptp-timestamp-control-register-r32_eth_ptptscr">29.2.3.1 PTP Timestamp Control Register (R32_ETH_PTPTSCR)</h4>
+
+<p><strong>Offset address:</strong> 0x0700</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="10">Reserved</td><td>TSARU</td><td>TSITE</td><td>TSSTU</td><td>TSSTI</td><td>TSFCU</td><td>TSE</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:6]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>TSARU</td>
+<td>RW</td>
+<td>Addend register update control bit. When set, the addend register value is added to the accumulator. Used in fine adjustment mode. After the accumulator increment is complete, this bit is automatically cleared. This bit can only be set when it is 0.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>TSITE</td>
+<td>RW</td>
+<td>Timestamp interrupt trigger enable bit. When set, an interrupt is generated when the PTP system time reaches the value set in the target time register.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>TSSTU</td>
+<td>RW</td>
+<td>System time update control bit. When set, the PTP system time is incremented by the value in the update register. After the update is complete, this bit is automatically cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TSSTI</td>
+<td>RW</td>
+<td>Timestamp initialization control bit. When set, the PTP system time is replaced with the value in the update register. After the update is complete, this bit is automatically cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TSFCU</td>
+<td>RW</td>
+<td>Update mode selection control bit:<br>
+1: Fine adjustment mode;<br>
+0: Coarse adjustment mode.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>TSE</td>
+<td>RW</td>
+<td>Timestamp enable bit:<br>
+1: After a transmit or receive is complete, a timestamp is added to the descriptor;<br>
+0: No timestamp is added to the descriptor.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.2-ptp-sub-second-increment-register-r32_eth_ptpssir">29.2.3.2 PTP Sub-Second Increment Register (R32_ETH_PTPSSIR)</h4>
+
+<p><strong>Offset address:</strong> 0x0704</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="8">STSSI[7:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>STSSI[7:0]</td>
+<td>RW</td>
+<td>Sub-second step value. In coarse adjustment mode, the PTP system time increments by this value every master clock cycle; in fine adjustment mode, the PTP system time increments by this value when the accumulator overflows.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.3-ptp-timestamp-register-high-r32_eth_ptptshr">29.2.3.3 PTP Timestamp Register High (R32_ETH_PTPTSHR)</h4>
+
+<p><strong>Offset address:</strong> 0x0708</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">STS[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">STS[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TSHR[31:0]</td>
+<td>RO</td>
+<td>PTP system time value, real-time value, in seconds.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.4-ptp-timestamp-register-low-r32_eth_ptptslr">29.2.3.4 PTP Timestamp Register Low (R32_ETH_PTPTSLR)</h4>
+
+<p><strong>Offset address:</strong> 0x070C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>STPNS</td><td colspan="15">STSS[30:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">STSS[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>STPNS</td>
+<td>RO</td>
+<td>System time positive/negative flag bit:<br>
+1: Current time is negative;<br>
+0: Current time is positive.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[30:0]</td>
+<td>STSS[30:0]</td>
+<td>RO</td>
+<td>PTP system time value, real-time value, in sub-seconds, i.e., approximately 0.46 ns. When STSS overflows, STS increments by 1 second.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.5-ptp-timestamp-update-register-high-r32_eth_ptptshur">29.2.3.5 PTP Timestamp Update Register High (R32_ETH_PTPTSHUR)</h4>
+
+<p><strong>Offset address:</strong> 0x0710</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TSUS[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TSUS[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TSUS[31:0]</td>
+<td>RW</td>
+<td>Timestamp update seconds value, used to replace the PTP system time high bits or to represent the seconds added to or subtracted from the system time.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.6-ptp-timestamp-update-register-low-r32_eth_ptptslur">29.2.3.6 PTP Timestamp Update Register Low (R32_ETH_PTPTSLUR)</h4>
+
+<p><strong>Offset address:</strong> 0x0714</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TSUSS[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TSUSS[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TSUSS[31:0]</td>
+<td>RW</td>
+<td>Timestamp update sub-seconds value, used to replace the PTP system time high bits or to represent the sub-seconds added to or subtracted from the system time.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.7-ptp-timestamp-addend-register-r32_eth_ptptsar">29.2.3.7 PTP Timestamp Addend Register (R32_ETH_PTPTSAR)</h4>
+
+<p><strong>Offset address:</strong> 0x0718</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TSA[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TSA[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TSA[31:0]</td>
+<td>RW</td>
+<td>Timestamp addend value. This register is only used in fine adjustment mode. The TSA value is added to the accumulator every system cycle. If the accumulator overflows, a system time update in fine adjustment mode is triggered.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.8-ptp-target-time-register-high-r32_eth_ptptthr">29.2.3.8 PTP Target Time Register High (R32_ETH_PTPTTHR)</h4>
+
+<p><strong>Offset address:</strong> 0x071C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TTSH[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TTSH[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TTSH[31:0]</td>
+<td>RW</td>
+<td>Target time seconds value. If the PTP system time reaches or exceeds this value and the relevant interrupt is enabled, an interrupt is generated.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.3.9-ptp-target-time-register-low-r32_eth_ptpttlr">29.2.3.9 PTP Target Time Register Low (R32_ETH_PTPTTLR)</h4>
+
+<p><strong>Offset address:</strong> 0x0720</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TTSL[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TTSL[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TTSL[31:0]</td>
+<td>RW</td>
+<td>Target time sub-seconds value. If the PTP system time reaches or exceeds this value and the relevant interrupt is enabled, an interrupt is generated.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="29.2.4-dma-control-related-registers">29.2.4 DMA Control Related Registers</h3>
+
+<h4 id="29.2.4.1-dma-bus-mode-register-r32_eth_dmabmr">29.2.4.1 DMA Bus Mode Register (R32_ETH_DMABMR)</h4>
+
+<p><strong>Offset address:</strong> 0x1000</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="8">Reserved</td><td colspan="5">DSL[4:0]</td><td>Reserved</td><td>SR</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:2]</td>
+<td>DSL[4:0]</td>
+<td>RW</td>
+<td>Descriptor skip length:<br>
+These bits define the skip distance between two descriptors that are not linked in a chain, in units of words (32 bits). The address skip is the address difference from the end of the current descriptor to the beginning of the next descriptor. When the DSL field is 0, in ring structure, the DMA considers the descriptors to be arranged contiguously and adjacent.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>SR</td>
+<td>RW</td>
+<td>Software reset:<br>
+When set to 1, the MAC DMA controller resets all internal registers and logic of the MAC subsystem. After the reset operations of the MAC internal different clock domain modules are complete, this bit is automatically cleared. Before rewriting MAC registers, this bit should be ensured to be 0.</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.2-dma-transmit-poll-demand-register-r32_eth_dmatpdr">29.2.4.2 DMA Transmit Poll Demand Register (R32_ETH_DMATPDR)</h4>
+
+<p><strong>Offset address:</strong> 0x1004</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TPDR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TPDR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TPDR[31:0]</td>
+<td>RW</td>
+<td>Transmit poll demand. The user writes any value to this register to resume the suspended transmit process. After the transmit process is resumed, this register is automatically cleared.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.3-dma-receive-poll-demand-register-r32_eth_dmarpdr">29.2.4.3 DMA Receive Poll Demand Register (R32_ETH_DMARPDR)</h4>
+
+<p><strong>Offset address:</strong> 0x1008</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">RPDR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RPDR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>RPDR[31:0]</td>
+<td>RW</td>
+<td>Receive poll demand. The receive process may be interrupted by various unexpected events; the user writes any value to this register to resume the receive process. After the receive process is resumed, this register is automatically cleared.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.4-dma-receive-descriptor-list-address-register-r32_eth_dmardlar">29.2.4.4 DMA Receive Descriptor List Address Register (R32_ETH_DMARDLAR)</h4>
+
+<p><strong>Offset address:</strong> 0x100C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">RDLAR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">RDLAR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>RDLAR[31:0]</td>
+<td>RW</td>
+<td>This register holds the address of the first receive DMA descriptor. Note that the descriptor must be 4-byte aligned.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.5-dma-transmit-descriptor-list-address-register-r32_eth_dmatdlar">29.2.4.5 DMA Transmit Descriptor List Address Register (R32_ETH_DMATDLAR)</h4>
+
+<p><strong>Offset address:</strong> 0x1010</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">TDLAR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">TDLAR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>TDLAR[31:0]</td>
+<td>RW</td>
+<td>This register holds the address of the first transmit DMA descriptor. Note that the descriptor must be 4-byte aligned.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.6-dma-status-register-r32_eth_dmasr">29.2.4.6 DMA Status Register (R32_ETH_DMASR)</h4>
+
+<p><strong>Offset address:</strong> 0x1014</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td>Reserved</td><td>TSTS</td><td>Reserved</td><td>MMCS</td><td colspan="3">EBS[2:0]</td><td colspan="3">TPS[2:0]</td><td colspan="3">RPS[2:0]</td><td>NIS</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>AIS</td><td>ERS</td><td>Reserved</td><td>PHYLINK_SR</td><td>ETS</td><td>RWTS</td><td>RPSS</td><td>RBUS</td><td>RS</td><td>TUS</td><td>ROS</td><td>TJTS</td><td>TBUS</td><td>TPSS</td><td>TS</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:30]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>29</td>
+<td>TSTS</td>
+<td>RO</td>
+<td>Timestamp trigger status flag bit. When an interrupt event is generated in the PTP section, this bit is set; if the PTP interrupt is enabled, an interrupt is generated. After clearing all PTP section flag bits, this bit is automatically cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>28</td>
+<td>PMTS</td>
+<td>RO</td>
+<td>PMT trigger status flag bit. When an interrupt event is generated in the PMT section, this bit is set; if the PMT interrupt is enabled, an interrupt is generated. After clearing all PMT section flag bits, this bit is automatically cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>27</td>
+<td>MMCS</td>
+<td>RO</td>
+<td>MMC trigger status flag bit. When an interrupt event is generated in the MMC section, this bit is set; if the MMC interrupt is enabled, an interrupt is generated. After clearing all MMC section flag bits, this bit is automatically cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>26</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[25:23]</td>
+<td>EBS[2:0]</td>
+<td>RO</td>
+<td>Error status field. This field indicates the type of bus error. This field is only valid when DMASR[13] bit is set.<br>
+DMASR[23]: 1: Error during receive DMA data transfer; 0: Error during transmit DMA data transfer.<br>
+DMASR[24]: 1: Error during write data transfer; 0: Error during read data transfer.<br>
+DMASR[25]: 1: Error during data buffer access; 0: Error during descriptor access.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[22:20]</td>
+<td>TPS[2:0]</td>
+<td>RO</td>
+<td>Transmit process status field. This field indicates the current transmit DMA state.<br>
+000: Stopped, received reset or stop transmit command;<br>
+001: Running, fetching transmit descriptor;<br>
+010: Running, waiting for status information;<br>
+011: Running, reading data from transmit buffer and pushing into FIFO;<br>
+100, 101: Reserved;<br>
+110: Suspended, transmit descriptor unavailable or transmit buffer data underflow;<br>
+111: Running, closing transmit descriptor.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:17]</td>
+<td>RPS[2:0]</td>
+<td>RO</td>
+<td>Receive process status field. This field indicates the current receive DMA state.<br>
+000: Stopped, received reset or stop transmit command;<br>
+001: Running, fetching receive descriptor;<br>
+010: Reserved;<br>
+011: Running, waiting for receive packet;<br>
+100: Suspended, receive descriptor unavailable;<br>
+101: Running, closing receive descriptor;<br>
+110: Reserved;<br>
+111: Running, pushing received data from FIFO into memory.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>NIS</td>
+<td>RW1</td>
+<td>Normal interrupt summary bit. Under interrupts enabled in the DMAIER register, if any of the following bits is set, the NIS bit is also set.<br>
+- DMASR[0]: Transmit interrupt;<br>
+- DMASR[2]: Transmit buffer unavailable;<br>
+- DMASR[6]: Receive interrupt;<br>
+- DMASR[11]: Ethernet physical layer link status changed;<br>
+- DMASR[14]: Early receive interrupt.<br>
+The NIS bit is a sticky bit. When the corresponding interrupt status bit that caused NIS to be set is cleared, the NIS bit must also be cleared by writing 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>AIS</td>
+<td>RW1</td>
+<td>Abnormal interrupt summary bit. Under interrupts enabled in the DMAIER register, if any of the following bits is set, the AIS bit is also set.<br>
+- DMASR[1]: Transmit process stopped;<br>
+- DMASR[3]: Transmit jabber timeout;<br>
+- DMASR[4]: Receive FIFO overflow;<br>
+- DMASR[5]: Transmit data underflow;<br>
+- DMASR[7]: Receive buffer unavailable;<br>
+- DMASR[8]: Receive process stopped;<br>
+- DMASR[9]: Receive watchdog timeout;<br>
+- DMASR[10]: Early transmit.<br>
+The AIS bit is a sticky bit. When the corresponding interrupt status bit that caused AIS to be set is cleared, the AIS bit must also be cleared by writing 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>ERS</td>
+<td>RW1</td>
+<td>Early receive status bit. When set, indicates that the DMA has filled the first buffer upon receiving a data frame, but the complete frame has not yet been received. After RS is set, the ERS bit is automatically cleared.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>PHYLINK_SR</td>
+<td>RW1Z</td>
+<td>The PHY has generated an interrupt; the PHY's related registers need to be read to determine the interrupt source. This bit is cleared by writing 1.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>ETS</td>
+<td>RW1</td>
+<td>Early transmit status bit. When set, indicates that the transmit frame has been fully pushed into the FIFO.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>RWTS</td>
+<td>RW1</td>
+<td>Receive watchdog timeout flag bit. When set, indicates that the frame length has exceeded 2048 bytes.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>RPSS</td>
+<td>RW1</td>
+<td>Receive process stopped status bit. When set, indicates that the receive process has stopped.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>RBUS</td>
+<td>RW1</td>
+<td>Receive buffer unavailable status bit. When set, indicates that the receive descriptor is owned by the CPU, the DMA cannot acquire it, and the receive process has been suspended. The user needs to release the descriptor and write a value to the RPDR register to resume the receive process. The DMA will retry acquiring the descriptor on the next frame received.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>RS</td>
+<td>RW1</td>
+<td>Receive complete status bit. When set, indicates that a frame has been received, and the frame information has been updated in the descriptor.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>TUS</td>
+<td>RW1</td>
+<td>Transmit data underflow bit. When set, indicates that the transmit buffer underflowed during frame transmission. At this point, the transmit process is suspended and the data underflow error bit is set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>ROS</td>
+<td>RW1</td>
+<td>Receive status overflow bit. When set, indicates that the receive buffer has experienced a data overflow.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>TJTS</td>
+<td>RW1</td>
+<td>Transmit jabber timeout bit. When set, indicates that the transmitter is too busy, transmission has stopped, and the descriptor's jabber timeout bit has been set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TBUS</td>
+<td>RW1</td>
+<td>Transmit buffer unavailable status bit. When set, indicates that the transmit descriptor is occupied by the CPU, the DMA cannot acquire it, and the transmit process has been suspended. Bits [22:20] show the current transmit status. The application needs to release the transmit descriptor.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TPSS</td>
+<td>RW1</td>
+<td>Transmit process stopped status bit. When set, indicates that the transmit process has stopped.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>TS</td>
+<td>RW1</td>
+<td>Transmit complete flag bit. When set, indicates that a frame has been transmitted and the descriptor ownership has been returned to the CPU.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.7-dma-operation-mode-register-r32_eth_dmaomr">29.2.4.7 DMA Operation Mode Register (R32_ETH_DMAOMR)</h4>
+
+<p><strong>Offset address:</strong> 0x1018</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="5">Reserved</td><td>DTCEFD</td><td colspan="4">Reserved</td><td>TSF</td><td>FTF</td><td colspan="5">Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>Reserved</td><td colspan="2">ST</td><td colspan="5">Reserved</td><td>FEF</td><td>FUGF</td><td colspan="3">Reserved</td><td>SR</td><td>Reserved</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:27]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>26</td>
+<td>DTCEFD</td>
+<td>RW</td>
+<td>Do not discard TCP/IP checksum error frames control bit:<br>
+1: When a checksum error is found in protocols such as TCP/IP/ICMP/UDP, the frame is not discarded;<br>
+0: If the FEF bit is 0, the MAC discards all frames with errors.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[25:22]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>21</td>
+<td>TSF</td>
+<td>RW</td>
+<td>Transmit store-and-forward control bit:<br>
+1: The transmit process starts transmitting only after the complete frame is written into the FIFO;<br>
+0: The transmit process starts transmitting after the data written into the FIFO reaches a defined threshold.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>20</td>
+<td>FTF</td>
+<td>RW</td>
+<td>Flush transmit FIFO control bit. Setting this bit resets the transmit FIFO.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[19:14]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>ST</td>
+<td>RW</td>
+<td>Start or stop transmit control bit:<br>
+1: Sets the transmit process to running state;<br>
+0: After transmitting the current frame, the transmit process enters stopped state.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[12:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>FEF</td>
+<td>RW</td>
+<td>Forward error frames control bit:<br>
+1: All frames except overly short frames are forwarded to the DMA;<br>
+0: The receive FIFO discards frames with errors.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>FUGF</td>
+<td>RW</td>
+<td>Forward undersized good frames control bit:<br>
+0: The receive FIFO discards all frames shorter than 64 bytes;<br>
+1: The receive FIFO forwards undersized frames.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[5:2]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>SR</td>
+<td>RW</td>
+<td>Start or stop receive control bit:<br>
+1: Starts the receive process; the DMA fetches the receive descriptor from the current position or from the head of the descriptor list;<br>
+0: After forwarding the currently received frame, the receive DMA enters stopped mode; the next transfer starts from the current receive descriptor position.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.8-dma-interrupt-enable-register-r32_eth_dmaier">29.2.4.8 DMA Interrupt Enable Register (R32_ETH_DMAIER)</h4>
+
+<p><strong>Offset address:</strong> 0x101C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="15">Reserved</td><td>NISE</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td>AISE</td><td>ERS</td><td>Reserved</td><td>PHYLINK_IER</td><td>ETIE</td><td>RWTIE</td><td>RPSIE</td><td>RBUIE</td><td>RIE</td><td colspan="2">Reserved</td><td>TUIE</td><td>ROIE</td><td>TJTIE</td><td>TBUIE</td><td>TPSIE</td><td>TIE</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:17]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>NISE</td>
+<td>RW</td>
+<td>Normal interrupt enable bit. Enabling this bit enables the following interrupts.<br>
+- DMASR[0]: Transmit interrupt;<br>
+- DMASR[2]: Transmit buffer unavailable;<br>
+- DMASR[6]: Receive interrupt;<br>
+- DMASR[14]: Early receive interrupt.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>15</td>
+<td>AISE</td>
+<td>RW</td>
+<td>Abnormal interrupt. Enabling this bit enables the following interrupts.<br>
+- DMASR[1]: Transmit process stopped;<br>
+- DMASR[3]: Transmit jabber timeout;<br>
+- DMASR[4]: Receive FIFO overflow;<br>
+- DMASR[5]: Transmit data underflow;<br>
+- DMASR[7]: Receive buffer unavailable;<br>
+- DMASR[8]: Receive process stopped;<br>
+- DMASR[9]: Receive watchdog timeout;<br>
+- DMASR[10]: Early transmit.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>ERS</td>
+<td>RW</td>
+<td>Early receive interrupt enable bit. Enabling this bit generates an early receive interrupt. NISE must be set. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[13:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>PHYLINK_IER</td>
+<td>RW</td>
+<td>Transceiver link interrupt enable bit. Enabling this bit generates a transceiver link interrupt.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>ETIE</td>
+<td>RW</td>
+<td>Early transmit interrupt enable bit. Enabling this bit generates an early transmit interrupt. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>RWTIE</td>
+<td>RW</td>
+<td>Receive watchdog interrupt enable bit. Enabling this bit generates a receive watchdog timeout interrupt. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>RPSIE</td>
+<td>RW</td>
+<td>Receive process stopped interrupt enable bit. Enabling this bit generates a receive process stopped interrupt.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>RBUIE</td>
+<td>RW</td>
+<td>Receive buffer unavailable interrupt enable bit. Enabling this bit generates a receive buffer unavailable interrupt. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>RIE</td>
+<td>RW</td>
+<td>Receive complete interrupt enable bit. Enabling this bit generates a receive complete interrupt. NISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>TUIE</td>
+<td>RW</td>
+<td>Transmit underflow interrupt enable. Enabling this bit generates a transmit underflow interrupt. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>ROIE</td>
+<td>RW</td>
+<td>Receive overflow interrupt. Enabling this bit generates a receive overflow interrupt. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>TJTIE</td>
+<td>RW</td>
+<td>Transmit jabber timeout interrupt enable. Enabling this bit generates a transmit jabber timeout interrupt. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TBUIE</td>
+<td>RW</td>
+<td>Transmit buffer unavailable interrupt enable. Enabling this bit generates a transmit buffer unavailable interrupt. NISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>TPSIE</td>
+<td>RW</td>
+<td>Transmit process stopped interrupt enable. Enabling this bit generates a transmit process stopped interrupt. AISE must be set.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>TIE</td>
+<td>RW</td>
+<td>Transmit complete interrupt enable. Enabling this bit generates a transmit complete interrupt. NISE must be set.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.9-dma-missed-frame-and-buffer-overflow-counter-register-r32_eth_dmamfbocr">29.2.4.9 DMA Missed Frame and Buffer Overflow Counter Register (R32_ETH_DMAMFBOCR)</h4>
+
+<p><strong>Offset address:</strong> 0x1020</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="3">Reserved</td><td>OFOC</td><td colspan="11">MFA[10:0]</td><td>OMFC</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">MFC[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:29]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>28</td>
+<td>OFOC</td>
+<td>RZ</td>
+<td>FIFO overflow counter overflow bit.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[27:17]</td>
+<td>MFA[10:0]</td>
+<td>RZ</td>
+<td>Frames missed by the application.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>16</td>
+<td>OMFC</td>
+<td>RZ</td>
+<td>Missed frame counter overflow bit.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[15:0]</td>
+<td>MFC[15:0]</td>
+<td>RZ</td>
+<td>Missed frame counter. This field indicates the number of frames lost due to receive buffer being unavailable.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.10-dma-current-transmit-descriptor-register-r32_eth_dmachtdr">29.2.4.10 DMA Current Transmit Descriptor Register (R32_ETH_DMACHTDR)</h4>
+
+<p><strong>Offset address:</strong> 0x1048</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">HTDAR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">HTDAR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>HTDAR[31:0]</td>
+<td>RO</td>
+<td>This register value points to the transmit descriptor currently in use. This register is updated in real-time by the DMA.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.11-dma-current-receive-descriptor-register-r32_eth_dmachrdr">29.2.4.11 DMA Current Receive Descriptor Register (R32_ETH_DMACHRDR)</h4>
+
+<p><strong>Offset address:</strong> 0x104C</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">HRDAR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">HRDAR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>HRDAR[31:0]</td>
+<td>RO</td>
+<td>This register value points to the receive descriptor currently in use. This register is updated in real-time by the DMA.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.12-dma-current-transmit-buffer-address-register-r32_eth_dmachtbar">29.2.4.12 DMA Current Transmit Buffer Address Register (R32_ETH_DMACHTBAR)</h4>
+
+<p><strong>Offset address:</strong> 0x1050</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">HTBAR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">HTBAR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>HTBAR[31:0]</td>
+<td>RO</td>
+<td>This register value points to the transmit buffer currently in use. This register is updated in real-time by the DMA.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.4.13-dma-current-receive-buffer-address-register-r32_eth_dmachrbar">29.2.4.13 DMA Current Receive Buffer Address Register (R32_ETH_DMACHRBAR)</h4>
+
+<p><strong>Offset address:</strong> 0x1054</p>
+
+<table class="reg-bits">
+<thead><tr><th>31</th><th>30</th><th>29</th><th>28</th><th>27</th><th>26</th><th>25</th><th>24</th><th>23</th><th>22</th><th>21</th><th>20</th><th>19</th><th>18</th><th>17</th><th>16</th></tr></thead>
+<tbody><tr><td colspan="16">HRBAR[31:16]</td></tr></tbody>
+</table>
+
+<table class="reg-bits">
+<thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+<tbody><tr><td colspan="16">HRBAR[15:0]</td></tr></tbody>
+</table>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[31:0]</td>
+<td>HRBAR[31:0]</td>
+<td>RO</td>
+<td>This register value points to the receive buffer currently in use. This register is updated in real-time by the DMA.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="29.2.5-internal-10m-100m-physical-layer-related-register-addresses">29.2.5 Internal 10M/100M Physical Layer Related Register Addresses</h3>
+
+<h4 id="29.2.5.1-basic-control-register-r16_bmcr">29.2.5.1 Basic Control Register (R16_BMCR)</h4>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>15</td>
+<td>RST</td>
+<td>RW/SC</td>
+<td>1: PHY reset;<br>
+0: Normal operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Loopback</td>
+<td>RW</td>
+<td>1: Enable loopback;<br>
+0: Normal operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Speed Selection</td>
+<td>RW</td>
+<td>1: 100 Mb/s;<br>
+0: 10 Mb/s.<br>
+After auto-negotiation, indicates the negotiated operating speed status.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Auto-Negotiation</td>
+<td>RW</td>
+<td>1: Enable auto-negotiation;<br>
+0: Disable auto-negotiation.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Power Down</td>
+<td>RW</td>
+<td>1: Power down;<br>
+0: Normal operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Isolate</td>
+<td>RW</td>
+<td>1: MII/RMII interface is isolated from PHY, PHY still responds to MDC/MDIO;<br>
+0: Normal operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Restart Auto-Negotiation</td>
+<td>RW/SC</td>
+<td>1: Restart auto-negotiation;<br>
+0: Normal operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Duplex Mode</td>
+<td>RW</td>
+<td>1: Full-duplex;<br>
+0: Half-duplex.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Collision Test</td>
+<td>RW</td>
+<td>Collision test.<br>
+1: Collision detection enabled;<br>
+0: Normal operation.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[6:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.5.2-basic-status-register-r16_bmsr">29.2.5.2 Basic Status Register (R16_BMSR)</h4>
+
+<p><strong>Offset address:</strong> 0x01</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>15</td>
+<td>100BASE-T4</td>
+<td>RO</td>
+<td>1: 100BASE-T4 capable;<br>
+0: 100BASE-T4 not capable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>100BASE-TX Full Duplex</td>
+<td>RO</td>
+<td>1: 100BASE-TX full-duplex capable;<br>
+0: 100BASE-TX full-duplex not capable.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>13</td>
+<td>100BASE-TX Half Duplex</td>
+<td>RO</td>
+<td>1: 100BASE-TX half-duplex capable;<br>
+0: 100BASE-TX half-duplex not capable.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>12</td>
+<td>10BASE-T Full Duplex</td>
+<td>RO</td>
+<td>1: 10BASE-T full-duplex capable;<br>
+0: 10BASE-T full-duplex not capable.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>11</td>
+<td>10BASE-T Half Duplex</td>
+<td>RO</td>
+<td>1: 10BASE-T half-duplex capable;<br>
+0: 10BASE-T half-duplex not capable.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>[10:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>MF Preamble Suppression</td>
+<td>RO</td>
+<td>Allows management frame suppression of preamble.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Auto-Negotiation Complete</td>
+<td>RO</td>
+<td>1: Auto-negotiation complete;<br>
+0: Auto-negotiation not complete.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Remote Fault</td>
+<td>RO</td>
+<td>1: Remote fault condition detected (read clears);<br>
+0: No remote fault condition detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Auto-Negotiation Ability</td>
+<td>RO</td>
+<td>1: PHY is able to perform auto-negotiation;<br>
+0: PHY is not able to perform auto-negotiation.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Link Status</td>
+<td>RO</td>
+<td>1: Valid link established;<br>
+0: No valid link established.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Jabber Detect</td>
+<td>RO</td>
+<td>1: Jabber condition detected;<br>
+0: No jabber condition detected.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>Extended Capability</td>
+<td>RO</td>
+<td>1: Extended register capabilities;<br>
+0: No extended register capabilities.</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.5.3-auto-negotiation-advertisement-register-r16_eth_anar">29.2.5.3 Auto-Negotiation Advertisement Register (R16_ETH_ANAR)</h4>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>15</td>
+<td>NP</td>
+<td>RW</td>
+<td>Next page bit:<br>
+1: Send protocol rule data page;<br>
+0: Send primary capability data page.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>ACK</td>
+<td>RO</td>
+<td>1: Acknowledge receipt of link partner capability data word;<br>
+0: No acknowledge signal received.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>RF</td>
+<td>RW</td>
+<td>1: Notify remote fault detection capability;<br>
+0: Do not notify remote fault detection capability.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>ASYPAUSE</td>
+<td>RW</td>
+<td>1: Asymmetric flow control supported;<br>
+0: Asymmetric flow control not supported.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>PAUSE</td>
+<td>RW</td>
+<td>1: Flow control supported;<br>
+0: Flow control not supported.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>100Base-T4</td>
+<td>RO</td>
+<td>1: Local node supports 100Base-T4;<br>
+0: Local node does not support 100Base-T4.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>100Base-TX-FD</td>
+<td>RW</td>
+<td>1: Local node supports 100Base-TX full-duplex;<br>
+0: Local node does not support 100Base-TX full-duplex.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>7</td>
+<td>100Base-TX</td>
+<td>RW</td>
+<td>1: Local node supports 100Base-TX;<br>
+0: Local node does not support 100Base-TX.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>6</td>
+<td>10Base-T-FD</td>
+<td>RW</td>
+<td>1: Local node supports 10Base-T full-duplex;<br>
+0: Local node does not support 10Base-T full-duplex.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>5</td>
+<td>10Base-T</td>
+<td>RW</td>
+<td>1: Local node supports 10Base-T half-duplex;<br>
+0: Local node does not support 10Base-T half-duplex.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>SELECT[4:0]</td>
+<td>RO</td>
+<td>This node supports binary encoded selector. Currently only CSMA/CD 00001; no other protocol is supported.</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.5.4-auto-negotiation-link-partner-ability-register-r16_eth_analpar">29.2.5.4 Auto-Negotiation Link Partner Ability Register (R16_ETH_ANALPAR)</h4>
+
+<p><strong>Offset address:</strong> 0x05</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>15</td>
+<td>NP</td>
+<td>RW</td>
+<td>Next page bit.<br>
+1: Send protocol detail data page;<br>
+0: Send basic capability data page.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>14</td>
+<td>ACK</td>
+<td>RO</td>
+<td>1: Acknowledge receipt of peer auto-negotiation capability register;<br>
+0: No acknowledge signal received.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>RF</td>
+<td>RW</td>
+<td>1: Notify remote fault detection capability;<br>
+0: Do not notify remote fault detection capability.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>ASYPAUSE</td>
+<td>RO</td>
+<td>1: Supports asymmetric pause;<br>
+0: Does not support asymmetric pause.<br>
+When auto-negotiation is enabled, this bit reflects the link partner's capability.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>PAUSE</td>
+<td>RO</td>
+<td>1: Supports symmetric pause;<br>
+0: Does not support symmetric pause.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>100Base-T4</td>
+<td>RO</td>
+<td>1: PHY supports 100BASE-T4;<br>
+0: PHY does not support 100BASE-T4.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>100Base-TX-FD</td>
+<td>RO</td>
+<td>1: PHY supports 100BASE-TX full-duplex;<br>
+0: PHY does not support 100BASE-TX full-duplex.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>100Base-TX</td>
+<td>RO</td>
+<td>1: PHY supports 100BASE-TX;<br>
+0: PHY does not support 100BASE-TX.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>10Base-T-FD</td>
+<td>RO</td>
+<td>1: PHY supports 10BASE-T full-duplex;<br>
+0: PHY does not support 10BASE-T full-duplex.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>10Base-T</td>
+<td>RO</td>
+<td>1: PHY supports 10BASE-T;<br>
+0: PHY does not support 10BASE-T.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[4:0]</td>
+<td>SELECT[4:0]</td>
+<td>RO</td>
+<td>PHY supports binary encoded selector. Currently only CSMA/CD 00001; no other protocol is supported.</td>
+<td>0x01</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.5.5-auto-negotiation-expansion-register-r16_aner">29.2.5.5 Auto-Negotiation Expansion Register (R16_ANER)</h4>
+
+<p><strong>Offset address:</strong> 0x06</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>RX_NPLA</td>
+<td>RO</td>
+<td>Whether the next page sent by the peer is stored in the location determined by bit 5.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>RX_NPSL</td>
+<td>RO</td>
+<td>1: Indicates whether the peer's next page is stored in register 8;<br>
+0: Indicates whether the peer's next page is stored in register 5.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Parallel Detection Fault</td>
+<td>RZ</td>
+<td>1: An error was detected during parallel detection;<br>
+0: No error was detected during parallel detection.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Link Partner Next Page Ability</td>
+<td>RO</td>
+<td>1: Link partner has next page capability;<br>
+0: Link partner does not have next page capability.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Local Next Page Ability</td>
+<td>RO</td>
+<td>1: Local device has next page capability;<br>
+0: Local device does not have next page capability.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Page Received</td>
+<td>RZ</td>
+<td>1: A new page was received;<br>
+0: No new page was received.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0</td>
+<td>Link Partner Auto-Negotiation Ability</td>
+<td>RO</td>
+<td>If the local device auto-negotiation is enabled, this bit means:<br>
+1: Link partner has auto-negotiation capability;<br>
+0: Link partner does not have auto-negotiation capability.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="29.2.5.6-page-selection-register-r16_page_sel">29.2.5.6 Page Selection Register (R16_PAGE_SEL)</h4>
+
+<p><strong>Offset address:</strong> 0x1F</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:8]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[7:0]</td>
+<td>SEL_PAGE_ADDR[7:0]</td>
+<td>RW</td>
+<td>Select page address: 00000000–11111111.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="29.2.6-page0-related-registers">29.2.6 PAGE0 Related Registers</h3>
+
+<h4 id="29.2.6.1-phy-status-register-r16_phy_status1">29.2.6.1 PHY Status Register (R16_PHY_STATUS1)</h4>
+
+<p><strong>Offset address:</strong> 0x1A</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>15</td>
+<td>incompatible_link</td>
+<td>RO</td>
+<td>Compatibility status of local device and peer device capability after auto-negotiation priority resolution:<br>
+1: Incompatible;<br>
+0: Compatible.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[14:7]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>signal_status</td>
+<td>RO</td>
+<td>100M signal status:<br>
+1: Good signal status;<br>
+0: No signal.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>mdi_mdix_status</td>
+<td>RO</td>
+<td>MDI/MDIX status:<br>
+1: MDI;<br>
+0: MDIX.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>polarity_status</td>
+<td>RO</td>
+<td>Polarity status:<br>
+1: Polarity reversed;<br>
+0: Polarity normal.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[3:0]</td>
+<td>phy_sepd_dup[3:0]</td>
+<td>RO</td>
+<td>PHY operating speed and full/half-duplex mode.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<table class="data-table">
+<caption>Table 29-23: phy_sepd_dup details</caption>
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>3</td><td>phy_100bt</td><td>RO</td><td>Operating speed 100M.</td></tr>
+<tr><td>2</td><td>phy10_indicate</td><td>RO</td><td>Operating speed 10M.</td></tr>
+<tr><td>1</td><td>full_indicat</td><td>RO</td><td>Full-duplex.</td></tr>
+<tr><td>0</td><td>hfull_indicat</td><td>RO</td><td>Half-duplex.</td></tr>
+</tbody>
+</table>
+
+<h4 id="29.2.6.2-interrupt-indication-register-r16_interrupt_ind">29.2.6.2 Interrupt Indication Register (R16_INTERRUPT_IND)</h4>
+
+<p><strong>Offset address:</strong> 0x1E</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:12]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>linkstatus_chg</td>
+<td>RZ</td>
+<td>Link status change indication.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[10:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="29.2.7-page7-related-registers">29.2.7 PAGE7 Related Registers</h3>
+
+<h4 id="29.2.7.1-interrupt-wol-led-flag-register-r16_interrupt_mask">29.2.7.1 Interrupt/WOL/LED Flag Register (R16_INTERRUPT_MASK)</h4>
+
+<p><strong>PAGE7 offset address:</strong> 0x13</p>
+
+<table class="reg-fields">
+<thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+<tbody>
+<tr>
+<td>[15:14]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>int_linkchg</td>
+<td>RW</td>
+<td>Link change interrupt MASK.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[12:10]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>led_enable</td>
+<td>RW</td>
+<td>LED function enable.</td>
+<td>0</td>
+</tr>
+<tr>
+<td>[8:0]</td>
+<td>Reserved</td>
+<td>RO</td>
+<td>Reserved.</td>
+<td>0x30</td>
+</tr>
+</tbody>
+</table>

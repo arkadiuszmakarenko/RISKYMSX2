@@ -1,0 +1,1378 @@
+<h1 id="chapter-15-general-purpose-timer-gptm">Chapter 15: General Purpose Timer (GPTM)</h1>
+
+<p>The general purpose timer module contains four 16-bit auto-reload timers (TIM2, TIM3, TIM4, TIM5), used to measure pulse widths or generate pulses of specific frequencies, PWM waves, etc. They can be used in automation control, power supply, and other fields.</p>
+
+<h2 id="15.1-main-features">15.1 Main Features</h2>
+
+<p>The main features of the 16-bit general purpose timer include:</p>
+<ul>
+  <li>16-bit auto-reload counter, supporting up-counting mode, down-counting mode, and up-down counting mode</li>
+  <li>16-bit prescaler, with division factor dynamically adjustable from 1 to 65536</li>
+  <li>Supports four independent compare/capture channels</li>
+  <li>Each compare/capture channel supports multiple working modes, such as: input capture, output compare, PWM generation, and single-pulse output</li>
+  <li>Supports external signal control of the timer</li>
+  <li>Supports DMA in multiple modes</li>
+  <li>Supports incremental encoder, cascading and synchronization between timers</li>
+</ul>
+
+<h2 id="15.2-principles-and-structure">15.2 Principles and Structure</h2>
+
+<figure><img src="figures/fig_15_1.png"><figcaption>Figure 15-1: Block diagram of the general purpose timer</figcaption></figure>
+
+<p>As shown in Figure 15-1, the structure of the general purpose timer can be roughly divided into three parts: the input clock section, the core counter section, and the compare/capture channel section.</p>
+
+<p>The clock of the general purpose timer can come from the HB bus clock (CK_INT), from the external clock input pin (TIMx_ETR), from other timers with clock output capability (ITRx), and from the input end of the compare/capture channels (TIMx_CHx). These input clock signals go through various configured filtering and division operations to become the CK_PSC clock, which is output to the core counter section. In addition, these complex clock sources can also be output as TRGO to other timers, ADCs, and other peripherals.</p>
+
+<p>The core of the general purpose timer is a 16-bit counter (CNT). CK_PSC is divided by the prescaler (PSC) to become CK_CNT, which is finally fed to CNT. CNT supports up-counting mode, down-counting mode, and up-down counting mode, and has an auto-reload register (ATRLR) that reloads the initial value to CNT after each counting cycle ends.</p>
+
+<p>The general purpose timer has four sets of compare/capture channels. Each compare/capture channel can input pulses from its dedicated pin or output waveforms to the pin, i.e., the compare/capture channel supports both input and output modes. The input of each compare/capture register channel supports filtering, division, edge detection, and other operations, supports inter-channel mutual triggering, and can also provide the clock for the core counter CNT. Each compare/capture channel has a set of compare/capture registers (CHxCVR), which support comparing with the main counter (CNT) and outputting pulses.</p>
+
+<h3 id="15.2.2-differences-between-general-purpose-timer-and-advanced-timer">15.2.2 Differences Between General Purpose Timer and Advanced Timer</h3>
+
+<p>Compared with the advanced timer, the general purpose timer lacks the following functions:</p>
+<ol>
+  <li>The general purpose timer lacks a repetition counter register that counts the counting period of the core counter.</li>
+  <li>The compare/capture channels of the general purpose timer lack dead-time generation and have no complementary output.</li>
+  <li>The general purpose timer has no break signal mechanism.</li>
+  <li>The default clock CK_INT of the general purpose timer comes from PB1, while the CK_INT of the advanced timer comes from PB2.</li>
+</ol>
+
+<h3 id="15.2.3-clock-input">15.2.3 Clock Input</h3>
+
+<p>This section discusses the source of CK_PSC. Here is an excerpt of the clock source part from the overall block diagram of the general purpose timer.</p>
+
+<figure><img src="figures/fig_15_2.png"><figcaption>Figure 15-2: Block diagram of CK_PSC source for the general purpose timer</figcaption></figure>
+
+<p>The available input clocks can be divided into 4 categories:</p>
+<ol>
+  <li>External clock pin (ETR) input path: ETR→ETRP→ETRF;</li>
+  <li>Internal PB clock input path: CK_INT;</li>
+  <li>Path from the compare/capture channel pins (TIMx_CHx): TIMx_CHx→TIx→TIxFPx, this path is also used in encoder mode;</li>
+  <li>Input from other internal timers: ITRx.</li>
+</ol>
+<p>By determining the input pulse selection of SMS, which determines the source of CK_PSC, the actual operations can be divided into three categories:</p>
+<ol>
+  <li>Select internal clock source (CK_INT);</li>
+  <li>External clock source mode 1;</li>
+  <li>External clock source mode 2;</li>
+  <li>Encoder mode.</li>
+</ol>
+<p>The 4 clock source sources mentioned above can all be selected through these 4 operations.</p>
+
+<h4 id="15.2.3.1-internal-clock-source-ck_int">15.2.3.1 Internal Clock Source (CK_INT)</h4>
+
+<p>If the general purpose timer is started with the SMS field kept at 000b, then the internal clock source (CK_INT) is selected as the clock. In this case, CK_INT is CK_PSC.</p>
+
+<h4 id="15.2.3.2-external-clock-source-mode-1">15.2.3.2 External Clock Source Mode 1</h4>
+
+<p>If the SMS field is set to 111b, external clock source mode 1 is enabled. When external clock source 1 is enabled, TRGI is selected as the source of CK_PSC. It is worth noting that the user also needs to configure the TS field to select the source of TRGI. The TS field can select the following pulses as clock sources:</p>
+<ol>
+  <li>Internal triggers (ITRx, where x is 0, 1, 2, 3);</li>
+  <li>The signal from compare/capture channel 1 after the edge detector (TI1F_ED);</li>
+  <li>Compare/capture channel signals TI1FP1, TI2FP2;</li>
+  <li>The signal ETRF from the external clock pin input.</li>
+</ol>
+
+<h4 id="15.2.3.3-external-clock-source-mode-2">15.2.3.3 External Clock Source Mode 2</h4>
+
+<p>Using external trigger mode 2 allows counting on every rising or falling edge of the external clock pin input. When the ECE bit is set, external clock source mode 2 is used. When using external clock source mode 2, ETRF is selected as CK_PSC. The ETR pin goes through the optional inverter (ETP), divider (ETPS) to become ETRP, and then through the filter (ETF) to become ETRF.</p>
+
+<p>When the ECE bit is set and SMS is set to 111b, it is equivalent to TS selecting ETRF as input.</p>
+
+<h4 id="15.2.3.4-encoder-mode">15.2.3.4 Encoder Mode</h4>
+
+<p>Setting SMS to 001b, 010b, or 011b enables encoder mode. Enabling encoder mode allows selecting a specific level of TI1FP1 or TI2FP2 and using the other transition edge as the signal for output. This mode is used when an external encoder is connected. For specific functions, refer to Section 15.3.7.</p>
+
+<h3 id="15.2.4-counter-and-peripherals">15.2.4 Counter and Peripherals</h3>
+
+<p>CK_PSC is input to the prescaler (PSC) for division. PSC is 16-bit, and the actual division factor equals the value of R16_TIMx_PSC + 1. CK_PSC becomes CK_CNT after passing through PSC. Changing the value of R16_TIM1_PSC does not take effect immediately, but is updated to PSC after an update event. Update events include clearing the UG bit and reset.</p>
+
+<h3 id="15.2.5-compare-capture-channel">15.2.5 Compare/Capture Channel</h3>
+
+<p>The compare/capture channel is the core of the timer's complex functions. Its core is the compare/capture register, supplemented by digital filtering of the peripheral input, division and inter-channel multiplexing, and the comparator and output control of the output section. The block diagram of the compare/capture channel is shown in Figure 15-3.</p>
+
+<figure><img src="figures/fig_15_3.png"><figcaption>Figure 15-3: Block diagram of the compare/capture channel</figcaption></figure>
+
+<p>After the signal enters from channel x pin, it can be selected as TIx (the source of TI1 can be more than just CH1, see the timer block diagram 15-1). Taking TI1 as an example: TI1 passes through the filter (ICF[3:0]) to generate TI1F, then through the edge detector to produce TI1F_Rising and TI1F_Falling. These two signals pass through the selection (CC1P) to generate TI1FP1. TI1FP1 and TI2FP1 from channel 2 are sent together to CC1S for selection to become IC1, which is then divided by ICPS and sent to the compare/capture register.</p>
+
+<p>The compare/capture register consists of a preload register and a shadow register. The read/write process only operates on the preload register. In capture mode, the capture occurs on the shadow register, and then is copied to the preload register; in compare mode, the contents of the preload register are copied to the shadow register, and then the contents of the shadow register are compared with the core counter (CNT).</p>
+
+<h2 id="15.3-functions-and-implementation">15.3 Functions and Implementation</h2>
+
+<p>The complex functions of the general purpose timer are all implemented by operating the timer's compare/capture channels, clock input circuit, counter, and peripheral components. The timer's clock input can come from multiple clock sources, including the input of the compare/capture channel. The operations on the compare/capture channel and clock source selection directly determine its function. The compare/capture channel is bidirectional and can work in both input and output modes.</p>
+
+<h3 id="15.3.1-input-capture-mode">15.3.1 Input Capture Mode</h3>
+
+<p>Input capture mode is one of the basic functions of the timer. The principle of input capture mode is: when a determined edge is detected on the ICxPS signal, a capture event is generated, and the current value of the counter is latched into the compare/capture register (R16_TIMx_CHCTLRx). When a capture event occurs, CCxIF (in R16_TIMx_INTFR) is set. If interrupt or DMA is enabled, the corresponding interrupt or DMA is also generated. If CCxIF is already set when a capture event occurs, the CCxOF bit is set. CCxIF can be cleared by software or by hardware through reading the compare/capture register. CCxOF is cleared by software.</p>
+
+<p>Using channel 1 as an example to illustrate the steps for using input capture mode:</p>
+<ol>
+  <li>Configure the CC1S field to select the source of the IC1 signal. For example, set it to 10b to select TI1FP1 as the source of IC1. The default setting cannot be used; the CC1S field defaults to configuring the compare/capture module as an output channel;</li>
+  <li>Configure the IC1F field. These bits set the sampling frequency and digital filter length of the TI1 input. The digital filter consists of an event counter, which produces an output transition after recording N events;</li>
+  <li>Configure the CC1P bit to set the polarity of TI1FP1. For example, keep the CC1P bit low to select rising edge transition;</li>
+  <li>Configure the IC1PS field to set the division factor between the IC1 signal becoming IC1PS. For example, keep IC1PS at 00b for no division;</li>
+  <li>Configure the CC1E bit to allow capturing the value of the core counter (CNT) into the compare/capture register;</li>
+  <li>Configure the CCxIE and CCxDE bits according to whether interrupts or DMA are needed.</li>
+</ol>
+<p>When TI1 inputs a captured pulse, the value of the core counter (CNT) is recorded into the compare/capture register, CC1IF is set. If CC1IF was already set before, CC1OF is also set. If CC1IE is set, an interrupt is generated; if CC1DE is set, a DMA request is generated. An input capture event can be generated by software through writing the event generation register (R16_TIMx_SWEVGR).</p>
+
+<h3 id="15.3.2-output-compare-mode">15.3.2 Output Compare Mode</h3>
+
+<p>Output compare mode is one of the basic functions of the timer. The principle of output compare mode is that when the value of the core counter (CNT) matches the value of the compare/capture register, a specific change or waveform is output. The OCxM field (in R16_TIMx_CHCTLRx) and the CCxP bit (in R16_TIMx_CCER) determine whether the output is a determined high/low level or a level toggle. When a compare match event occurs, the CCxIF bit is also set. If CCxIE is pre-set, an interrupt is generated; if CCxDE is pre-set, a DMA request is generated.</p>
+
+<p>The steps to configure output compare mode are as follows:</p>
+<ol>
+  <li>Configure the clock source and auto-reload value of the core counter (CNT);</li>
+  <li>Set the desired compare count value into the compare/capture register (R16_TIMx_CHxCVR);</li>
+  <li>If an interrupt is needed, set the CCxIE bit;</li>
+  <li>Keep OCxPE at 0 to disable the preload register of the compare/capture register;</li>
+  <li>Set the output mode by configuring the OCxM field and CCxP bit;</li>
+  <li>Enable the output by setting the CCxE bit;</li>
+  <li>Set the CEN bit to start the timer.</li>
+</ol>
+
+<h3 id="15.3.3-forced-output-mode">15.3.3 Forced Output Mode</h3>
+
+<p>The output mode of the timer's compare/capture channel can be forced by software to output a determined level, without relying on the comparison between the shadow register of the compare/capture register and the core counter.</p>
+
+<p>The specific method is to set OCxM to 100b, which forces OCxREF to low; or set OCxM to 101b, which forces OCxREF to high.</p>
+
+<p>It should be noted that when OCxM is forced to 100b or 101b, the comparison between the internal main counter and the compare/capture register is still ongoing, the corresponding flag bits are still being set, and interrupt and DMA requests are still being generated.</p>
+
+<h3 id="15.3.4-pwm-input-mode">15.3.4 PWM Input Mode</h3>
+
+<p>PWM input mode is used to measure the duty cycle and frequency of a PWM signal, and is a special case of input capture mode. Except for the following differences, the operation is the same as input capture mode: PWM occupies two compare/capture channels, and the input polarities of the two channels are set to opposite. One of the signals is set as the trigger input, and SMS is set to reset mode.</p>
+
+<p>For example, to measure the period and frequency of a PWM wave input from TI1, the following operations are required:</p>
+<ol>
+  <li>Set TI1 (TI1FP1) as the input of the IC1 signal. Set CC1S to 01b;</li>
+  <li>Set TI1FP1 to rising edge active. Keep CC1P at 0;</li>
+  <li>Set TI1 (TI1FP2) as the input of the IC2 signal. Set CC2S to 10b;</li>
+  <li>Set TI1FP2 to falling edge active. Set CC2P to 1;</li>
+  <li>Select the clock source as TI1FP1. Set TS to 101b;</li>
+  <li>Set SMS to reset mode, i.e., 100b;</li>
+  <li>Enable input capture. Set CC1E and CC2E.</li>
+</ol>
+<div class="note">Note: Since only TI1FP1 and TI2FP2 are connected to the slave mode controller, PWM input mode can only use TIMx_CH1/TIMx_CH2.</div>
+
+<h3 id="15.3.5-pwm-output-mode">15.3.5 PWM Output Mode</h3>
+
+<p>PWM output mode is one of the basic functions of the timer. The most common approach in PWM output mode is to use the auto-reload value to determine the PWM frequency and use the capture/compare register to determine the duty cycle. Set OCxM to 110b or 111b to use PWM mode 1 or mode 2, set the OCxPE bit to enable the preload register, and finally set the ARPE bit to enable auto-reload of the preload register. The value of the preload register is transferred to the shadow register only when an update event occurs, so before the core counter starts counting, the UG bit needs to be set to initialize all registers. In PWM mode, the core counter and the compare/capture register are continuously compared. According to the CMS bits, the timer can output edge-aligned or center-aligned PWM signals.</p>
+
+<p><strong>Edge-aligned</strong></p>
+<p>When using edge-aligned mode, the core counter counts up or down. In PWM mode 1, when the value of the core counter is greater than the compare/capture register, OCxREF goes high; when the value of the core counter is less than the compare/capture register (for example, when the core counter grows to the value of R16_TIMx_ATRLR and resets to all zeros), OCxREF goes low.</p>
+
+<p><strong>Center-aligned</strong></p>
+<p>When using center-aligned mode, the core counter operates in a mode of alternating up-counting and down-counting. OCxREF transitions up and down when the value of the core counter matches the compare/capture register. However, the timing of the compare flag being set differs among the three center-aligned modes. When using center-aligned mode, it is best to generate a software update flag (set the UG bit) before starting the core counter.</p>
+
+<h3 id="15.3.6-single-pulse-mode">15.3.6 Single Pulse Mode</h3>
+
+<p>Single pulse mode can respond to a specific event and produce a pulse after a delay, with both the delay and pulse width being programmable. Setting the OPM bit causes the core counter to stop at the next update event (UEV) (counter rolls over to 0).</p>
+
+<figure><img src="figures/fig_15_4.png"><figcaption>Figure 15-4: Event generation and pulse response</figcaption></figure>
+
+<p>As shown in Figure 15-4, to detect a rising edge on the TI2 input pin, and after a delay T<sub>delay</sub>, produce a positive pulse of length T<sub>pulse</sub> on OC1:</p>
+<ol>
+  <li>Set TI2 as the trigger. Set CC2S to 01b to map TI2FP2 to TI2; set CC2P to 0b for TI2FP2 rising edge detection; set TS to 110b for TI2FP2 as the trigger source; set SMS to 110b so that TI2FP2 is used to start the counter;</li>
+  <li>T<sub>delay</sub> is defined by the compare/capture register, and T<sub>pulse</sub> is determined by the value of the auto-reload register and the compare/capture register.</li>
+</ol>
+
+<h3 id="15.3.7-encoder-mode">15.3.7 Encoder Mode</h3>
+
+<p>Encoder mode is a typical application of the timer, which can be used to connect the dual-phase output of an encoder. The counting direction of the core counter is synchronized with the rotation direction of the encoder shaft. Each pulse output by the encoder causes the core counter to increment or decrement by one. The steps to use the encoder are: set the SMS field to 001b (count on TI2 edges only), 010b (count on TI1 edges only), or 011b (count on both TI1 and TI2 edges), connect the encoder to the input of compare/capture channels 1 and 2, and set a reload value for the counter, which can be set to a larger value. In encoder mode, the timer's internal compare/capture registers, prescaler, repetition counter register, etc., all work normally. The following table shows the relationship between the counting direction and the encoder signals.</p>
+
+<table class="data-table">
+  <caption>Table 15-1: Relationship between counting direction and encoder signals in timer encoder mode</caption>
+  <thead>
+    <tr>
+      <th rowspan="2">Active counting edge</th>
+      <th rowspan="2">Relative signal level</th>
+      <th colspan="2">TI1FP1 signal edge</th>
+      <th colspan="2">TI2FP2 signal edge</th>
+    </tr>
+    <tr>
+      <th>Rising</th>
+      <th>Falling</th>
+      <th>Rising</th>
+      <th>Falling</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="2">Count on TI1 edges only</td>
+      <td>High</td>
+      <td>Count down</td>
+      <td>Count up</td>
+      <td colspan="2" rowspan="2">No count</td>
+    </tr>
+    <tr>
+      <td>Low</td>
+      <td>Count up</td>
+      <td>Count down</td>
+    </tr>
+    <tr>
+      <td rowspan="2">Count on TI2 edges only</td>
+      <td>High</td>
+      <td colspan="2" rowspan="2">No count</td>
+      <td>Count up</td>
+      <td>Count down</td>
+    </tr>
+    <tr>
+      <td>Low</td>
+      <td>Count down</td>
+      <td>Count up</td>
+    </tr>
+    <tr>
+      <td rowspan="2">Count on both TI1 and TI2 edges</td>
+      <td>High</td>
+      <td>Count down</td>
+      <td>Count up</td>
+      <td>Count up</td>
+      <td>Count down</td>
+    </tr>
+    <tr>
+      <td>Low</td>
+      <td>Count up</td>
+      <td>Count down</td>
+      <td>Count down</td>
+      <td>Count up</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.3.8-timer-synchronization-mode">15.3.8 Timer Synchronization Mode</h3>
+
+<p>The timer can output clock pulses (TRGO) and can also receive inputs from other timers (ITRx). The sources of ITRx (TRGO of other timers) are different for different timers. The timer internal trigger connections are shown in Table 15-2.</p>
+
+<table class="data-table">
+  <caption>Table 15-2: GPTM internal trigger connections</caption>
+  <thead>
+    <tr>
+      <th>Slave timer</th>
+      <th>ITR0 (TS=000)</th>
+      <th>ITR1 (TS=001)</th>
+      <th>ITR2 (TS=010)</th>
+      <th>ITR3 (TS=011)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>TIM2</td><td>TIM1</td><td>USB</td><td>TIM3</td><td>TIM4</td></tr>
+    <tr><td>TIM3</td><td>TIM1</td><td>TIM2</td><td>-</td><td>TIM4</td></tr>
+    <tr><td>TIM4</td><td>TIM1</td><td>TIM2</td><td>TIM3</td><td>-</td></tr>
+    <tr><td>TIM5</td><td>TIM2</td><td>TIM3</td><td>TIM4</td><td>-</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.3.9-dual-edge-capture-mode">15.3.9 Dual-Edge Capture Mode</h3>
+
+<p>Pulse measurement can be performed through the TIMx_AUX register.</p>
+
+<p>For example: to capture the pulse width through channel 2, in the capture function configuration, select the source of the IC2 signal (CC2S bits of the TIMx_CHCTLR1 register set to 11b), and enable the dual-edge capture function of channel 2 (CAP_ED_CH2 bit of the TIMx_AUX register set to 1). The dual-edge capture configuration is now complete.</p>
+
+<p>The captured dual-edge pulse width value can be read through the CCR2 bits of the TIMx_CH2CVR register.</p>
+
+<h3 id="15.3.10-debug-mode">15.3.10 Debug Mode</h3>
+
+<p>When the system enters debug mode, the timer can be controlled to continue running or stop according to the DBG module settings.</p>
+
+<h2 id="15.4-register-description">15.4 Register Description</h2>
+
+<table class="reg-list">
+  <caption>Table 15-3: TIM2 related register list</caption>
+  <thead>
+    <tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>R16_TIM2_CTLR1</td><td>0x40000000</td><td>TIM2 control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CTLR2</td><td>0x40000004</td><td>TIM2 control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_SMCFGR</td><td>0x40000008</td><td>TIM2 slave mode control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_DMAINTENR</td><td>0x4000000C</td><td>TIM2 DMA/interrupt enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_INTFR</td><td>0x40000010</td><td>TIM2 interrupt status register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_SWEVGR</td><td>0x40000014</td><td>TIM2 event generation register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CHCTLR1</td><td>0x40000018</td><td>TIM2 compare/capture control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CHCTLR2</td><td>0x4000001C</td><td>TIM2 compare/capture control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CCER</td><td>0x40000020</td><td>TIM2 compare/capture enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CNT</td><td>0x40000024</td><td>TIM2 counter</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_PSC</td><td>0x40000028</td><td>TIM2 counter clock prescaler</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_ATRLR</td><td>0x4000002C</td><td>TIM2 auto-reload register</td><td>0xFFFF</td></tr>
+    <tr><td>R16_TIM2_CH1CVR</td><td>0x40000034</td><td>TIM2 compare/capture register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CH2CVR</td><td>0x40000038</td><td>TIM2 compare/capture register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CH3CVR</td><td>0x4000003C</td><td>TIM2 compare/capture register 3</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_CH4CVR</td><td>0x40000040</td><td>TIM2 compare/capture register 4</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_DMACFGR</td><td>0x40000048</td><td>TIM2 DMA control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_DMAADR</td><td>0x4000004C</td><td>TIM2 DMA address register for continuous mode</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM2_AUX</td><td>0x40000050</td><td>TIM2 dual-edge capture register</td><td>0x0000</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-list">
+  <caption>Table 15-4: TIM3 related register list</caption>
+  <thead>
+    <tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>R16_TIM3_CTLR1</td><td>0x40000400</td><td>TIM3 control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CTLR2</td><td>0x40000404</td><td>TIM3 control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_SMCFGR</td><td>0x40000408</td><td>TIM3 slave mode control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_DMAINTENR</td><td>0x4000040C</td><td>TIM3 DMA/interrupt enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_INTFR</td><td>0x40000410</td><td>TIM3 interrupt status register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_SWEVGR</td><td>0x40000414</td><td>TIM3 event generation register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CHCTLR1</td><td>0x40000418</td><td>TIM3 compare/capture control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CHCTLR2</td><td>0x4000041C</td><td>TIM3 compare/capture control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CCER</td><td>0x40000420</td><td>TIM3 compare/capture enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CNT</td><td>0x40000424</td><td>TIM3 counter</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_PSC</td><td>0x40000428</td><td>TIM3 counter clock prescaler</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_ATRLR</td><td>0x4000042C</td><td>TIM3 auto-reload register</td><td>0xFFFF</td></tr>
+    <tr><td>R16_TIM3_CH1CVR</td><td>0x40000434</td><td>TIM3 compare/capture register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CH2CVR</td><td>0x40000438</td><td>TIM3 compare/capture register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CH3CVR</td><td>0x4000043C</td><td>TIM3 compare/capture register 3</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_CH4CVR</td><td>0x40000440</td><td>TIM3 compare/capture register 4</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_DMACFGR</td><td>0x40000448</td><td>TIM3 DMA control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_DMAADR</td><td>0x4000044C</td><td>TIM3 DMA address register for continuous mode</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM3_AUX</td><td>0x40000450</td><td>TIM3 dual-edge capture register</td><td>0x0000</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-list">
+  <caption>Table 15-5: TIM4 related register list</caption>
+  <thead>
+    <tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>R16_TIM4_CTLR1</td><td>0x40000800</td><td>TIM4 control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CTLR2</td><td>0x40000804</td><td>TIM4 control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_SMCFGR</td><td>0x40000808</td><td>TIM4 slave mode control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_DMAINTENR</td><td>0x4000080C</td><td>TIM4 DMA/interrupt enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_INTFR</td><td>0x40000810</td><td>TIM4 interrupt status register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_SWEVGR</td><td>0x40000814</td><td>TIM4 event generation register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CHCTLR1</td><td>0x40000818</td><td>TIM4 compare/capture control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CHCTLR2</td><td>0x4000081C</td><td>TIM4 compare/capture control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CCER</td><td>0x40000820</td><td>TIM4 compare/capture enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CNT</td><td>0x40000824</td><td>TIM4 counter</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_PSC</td><td>0x40000828</td><td>TIM4 counter clock prescaler</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_ATRLR</td><td>0x4000082C</td><td>TIM4 auto-reload register</td><td>0xFFFF</td></tr>
+    <tr><td>R16_TIM4_CH1CVR</td><td>0x40000834</td><td>TIM4 compare/capture register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CH2CVR</td><td>0x40000838</td><td>TIM4 compare/capture register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CH3CVR</td><td>0x4000083C</td><td>TIM4 compare/capture register 3</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_CH4CVR</td><td>0x40000840</td><td>TIM4 compare/capture register 4</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_DMACFGR</td><td>0x40000848</td><td>TIM4 DMA control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_DMAADR</td><td>0x4000084C</td><td>TIM4 DMA address register for continuous mode</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM4_AUX</td><td>0x40000850</td><td>TIM4 dual-edge capture register</td><td>0x0000</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-list">
+  <caption>Table 15-6: TIM5 related register list</caption>
+  <thead>
+    <tr><th>Name</th><th>Address</th><th>Description</th><th>Reset Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>R16_TIM5_CTLR1</td><td>0x40000C00</td><td>TIM5 control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CTLR2</td><td>0x40000C04</td><td>TIM5 control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_SMCFGR</td><td>0x40000C08</td><td>TIM5 slave mode control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_DMAINTENR</td><td>0x40000C0C</td><td>TIM5 DMA/interrupt enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_INTFR</td><td>0x40000C10</td><td>TIM5 interrupt status register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_SWEVGR</td><td>0x40000C14</td><td>TIM5 event generation register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CHCTLR1</td><td>0x40000C18</td><td>TIM5 compare/capture control register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CHCTLR2</td><td>0x40000C1C</td><td>TIM5 compare/capture control register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CCER</td><td>0x40000C20</td><td>TIM5 compare/capture enable register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CNT</td><td>0x40000C24</td><td>TIM5 counter</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_PSC</td><td>0x40000C28</td><td>TIM5 counter clock prescaler</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_ATRLR</td><td>0x40000C2C</td><td>TIM5 auto-reload register</td><td>0xFFFF</td></tr>
+    <tr><td>R16_TIM5_CH1CVR</td><td>0x40000C34</td><td>TIM5 compare/capture register 1</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CH2CVR</td><td>0x40000C38</td><td>TIM5 compare/capture register 2</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CH3CVR</td><td>0x40000C3C</td><td>TIM5 compare/capture register 3</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_CH4CVR</td><td>0x40000C40</td><td>TIM5 compare/capture register 4</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_DMACFGR</td><td>0x40000C48</td><td>TIM5 DMA control register</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_DMAADR</td><td>0x40000C4C</td><td>TIM5 DMA address register for continuous mode</td><td>0x0000</td></tr>
+    <tr><td>R16_TIM5_AUX</td><td>0x40000C50</td><td>TIM5 dual-edge capture register</td><td>0x0000</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.1-control-register-1-timx_ctlr1-x-2-3-4-5">15.4.1 Control Register 1 (TIMx_CTLR1) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x00</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="6">Reserved</td><td colspan="2">CKD[1:0]</td><td>ARPE</td><td colspan="2">CMS[1:0]</td><td>DIR</td><td>OPM</td><td>URS</td><td>UDIS</td><td>CEN</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>[9:8]</td>
+      <td>CKD[1:0]</td>
+      <td>RW</td>
+      <td>These 2 bits define the division ratio between the timer clock (CK_INT) frequency and the sampling clock used by the digital filter:<br>
+        00: T<sub>dts</sub> = T<sub>ck_int</sub>;<br>
+        01: T<sub>dts</sub> = 2×T<sub>ck_int</sub>;<br>
+        10: T<sub>dts</sub> = 4×T<sub>ck_int</sub>;<br>
+        11: Reserved.</td>
+      <td>00b</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>ARPE</td>
+      <td>RW</td>
+      <td>Auto-reload preload enable:<br>
+        1: Auto-reload register (ATRLR) is enabled;<br>
+        0: Auto-reload register (ATRLR) is disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>[6:5]</td>
+      <td>CMS[1:0]</td>
+      <td>RW</td>
+      <td>Center-aligned mode selection:<br>
+        00: Edge-aligned mode. The counter counts up or down depending on the direction bit (DIR).<br>
+        01: Center-aligned mode 1. The counter counts alternately up and down. The output compare interrupt flag of channels configured as output (CCxS=00 in CHCTLRx register) is set only when the counter is counting down.<br>
+        10: Center-aligned mode 2. The counter counts alternately up and down. The output compare interrupt flag of channels configured as output (CCxS=00 in CHCTLRx register) is set only when the counter is counting up.<br>
+        11: Center-aligned mode 3. The counter counts alternately up and down. The output compare interrupt flag of channels configured as output (CCxS=00 in CHCTLRx register) is set both when the counter is counting up and down.<br>
+        Note: It is not allowed to switch from edge-aligned mode to center-aligned mode while the counter is enabled (CEN=1).</td>
+      <td>00b</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>DIR</td>
+      <td>RW</td>
+      <td>Counter direction:<br>
+        1: The counter counts down;<br>
+        0: The counter counts up.<br>
+        Note: This bit is invalid when the counter is configured in center-aligned mode or encoder mode.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>OPM</td>
+      <td>RW</td>
+      <td>Single pulse mode.<br>
+        1: The counter stops at the next update event (CEN bit is cleared);<br>
+        0: The counter does not stop at the next update event.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>URS</td>
+      <td>RW</td>
+      <td>Update request source. Software uses this bit to select the source of UEV events.<br>
+        1: If update interrupt or DMA request is enabled, only counter overflow/underflow generates update interrupt or DMA request;<br>
+        0: If update interrupt or DMA request is enabled, any of the following events generates update interrupt or DMA request:<br>
+        - Counter overflow/underflow;<br>
+        - Setting the UG bit;<br>
+        - Update generated by the slave mode controller.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>UDIS</td>
+      <td>RW</td>
+      <td>Update disable. Software uses this bit to enable/disable the generation of UEV events.<br>
+        1: UEV disabled. No update events are generated, and the registers (ATRLR, PSC, CHCTLRx) keep their values. If the UG bit is set or a hardware reset is issued from the slave mode controller, the counter and prescaler are reinitialized.<br>
+        0: UEV enabled. Update (UEV) events are generated by any of the following events:<br>
+        - Counter overflow/underflow;<br>
+        - Setting the UG bit;<br>
+        - Update generated by the slave mode controller. The buffered registers are loaded with their preload values.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>0</td>
+      <td>CEN</td>
+      <td>RW</td>
+      <td>Counter enable.<br>
+        1: Counter enabled;<br>
+        0: Counter disabled.<br>
+        Note: External clock, gated mode, and encoder mode only work after the CEN bit is set by software. Trigger mode can automatically set the CEN bit through hardware.</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.2-control-register-2-timx_ctlr2-x-2-3-4-5">15.4.2 Control Register 2 (TIMx_CTLR2) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x04</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="8">Reserved</td><td>TI1S</td><td colspan="3">MMS[2:0]</td><td>CCDS</td><td>CCUS</td><td>Reserved</td><td>CCPC</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:8]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>7</td>
+      <td>TI1S</td>
+      <td>RW</td>
+      <td>TI1 selection:<br>
+        1: TIMx_CH1, TIMx_CH2, and TIMx_CH3 pins are XORed and connected to the TI1 input;<br>
+        0: TIMx_CH1 pin is directly connected to the TI1 input.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>[6:4]</td>
+      <td>MMS[2:0]</td>
+      <td>RW</td>
+      <td>Master mode selection. These 3 bits are used to select the synchronization information (TRGO) sent to the slave timer in master mode. The possible combinations are:<br>
+        000: Reset – The UG bit is used as the trigger output (TRGO). If the reset is caused by a trigger input (slave mode controller in reset mode), there is a delay on the TRGO signal relative to the actual reset;<br>
+        001: Enable – The counter enable signal CNT_EN is used as the trigger output (TRGO). Sometimes it is needed to start multiple timers at the same time or control enabling the slave timer for a period. The counter enable signal is produced by a logical OR of the CEN control bit and the trigger input signal in gated mode. When the counter enable signal is controlled by the trigger input, there is a delay on TRGO unless master/slave mode is selected (see the description of the MSM bit in the TIMx_SMCFGR register);<br>
+        010: Update event is selected as the trigger input (TRGO). For example, the clock of a master timer can be used as a prescaler for a slave timer;<br>
+        011: Compare pulse. When a capture or a compare match occurs and the CC1IF flag is to be set (even if it is already high), the trigger output sends a positive pulse (TRGO);<br>
+        100: OC1REF signal is used as the trigger output (TRGO);<br>
+        101: OC2REF signal is used as the trigger output (TRGO);<br>
+        110: OC3REF signal is used as the trigger output (TRGO);<br>
+        111: OC4REF signal is used as the trigger output (TRGO).</td>
+      <td>000b</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>CCDS</td>
+      <td>RW</td>
+      <td>Compare/capture DMA selection:<br>
+        1: DMA request of CHxCVR is sent when an update event occurs;<br>
+        0: DMA request of CHxCVR is sent when a CHxCVR event occurs.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>CCUS</td>
+      <td>RW</td>
+      <td>Compare/capture control update selection:<br>
+        1: If CCPC is set, they can be updated by setting the COM bit or by a rising edge on TRGI;<br>
+        0: If CCPC is set, they can only be updated by setting the COM bit.<br>
+        Note: This bit only applies to channels with complementary outputs.</td>
+      <td>0</td>
+    </tr>
+    <tr><td>1</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>0</td>
+      <td>CCPC</td>
+      <td>RW</td>
+      <td>Compare/capture preload control:<br>
+        1: CCxE, CCxNE, and OCxM bits are preloaded. After setting this bit, they are only updated after the COM bit is set;<br>
+        0: CCxE, CCxNE, and OCxM bits are not preloaded.<br>
+        Note: This bit only applies to channels with complementary outputs.</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.3-slave-mode-control-register-timx_smcfgr-x-2-3-4-5">15.4.3 Slave Mode Control Register (TIMx_SMCFGR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x08</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td>ETP</td><td>ECE</td><td colspan="2">ETPS[1:0]</td><td colspan="4">ETF[3:0]</td><td>MSM</td><td colspan="3">TS[2:0]</td><td>Reserved</td><td colspan="3">SMS[2:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>15</td>
+      <td>ETP</td>
+      <td>RO</td>
+      <td>ETR trigger polarity selection. This bit selects whether to input ETR directly or the inverted ETR.<br>
+        1: ETR is inverted, low level or falling edge active;<br>
+        0: ETR, high level or rising edge active.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td>ECE</td>
+      <td>RW</td>
+      <td>External clock mode 2 enable selection.<br>
+        1: External clock mode 2 enabled;<br>
+        0: External clock mode 2 disabled.<br>
+        Note 1: The slave mode can be used simultaneously with external clock mode 2: reset mode, gated mode, and trigger mode; however, TRGI cannot be connected to ETRF (TS bits cannot be 111b).<br>
+        Note 2: When both external clock mode 1 and external clock mode 2 are enabled, the external clock input is ETRF.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>[13:12]</td>
+      <td>ETPS[1:0]</td>
+      <td>RW</td>
+      <td>External trigger signal (ETRP) prescaler. The frequency of this signal cannot exceed 1/4 of the TIMxCLK frequency. This field can be used to reduce the frequency.<br>
+        00: Prescaler off;<br>
+        01: ETRP frequency divided by 2;<br>
+        10: ETRP frequency divided by 4;<br>
+        11: ETRP frequency divided by 8.</td>
+      <td>00b</td>
+    </tr>
+    <tr>
+      <td>[11:8]</td>
+      <td>ETF[3:0]</td>
+      <td>RW</td>
+      <td>External trigger filter. In practice, the digital filter is an event counter that uses a certain sampling frequency and produces an output transition after recording N events.<br>
+        0000: No filter, sampling at F<sub>dts</sub>;<br>
+        0001: Sampling frequency F<sub>sampling</sub>=F<sub>ck_int</sub>, N=2;<br>
+        0010: Sampling frequency F<sub>sampling</sub>=F<sub>ck_int</sub>, N=4;<br>
+        0011: Sampling frequency F<sub>sampling</sub>=F<sub>ck_int</sub>, N=8;<br>
+        0100: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/2, N=6;<br>
+        0101: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/2, N=8;<br>
+        0110: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/4, N=6;<br>
+        0111: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/4, N=8;<br>
+        1000: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/8, N=6;<br>
+        1001: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/8, N=8;<br>
+        1010: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/16, N=5;<br>
+        1011: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/16, N=6;<br>
+        1100: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/16, N=8;<br>
+        1101: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/32, N=5;<br>
+        1110: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/32, N=6;<br>
+        1111: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/32, N=8.</td>
+      <td>0000b</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>MSM</td>
+      <td>RW</td>
+      <td>Master/slave mode selection:<br>
+        1: Events on the trigger input (TRGI) are delayed to allow perfect synchronization between the current timer (via TRGO) and its slave timer. This is very useful when several timers need to be synchronized to a single external event;<br>
+        0: No effect.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>[6:4]</td>
+      <td>TS[2:0]</td>
+      <td>RW</td>
+      <td>Trigger selection. These 3 bits select the trigger input source used to synchronize the counter.<br>
+        000: Internal trigger 0 (ITR0);<br>
+        100: TI1 edge detector (TI1F_ED);<br>
+        001: Internal trigger 1 (ITR1);<br>
+        101: Filtered timer input 1 (TI1FP1);<br>
+        010: Internal trigger 2 (ITR2);<br>
+        110: Filtered timer input 2 (TI2FP2);<br>
+        011: Internal trigger 3 (ITR3);<br>
+        111: External trigger input (ETRF);<br>
+        The above can only be changed when SMS is 0.</td>
+      <td>000b</td>
+    </tr>
+    <tr><td>3</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>[2:0]</td>
+      <td>SMS[2:0]</td>
+      <td>RW</td>
+      <td>Input mode selection. Selects the clock and trigger mode of the core counter.<br>
+        000: Driven by internal clock CK_INT;<br>
+        001: Encoder mode 1. The core counter counts up/down on TI2FP2 edges depending on the level of TI1FP1;<br>
+        010: Encoder mode 2. The core counter counts up/down on TI1FP1 edges depending on the level of TI2FP2;<br>
+        011: Encoder mode 3. The core counter counts up/down on both TI1FP1 and TI2FP2 edges depending on the input level of the other signal;<br>
+        100: Reset mode. The rising edge of the trigger input (TRGI) initializes the counter and generates a signal to update the registers;<br>
+        101: Gated mode. The counter clock is enabled when the trigger input (TRGI) is high. When the trigger input goes low, the counter stops. Both the start and stop of the counter are controlled;<br>
+        110: Trigger mode. The counter starts on the rising edge of the trigger input TRGI. Only the start of the counter is controlled;<br>
+        111: External clock mode 1. The rising edge of the selected trigger input (TRGI) drives the counter.</td>
+      <td>000b</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.4-dma-interrupt-enable-register-timx_dmaintenr-x-2-3-4-5">15.4.4 DMA/Interrupt Enable Register (TIMx_DMAINTENR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x0C</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td>Reserved</td><td>TDE</td><td>Reserved</td><td>CC4DE</td><td>CC3DE</td><td>CC2DE</td><td>CC1DE</td><td>UDE</td><td>Reserved</td><td>TIE</td><td>Reserved</td><td>CC4IE</td><td>CC3IE</td><td>CC2IE</td><td>CC1IE</td><td>UIE</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>15</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>14</td>
+      <td>TDE</td>
+      <td>RW</td>
+      <td>Trigger DMA request enable.<br>
+        1: Trigger DMA request enabled;<br>
+        0: Trigger DMA request disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr><td>13</td><td>Reserved</td><td>RW</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>12</td>
+      <td>CC4DE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 4 DMA request enable.<br>
+        1: DMA request of compare/capture channel 4 enabled;<br>
+        0: DMA request of compare/capture channel 4 disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td>CC3DE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 3 DMA request enable.<br>
+        1: DMA request of compare/capture channel 3 enabled;<br>
+        0: DMA request of compare/capture channel 3 disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>CC2DE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 DMA request enable.<br>
+        1: DMA request of compare/capture channel 2 enabled;<br>
+        0: DMA request of compare/capture channel 2 disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>CC1DE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 1 DMA request enable.<br>
+        1: DMA request of compare/capture channel 1 enabled;<br>
+        0: DMA request of compare/capture channel 1 disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>UDE</td>
+      <td>RW</td>
+      <td>Update DMA request enable.<br>
+        1: Update DMA request enabled;<br>
+        0: Update DMA request disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr><td>7</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>6</td>
+      <td>TIE</td>
+      <td>RW</td>
+      <td>Trigger interrupt enable.<br>
+        1: Trigger interrupt enabled;<br>
+        0: Trigger interrupt disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr><td>5</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>4</td>
+      <td>CC4IE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 4 interrupt enable.<br>
+        1: Compare/capture channel 4 interrupt enabled;<br>
+        0: Compare/capture channel 4 interrupt disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>CC3IE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 3 interrupt enable.<br>
+        1: Compare/capture channel 3 interrupt enabled;<br>
+        0: Compare/capture channel 3 interrupt disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>CC2IE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 interrupt enable.<br>
+        1: Compare/capture channel 2 interrupt enabled;<br>
+        0: Compare/capture channel 2 interrupt disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>CC1IE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 1 interrupt enable.<br>
+        1: Compare/capture channel 1 interrupt enabled;<br>
+        0: Compare/capture channel 1 interrupt disabled.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>0</td>
+      <td>UIE</td>
+      <td>RW</td>
+      <td>Update interrupt enable.<br>
+        1: Update interrupt enabled;<br>
+        0: Update interrupt disabled.</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.5-interrupt-status-register-timx_intfr-x-2-3-4-5">15.4.5 Interrupt Status Register (TIMx_INTFR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x10</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="3">Reserved</td><td>CC4OF</td><td>CC3OF</td><td>CC2OF</td><td>CC1OF</td><td>Reserved</td><td>TIF</td><td>Reserved</td><td>CC4IF</td><td>CC3IF</td><td>CC2IF</td><td>CC1IF</td><td>UIF</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:13]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>12</td><td>CC4OF</td><td>RW0</td><td>Compare/capture channel 4 over-capture flag.</td><td>0</td></tr>
+    <tr><td>11</td><td>CC3OF</td><td>RW0</td><td>Compare/capture channel 3 over-capture flag.</td><td>0</td></tr>
+    <tr><td>10</td><td>CC2OF</td><td>RW0</td><td>Compare/capture channel 2 over-capture flag.</td><td>0</td></tr>
+    <tr>
+      <td>9</td>
+      <td>CC1OF</td>
+      <td>RW0</td>
+      <td>Compare/capture channel 1 over-capture flag, only used when the compare/capture channel is configured as input capture mode. This flag is set by hardware and cleared by software writing 0.<br>
+        1: The counter value was captured to the capture/compare register while CC1IF was already set;<br>
+        0: No over-capture occurred.</td>
+      <td>0</td>
+    </tr>
+    <tr><td>[8:7]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>6</td>
+      <td>TIF</td>
+      <td>RW0</td>
+      <td>Trigger interrupt flag. This bit is set by hardware when a trigger event occurs and cleared by software. Trigger events include: when in modes other than gated mode, a valid edge is detected on the TRGI input; or in gated mode, any edge.<br>
+        1: Trigger event generated;<br>
+        0: No trigger event generated.</td>
+      <td>0</td>
+    </tr>
+    <tr><td>5</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>4</td><td>CC4IF</td><td>RW0</td><td>Compare/capture channel 4 interrupt flag.</td><td>0</td></tr>
+    <tr><td>3</td><td>CC3IF</td><td>RW0</td><td>Compare/capture channel 3 interrupt flag.</td><td>0</td></tr>
+    <tr><td>2</td><td>CC2IF</td><td>RW0</td><td>Compare/capture channel 2 interrupt flag.</td><td>0</td></tr>
+    <tr>
+      <td>1</td>
+      <td>CC1IF</td>
+      <td>RW0</td>
+      <td>Compare/capture channel 1 interrupt flag.<br>
+        If the compare/capture channel is configured as output mode, this bit is set by hardware when the counter value matches the compare value, except in center-aligned mode. This bit is cleared by software.<br>
+        1: The core counter value matches the compare/capture register 1 value;<br>
+        0: No match occurred.<br>
+        If compare/capture channel 1 is configured as input mode, this bit is set by hardware when a capture event occurs. It is cleared by software or by reading the compare/capture register.<br>
+        1: The counter value has been captured to compare/capture register 1;<br>
+        0: No input capture occurred.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>0</td>
+      <td>UIF</td>
+      <td>RW0</td>
+      <td>Update interrupt flag. This bit is set by hardware when an update event is generated and cleared by software.<br>
+        1: Update interrupt generated;<br>
+        0: No update event generated.<br>
+        The following situations generate an update event:<br>
+        If UDIS=0, when the repetition counter overflows or underflows;<br>
+        If URS=0, UDIS=0, when the UG bit is set, or when the core counter is reinitialized by software;<br>
+        If URS=0, UDIS=0, when the counter CNT is reinitialized by a trigger event.</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.6-event-generation-register-timx_swevgr-x-2-3-4-5">15.4.6 Event Generation Register (TIMx_SWEVGR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x14</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="6">Reserved</td><td>TG</td><td>Reserved</td><td>CC4G</td><td>CC3G</td><td>CC2G</td><td>CC1G</td><td>UG</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:7]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>6</td>
+      <td>TG</td>
+      <td>WO</td>
+      <td>Trigger event generation. This bit is set by software and cleared by hardware. Used to generate a trigger event.<br>
+        1: A trigger event is generated. TIF is set. If the corresponding interrupt and DMA are enabled, the corresponding interrupt and DMA are generated;<br>
+        0: No action.</td>
+      <td>0</td>
+    </tr>
+    <tr><td>5</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>4</td><td>CC4G</td><td>WO</td><td>Compare/capture event generation bit 4. Generates compare/capture event 4.</td><td>0</td></tr>
+    <tr><td>3</td><td>CC3G</td><td>WO</td><td>Compare/capture event generation bit 3. Generates compare/capture event 3.</td><td>0</td></tr>
+    <tr><td>2</td><td>CC2G</td><td>WO</td><td>Compare/capture event generation bit 2. Generates compare/capture event 2.</td><td>0</td></tr>
+    <tr>
+      <td>1</td>
+      <td>CC1G</td>
+      <td>WO</td>
+      <td>Compare/capture event generation bit 1. Generates compare/capture event 1. This bit is set by software and cleared by hardware. Used to generate a compare/capture event.<br>
+        1: Generates a compare/capture event on compare/capture channel 1:<br>
+        If compare/capture channel 1 is configured as output: Sets the CC1IF bit. If the corresponding interrupt and DMA are enabled, the corresponding interrupt and DMA are generated;<br>
+        If compare/capture channel 1 is configured as input: The current core counter value is captured into compare/capture register 1; the CC1IF bit is set. If the corresponding interrupt and DMA are enabled, the corresponding interrupt and DMA are generated. If CC1IF is already set, the CC1OF bit is set;<br>
+        0: No action.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>0</td>
+      <td>UG</td>
+      <td>WO</td>
+      <td>Update event generation. Generates an update event. This bit is set by software and automatically cleared by hardware.<br>
+        1: Initializes the counter and generates an update event;<br>
+        0: No action.<br>
+        Note: The prescaler counter is also cleared, but the prescaler division factor remains unchanged. If in center-aligned mode or up-counting mode, the core counter is cleared; if in down-counting mode, the core counter takes the value of the auto-reload register.</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.7-compare-capture-control-register-1-timx_chctlr1-x-2-3-4-5">15.4.7 Compare/Capture Control Register 1 (TIMx_CHCTLR1) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x18</p>
+
+<p>The channel can be used for input (capture mode) or output (compare mode). The direction of the channel is defined by the corresponding CCxS bits. The function of the other bits in this register differs between input and output modes. OCxx describes the channel function in output mode, and ICxx describes the channel function in input mode.</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td>OC2CE</td><td colspan="3">OC2M[2:0]</td><td>OC2PE</td><td>OC2FE</td><td colspan="2">CC2S[1:0]</td><td>OC1CE</td><td colspan="3">OC1M[2:0]</td><td>OC1PE</td><td>OC1FE</td><td colspan="2">CC1S[1:0]</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Compare mode (pin direction is output):</strong></p>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>15</td>
+      <td>OC2CE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 clear enable.<br>
+        1: OC2REF is cleared to zero as soon as a high level is detected on the ETRF input;<br>
+        0: OC2REF is not affected by the ETRF input.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>[14:12]</td>
+      <td>OC2M[2:0]</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 mode configuration. These 3 bits define the action of the output reference signal OC2REF, which determines the values of OC2 and OC2N. OC2REF is active high, while the active level of OC2 and OC2N depends on the CC2P and CC2NP bits.<br>
+        000: Frozen. The comparison between the compare/capture register value and the core counter has no effect on OC2REF;<br>
+        001: Force active level. When the core counter matches the value of compare/capture register 2, OC2REF is forced high;<br>
+        010: Force inactive level. When the core counter value matches compare/capture register 2, OC2REF is forced low;<br>
+        011: Toggle. When the core counter matches the value of compare/capture register 2, OC2REF toggles;<br>
+        100: Force inactive level. OC2REF is forced low;<br>
+        101: Force active level. OC2REF is forced high;<br>
+        110: PWM mode 1: In up-counting, channel 2 is active when the core counter is less than the compare/capture register value, otherwise inactive; in down-counting, channel 2 is inactive (OC2REF=0) when the core counter is greater than the compare/capture register value, otherwise active (OC2REF=1);<br>
+        111: PWM mode 2: In up-counting, channel 2 is inactive when the core counter is less than the compare/capture register value, otherwise active; in down-counting, channel 2 is active (OC2REF=1) when the core counter is greater than the compare/capture register value, otherwise inactive (OC2REF=0);<br>
+        Note: Once the LOCK level is set to 3 and CC1S=00b, this bit cannot be modified. In PWM mode 1 or PWM mode 2, the OC2REF level changes only when the comparison result changes or when switching from frozen mode to PWM mode in output compare mode.</td>
+      <td>000b</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td>OC2PE</td>
+      <td>RW</td>
+      <td>Compare/capture register 2 preload enable.<br>
+        1: The preload function of the compare/capture register is enabled. Read/write operations only operate on the preload register. The preload value of compare/capture register 1 is loaded into the current shadow register when an update event occurs;<br>
+        0: The preload function of compare/capture register 2 is disabled. Compare/capture register 2 can be written at any time, and the newly written value takes effect immediately.<br>
+        Note: Once the LOCK level is set to 3 and CC1S=00, this bit cannot be modified. Only in single pulse mode (OPM=1) can PWM mode be used without confirming the preload register, otherwise its behavior is undefined.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>OC2FE</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 fast enable. This bit is used to speed up the response of the compare/capture channel output to trigger input events.<br>
+        1: The effect of the active edge on the trigger is like a compare match occurred. Therefore, OC is set to the compare level regardless of the comparison result. The delay between the active edge of the trigger and the compare/capture channel 2 output is reduced to 3 clock cycles;<br>
+        0: The compare/capture channel 2 operates normally based on the counter and compare/capture register 2 values, even if the trigger is enabled. When the trigger input has an active edge, the minimum delay to activate the compare/capture channel 2 output is 5 clock cycles.<br>
+        OC2FE only takes effect when the channel is configured in PWM1 or PWM2 mode.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>[9:8]</td>
+      <td>CC2S[1:0]</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 input selection.<br>
+        00: Compare/capture channel 2 is configured as output;<br>
+        01: Compare/capture channel 2 is configured as input, IC2 is mapped on TI2;<br>
+        10: Compare/capture channel 2 is configured as input, IC2 is mapped on TI1;<br>
+        11: Compare/capture channel 2 is configured as input, IC2 is mapped on TRC. This mode only works when the internal trigger input is selected (by TS bits).<br>
+        Note: Compare/capture channel 2 is writable only when the channel is off (CC2E is 0).</td>
+      <td>00b</td>
+    </tr>
+    <tr><td>7</td><td>OC1CE</td><td>RW</td><td>Compare/capture channel 1 clear enable.</td><td>0</td></tr>
+    <tr><td>[6:4]</td><td>OC1M[2:0]</td><td>RW</td><td>Compare/capture channel 1 mode configuration.</td><td>0</td></tr>
+    <tr><td>3</td><td>OC1PE</td><td>RW</td><td>Compare/capture register 1 preload enable.</td><td>0</td></tr>
+    <tr><td>2</td><td>OC1FE</td><td>RW</td><td>Compare/capture channel 1 fast enable.</td><td>0</td></tr>
+    <tr><td>[1:0]</td><td>CC1S[1:0]</td><td>RW</td><td>Compare/capture channel 1 input selection.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Capture mode (pin direction is input):</strong></p>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>[15:12]</td>
+      <td>IC2F[3:0]</td>
+      <td>RW</td>
+      <td>Input capture filter 2 configuration. These bits set the sampling frequency and digital filter length of the TI1 input. The digital filter consists of an event counter, which produces an output transition after recording N events.<br>
+        0000: No filter, sampling at f<sub>DTS</sub>;<br>
+        0001: Sampling frequency F<sub>sampling</sub>=F<sub>ck_int</sub>, N=2;<br>
+        0010: Sampling frequency F<sub>sampling</sub>=F<sub>ck_int</sub>, N=4;<br>
+        0011: Sampling frequency F<sub>sampling</sub>=F<sub>ck_int</sub>, N=8;<br>
+        0100: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/2, N=6;<br>
+        0101: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/2, N=8;<br>
+        0110: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/4, N=6;<br>
+        0111: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/4, N=8;<br>
+        1000: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/8, N=6;<br>
+        1001: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/8, N=8;<br>
+        1010: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/16, N=5;<br>
+        1011: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/16, N=6;<br>
+        1100: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/16, N=8;<br>
+        1101: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/32, N=5;<br>
+        1110: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/32, N=6;<br>
+        1111: Sampling frequency F<sub>sampling</sub>=F<sub>dts</sub>/32, N=8.</td>
+      <td>0000b</td>
+    </tr>
+    <tr>
+      <td>[11:10]</td>
+      <td>IC2PSC[1:0]</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 prescaler configuration. These 2 bits define the prescaler factor of compare/capture channel 2. Once CC1E=0, the prescaler is reset.<br>
+        00: No prescaler, capture is triggered on every edge detected at the input;<br>
+        01: Capture is triggered every 2 events;<br>
+        10: Capture is triggered every 4 events;<br>
+        11: Capture is triggered every 8 events.</td>
+      <td>00b</td>
+    </tr>
+    <tr>
+      <td>[9:8]</td>
+      <td>CC2S[1:0]</td>
+      <td>RW</td>
+      <td>Compare/capture channel 2 input selection. These 2 bits define the channel direction (input/output) and the input pin selection.<br>
+        00: Compare/capture channel 1 is configured as output;<br>
+        01: Compare/capture channel 1 is configured as input, IC1 is mapped on TI1;<br>
+        10: Compare/capture channel 1 is configured as input, IC1 is mapped on TI2;<br>
+        11: Compare/capture channel 1 is configured as input, IC1 is mapped on TRC. This mode only works when the internal trigger input is selected (by TS bits).<br>
+        Note: CC1S is writable only when the channel is off (CC1E is 0).</td>
+      <td>00b</td>
+    </tr>
+    <tr><td>[7:4]</td><td>IC1F[3:0]</td><td>RW</td><td>Input capture filter 1 configuration.</td><td>0</td></tr>
+    <tr><td>[3:2]</td><td>IC1PSC[1:0]</td><td>RW</td><td>Compare/capture channel 1 prescaler configuration.</td><td>0</td></tr>
+    <tr><td>[1:0]</td><td>CC1S[1:0]</td><td>RW</td><td>Compare/capture channel 1 input selection.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.8-compare-capture-control-register-2-timx_chctlr2-x-2-3-4-5">15.4.8 Compare/Capture Control Register 2 (TIMx_CHCTLR2) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x1C</p>
+
+<p>The channel can be used for input (capture mode) or output (compare mode). The direction of the channel is defined by the corresponding CCxS bits. The function of the other bits in this register differs between input and output modes. OCxx describes the channel function in output mode, and ICxx describes the channel function in input mode.</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td>OC4CE</td><td colspan="3">OC4M[2:0]</td><td>OC4PE</td><td>OC4FE</td><td colspan="2">CC4S[1:0]</td><td>OC3CE</td><td colspan="3">OC3M[2:0]</td><td>OC3PE</td><td>OC3FE</td><td colspan="2">CC3S[1:0]</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Compare mode (pin direction is output):</strong></p>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>15</td><td>OC4CE</td><td>RW</td><td>Compare/capture channel 4 clear enable.</td><td>0</td></tr>
+    <tr><td>[14:12]</td><td>OC4M[2:0]</td><td>RW</td><td>Compare/capture channel 4 mode configuration.</td><td>0</td></tr>
+    <tr><td>11</td><td>OC4PE</td><td>RW</td><td>Compare/capture register 4 preload enable.</td><td>0</td></tr>
+    <tr><td>10</td><td>OC4FE</td><td>RW</td><td>Compare/capture channel 4 fast enable.</td><td>0</td></tr>
+    <tr><td>[9:8]</td><td>CC4S[1:0]</td><td>RW</td><td>Compare/capture channel 4 input selection.</td><td>0</td></tr>
+    <tr><td>7</td><td>OC3CE</td><td>RW</td><td>Compare/capture channel 3 clear enable.</td><td>0</td></tr>
+    <tr><td>[6:4]</td><td>OC3M[2:0]</td><td>RW</td><td>Compare/capture channel 3 mode configuration.</td><td>0</td></tr>
+    <tr><td>3</td><td>OC3PE</td><td>RW</td><td>Compare/capture register 3 preload enable.</td><td>0</td></tr>
+    <tr><td>2</td><td>OC3FE</td><td>RW</td><td>Compare/capture channel 3 fast enable.</td><td>0</td></tr>
+    <tr><td>[1:0]</td><td>CC3S[1:0]</td><td>RW</td><td>Compare/capture channel 3 input selection.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Capture mode (pin direction is input):</strong></p>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:12]</td><td>IC4F[3:0]</td><td>RW</td><td>Input capture filter 4 configuration.</td><td>0</td></tr>
+    <tr><td>[11:10]</td><td>IC4PSC[1:0]</td><td>RW</td><td>Compare/capture channel 4 prescaler configuration.</td><td>0</td></tr>
+    <tr><td>[9:8]</td><td>CC4S[1:0]</td><td>RW</td><td>Compare/capture channel 4 input selection.</td><td>0</td></tr>
+    <tr><td>[7:4]</td><td>IC3F[3:0]</td><td>RW</td><td>Input capture filter 3 configuration.</td><td>0</td></tr>
+    <tr><td>[3:2]</td><td>IC3PSC[1:0]</td><td>RW</td><td>Compare/capture channel 3 prescaler configuration.</td><td>0</td></tr>
+    <tr><td>[1:0]</td><td>CC3S[1:0]</td><td>RW</td><td>Compare/capture channel 3 input selection.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.9-compare-capture-enable-register-timx_ccer-x-2-3-4-5">15.4.9 Compare/Capture Enable Register (TIMx_CCER) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x20</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="2">Reserved</td><td>CC4P</td><td>CC4E</td><td colspan="2">Reserved</td><td>CC3P</td><td>CC3E</td><td colspan="2">Reserved</td><td>CC2P</td><td>CC2E</td><td colspan="2">Reserved</td><td>CC1P</td><td>CC1E</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:14]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>13</td><td>CC4P</td><td>RW</td><td>Compare/capture channel 4 output polarity.</td><td>0</td></tr>
+    <tr><td>12</td><td>CC4E</td><td>RW</td><td>Compare/capture channel 4 output enable.</td><td>0</td></tr>
+    <tr><td>[11:10]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>9</td><td>CC3P</td><td>RW</td><td>Compare/capture channel 3 output polarity.</td><td>0</td></tr>
+    <tr><td>8</td><td>CC3E</td><td>RW</td><td>Compare/capture channel 3 output enable.</td><td>0</td></tr>
+    <tr><td>[7:6]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>5</td><td>CC2P</td><td>RW</td><td>Compare/capture channel 2 output polarity.</td><td>0</td></tr>
+    <tr><td>4</td><td>CC2E</td><td>RW</td><td>Compare/capture channel 2 output enable.</td><td>0</td></tr>
+    <tr><td>[3:2]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>1</td>
+      <td>CC1P</td>
+      <td>RW</td>
+      <td>Compare/capture channel 1 output polarity.<br>
+        CC1 channel configured as output:<br>
+        1: OC1 active low;<br>
+        0: OC1 active high.<br>
+        CC1 channel configured as input:<br>
+        This bit selects whether IC1 or the inverted IC1 signal is used as the trigger or capture signal.<br>
+        1: Inverted: capture occurs on the falling edge of IC1; when used as an external trigger, IC1 is inverted;<br>
+        0: Non-inverted: capture occurs on the rising edge of IC1; when used as an external trigger, IC1 is not inverted.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>0</td>
+      <td>CC1E</td>
+      <td>RW</td>
+      <td>Compare/capture channel 1 output enable.<br>
+        CC1 channel configured as output:<br>
+        1: On – OC1 signal is output to the corresponding output pin;<br>
+        0: Off – OC1 output disabled.<br>
+        CC1 channel configured as input:<br>
+        This bit determines whether the counter value can be captured into the TIMx_CCR1 register.<br>
+        1: Capture enabled;<br>
+        0: Capture disabled.</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.10-general-purpose-timer-counter-timx_cnt-x-2-3-4-5">15.4.10 General Purpose Timer Counter (TIMx_CNT) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x24</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">CNT[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>CNT[15:0]</td><td>RW</td><td>Real-time value of the timer counter.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.11-counter-clock-prescaler-timx_psc-x-2-3-4-5">15.4.11 Counter Clock Prescaler (TIMx_PSC) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x28</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">PSC[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>PSC[15:0]</td><td>RW</td><td>Division factor of the timer prescaler. The counter clock frequency equals the prescaler input frequency / (PSC + 1).</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.12-auto-reload-register-timx_atrlr-x-2-3-4-5">15.4.12 Auto-Reload Register (TIMx_ATRLR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x2C</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">ARR[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>ARR[15:0]</td><td>RW</td><td>Counter threshold. For when ATRLR takes action and updates, please refer to Section 15.2.4. When ATRLR is empty, the counter stops.</td><td>0xFFFF</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.13-compare-capture-register-1-timx_ch1cvr-x-2-3-4-5">15.4.13 Compare/Capture Register 1 (TIMx_CH1CVR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x34</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">CCR1[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>CCR1[15:0]</td><td>RW</td><td>Value of compare/capture register channel 1.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.14-compare-capture-register-2-timx_ch2cvr-x-2-3-4-5">15.4.14 Compare/Capture Register 2 (TIMx_CH2CVR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x38</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">CCR2[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>CCR2[15:0]</td><td>RW</td><td>Value of compare/capture register channel 2.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.15-compare-capture-register-3-timx_ch3cvr-x-2-3-4-5">15.4.15 Compare/Capture Register 3 (TIMx_CH3CVR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x3C</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">CCR3[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>CCR3[15:0]</td><td>RW</td><td>Value of compare/capture register channel 3.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.16-compare-capture-register-4-timx_ch4cvr-x-2-3-4-5">15.4.16 Compare/Capture Register 4 (TIMx_CH4CVR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x40</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">CCR4[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>CCR4[15:0]</td><td>RW</td><td>Value of compare/capture register channel 4.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.17-dma-control-register-timx_dmacfgr-x-2-3-4-5">15.4.17 DMA Control Register (TIMx_DMACFGR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x48</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="3">Reserved</td><td colspan="5">DBL[4:0]</td><td colspan="3">Reserved</td><td colspan="5">DBA[4:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:13]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>[12:8]</td><td>DBL[4:0]</td><td>RW</td><td>DMA burst transfer length. The actual value is this field's value + 1.</td><td>0</td></tr>
+    <tr><td>[7:5]</td><td>Reserved</td><td>RO</td><td>Reserved.</td><td>0</td></tr>
+    <tr><td>[4:0]</td><td>DBA[4:0]</td><td>RW</td><td>These bits define the address offset of the DMA in burst mode from control register 1.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.18-dma-address-register-for-continuous-mode-timx_dmaadr-x-2-3-4-5">15.4.18 DMA Address Register for Continuous Mode (TIMx_DMAADR) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x4C</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="16">DMAB[15:0]</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:0]</td><td>DMAB[15:0]</td><td>RW</td><td>DMA address in continuous mode.</td><td>0</td></tr>
+  </tbody>
+</table>
+
+<h3 id="15.4.19-dual-edge-capture-register-timx_aux-x-2-3-4-5">15.4.19 Dual-Edge Capture Register (TIMx_AUX) (x=2/3/4/5)</h3>
+
+<p><strong>Offset address:</strong> 0x50</p>
+
+<table class="reg-bits">
+  <thead><tr><th>15</th><th>14</th><th>13</th><th>12</th><th>11</th><th>10</th><th>9</th><th>8</th><th>7</th><th>6</th><th>5</th><th>4</th><th>3</th><th>2</th><th>1</th><th>0</th></tr></thead>
+  <tbody>
+    <tr><td colspan="13">Reserved</td><td>CAP_ED_CH4</td><td>CAP_ED_CH3</td><td>CAP_ED_CH2</td></tr>
+  </tbody>
+</table>
+
+<table class="reg-fields">
+  <thead><tr><th>Bits</th><th>Name</th><th>Access</th><th>Description</th><th>Reset</th></tr></thead>
+  <tbody>
+    <tr><td>[15:3]</td><td>Reserved</td><td>R0</td><td>Reserved.</td><td>0</td></tr>
+    <tr>
+      <td>2</td>
+      <td>CAP_ED_CH4</td>
+      <td>RW</td>
+      <td>Dual-edge capture enable for channel 4:<br>
+        1: Dual-edge capture enable for channel 4;<br>
+        0: Dual-edge capture disable for channel 4.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>CAP_ED_CH3</td>
+      <td>RW</td>
+      <td>Dual-edge capture enable for channel 3:<br>
+        1: Dual-edge capture enable for channel 3;<br>
+        0: Dual-edge capture disable for channel 3.</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>0</td>
+      <td>CAP_ED_CH2</td>
+      <td>RW</td>
+      <td>Dual-edge capture enable for channel 2:<br>
+        1: Dual-edge capture enable for channel 2;<br>
+        0: Dual-edge capture disable for channel 2.</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
