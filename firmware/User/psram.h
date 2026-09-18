@@ -4,7 +4,7 @@
  *                      for the RISKYMSX2 cartridge handler.
  *
  *                      After PSRAM_Init() returns nonzero (PASS), the
- *                      32 KiB hello_rom[] image has been DMA-equivalent-copied
+ *                      32 KiB selector_rom[] image has been DMA-equivalent-copied
  *                      into PSRAM at PSRAM_BASE (0x80000000). The application
  *                      can then point cartpnt at PSRAM_BASE for zero-wait-state
  *                      read access from the .ramfunc cartridge handler.
@@ -29,7 +29,7 @@
  * for the external memory bus address. */
 #define PSRAM_BUS_BASE   0x80000000UL
 
-/* Cart ROM size we mirror into PSRAM. Must match hello_rom[]. */
+/* Cart ROM size we mirror into PSRAM. Must match selector_rom[]. */
 #define PSRAM_ROM_SIZE   32768U
 
 /* Self-test pattern size. 1 KiB is enough to exercise multi-row addressing
@@ -43,7 +43,7 @@
 #define PSRAM_ERR_INIT          0x02U /* Peripheral init register write rejected */
 #define PSRAM_ERR_TEST_PATTERN  0x04U /* Wrote pattern, readback mismatch */
 #define PSRAM_ERR_TEST_OFFSETS  0x08U /* Multi-offset test mismatch */
-#define PSRAM_ERR_ROM_MIRROR    0x10U /* hello_rom -> PSRAM copy mismatch */
+#define PSRAM_ERR_ROM_MIRROR    0x10U /* selector_rom -> PSRAM copy mismatch */
 #define PSRAM_ERR_HCLK_TOO_HIGH 0x20U /* HCLK above what this PSRAM device supports */
 
 /* Public entry points. */

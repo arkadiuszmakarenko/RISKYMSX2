@@ -32,6 +32,7 @@
  *********************************************************************************/
 
 #include "usb_disk.h"
+#include "cart.h"
 #include "psram.h"
 #include "ch32v4x7.h"
 #include "ch32v4x7_psram.h"
@@ -187,11 +188,35 @@ static uint8_t usb_recv_csw (CSW_t *csw) {
 
 static uint8_t bulk_in_read_retry (uint8_t *buf, uint16_t *plen,
                                    int max_retries) {
+    /* The CH32V407 USBHS controller reports ERR_SUCCESS with RX_LEN=0
+     * when a bulk-IN handshake completes but no data was returned --
+     * i.e. the stick's ZLP response to an IN while it is still
+     * processing the previous OUT (CBW). On most sticks this lasts
+     * 100-1000 us; retrying transparently without touching the data
+     * toggle is the right thing.
+     *
+     * We retry up to `max_retries` times on plen=0, with a tiny delay
+     * between attempts. If we exhaust retries AND the controller
+     * reported an error, return that. If the controller always said
+     * ERR_SUCCESS but we never got data, the caller can decide. */
     uint8_t res;
     int tries = 0;
+    int zlp_retries = 0;
     do {
         res = USBHSH_GetEndpData (usb_in_ep, &in_tog, buf, &plen[0]);
-        if (res == ERR_SUCCESS) return res;
+        if (res == ERR_SUCCESS && plen[0] > 0) return res;
+        /* ZLP-style empty response: stick is busy. Don't reset toggles
+         * (the toggle bit is now set on DATA1, the stick expects DATA0
+         * next). Just back off and try again. Cap ZLP retries
+         * independently of hard-error retries. */
+        if (res == ERR_SUCCESS && plen[0] == 0) {
+            if (++zlp_retries >= 20) {
+                /* Give up -- tell caller we got no data. */
+                return res;
+            }
+            Delay_Us (100);
+            continue;
+        }
         if ((tries % 10) == 9) {
             uint8_t ep0 = RootHubDev[DEF_USB_PORT].bEp0MaxPks;
             (void)USBHSH_ClearEndpStall (ep0, (uint8_t)(0x80 | usb_in_ep));
@@ -288,13 +313,8 @@ ENUM_START:
     {
         uint8_t *p   = Com_Buffer;
         uint8_t *end = Com_Buffer + len;
-        usb_in_ep  = 0;
-        usb_out_ep = 0;
-        in_tog     = 0;
-        out_tog    = 0;
+        uint8_t in_ep_found = 0, out_ep_found = 0;
         msc_interface_found = 0;
-        msc_in_ep_found     = 0;
-        msc_out_ep_found    = 0;
         uint8_t interface_class = 0, interface_subclass = 0, interface_protocol = 0;
 
         while (p < end) {
@@ -314,12 +334,10 @@ ENUM_START:
                 if ((ep_attr & 0x03) == 0x02) {  /* BULK */
                     if (ep_addr & 0x80) {
                         usb_in_ep = ep_addr & 0x0F;
-                        in_tog    = 0;
-                        msc_in_ep_found = 1;
+                        in_ep_found = 1;
                     } else {
                         usb_out_ep = ep_addr & 0x0F;
-                        out_tog    = 0;
-                        msc_out_ep_found = 1;
+                        out_ep_found = 1;
                     }
                 }
             }
@@ -327,7 +345,13 @@ ENUM_START:
             p += p[0];
         }
 
-        if (!msc_interface_found || !msc_in_ep_found || !msc_out_ep_found) {
+        if (msc_interface_found && in_ep_found && out_ep_found) {
+            /* Publish + reset toggles in one place (shared with the
+             * verbose enumeration diagnostic in usb_tests.c). */
+            USB_PublishEndpoints (usb_in_ep, usb_out_ep);
+        } else {
+            usb_in_ep = 0;
+            usb_out_ep = 0;
             return ERR_USB_UNSUPPORT;
         }
     }
@@ -477,6 +501,32 @@ static uint8_t scsi_read_capacity16_once (uint32_t *block_count,
     return 0;
 }
 
+/* Single-shot READ CAPACITY(10). Public wrapper for the enumeration
+ * diagnostic in usb_tests.c (the retrying production version is
+ * usb_scsi_read_capacity below). */
+uint8_t USB_ScsiReadCapacityOnce (uint32_t *block_count,
+                                  uint32_t *block_size) {
+    return scsi_read_capacity10_once (block_count, block_size);
+}
+
+/* Single-shot READ CAPACITY(16) for >2 TiB sticks. Public wrapper for
+ * the enumeration diagnostic. */
+uint8_t USB_ScsiReadCapacity16Once (uint32_t *block_count,
+                                    uint32_t *block_size) {
+    return scsi_read_capacity16_once (block_count, block_size);
+}
+
+/* Publish the discovered bulk endpoint pair into the globals and reset
+ * the data toggles. Called by USBH_EnumRootDevice and by the verbose
+ * enumeration diagnostic in usb_tests.c once the MSC interface has
+ * been parsed. */
+void USB_PublishEndpoints (uint8_t in_ep, uint8_t out_ep) {
+    usb_in_ep  = in_ep;
+    usb_out_ep = out_ep;
+    in_tog     = 0;
+    out_tog    = 0;
+}
+
 uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size) {
     /* Try READ CAPACITY(10) several times before giving up.  Many
      * sticks need a moment after enumeration to spin up their flash
@@ -577,6 +627,79 @@ uint8_t usb_scsi_read_sector (uint32_t lba, uint8_t *buf, uint32_t block_size) {
     return 3;
 }
 
+/* Write a single block with SCSI WRITE(10).  Mirrors scsi_read_sector_once:
+ * CBW (OUT, data-out) -> DATA-OUT packets on the bulk OUT endpoint ->
+ * CSW (IN).  The data stage sends `block_size` bytes in 512-byte
+ * (USBHS_BULK_MAX_PACKET) chunks. */
+static uint8_t scsi_write_sector_once (uint32_t lba, const uint8_t *buf,
+                                       uint32_t block_size) {
+    CBW_t cbw;
+    CSW_t csw;
+    uint8_t  res;
+    uint32_t bytes_sent = 0;
+
+    memset (&cbw, 0, sizeof (cbw));
+    cbw.dCBWSignature          = 0x43425355;
+    cbw.dCBWTag                = 0xCAFEBA5E;
+    cbw.dCBWDataTransferLength = block_size;
+    cbw.bmCBWFlags             = 0x00;  /* OUT - host to device */
+    cbw.bCBWLUN                = 0;
+    cbw.bCBWCBLength           = 10;
+    cbw.CBWCB[0] = 0x2A;  /* WRITE(10) */
+    cbw.CBWCB[2] = (lba >> 24) & 0xFF;
+    cbw.CBWCB[3] = (lba >> 16) & 0xFF;
+    cbw.CBWCB[4] = (lba >> 8)  & 0xFF;
+    cbw.CBWCB[5] = (lba)       & 0xFF;
+    cbw.CBWCB[7] = 0;          /* 1 block (MSB) */
+    cbw.CBWCB[8] = 1;          /* 1 block */
+
+    res = usb_send_cbw (&cbw);
+    if (res != ERR_SUCCESS) {
+        printf ("USB: WR10 CBW send failed r=%02x\r\n", (unsigned)res);
+        return 1;
+    }
+
+    /* Data stage: stream the block out on the bulk OUT endpoint in
+     * 512-byte chunks. */
+    while (bytes_sent < block_size) {
+        uint16_t chunk = (uint16_t)((block_size - bytes_sent)
+                                    > USBHS_BULK_MAX_PACKET)
+                       ? (uint16_t)USBHS_BULK_MAX_PACKET
+                       : (uint16_t)(block_size - bytes_sent);
+        int out_retries = 0;
+        do {
+            res = USBHSH_SendEndpData (usb_out_ep, &out_tog,
+                                       buf + bytes_sent, chunk);
+            if (res == ERR_SUCCESS) break;
+            Delay_Ms (1);
+            if (++out_retries >= 20) return 2;
+        } while (res != ERR_SUCCESS);
+        bytes_sent += chunk;
+    }
+
+    Delay_Ms (1);
+    res = usb_recv_csw (&csw);
+    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
+        printf ("USB: WR10 CSW rc=%02x status=%u\r\n",
+                (unsigned)res, (unsigned)csw.bCSWStatus);
+        return 3;
+    }
+    return 0;
+}
+
+uint8_t usb_scsi_write_sector (uint32_t lba, const uint8_t *buf,
+                               uint32_t block_size) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+        uint8_t r = scsi_write_sector_once (lba, buf, block_size);
+        if (r == 0) return 0;
+        uint8_t sense[18] = {0};
+        (void)usb_scsi_request_sense (sense, sizeof(sense));
+        (void)msc_mass_storage_reset ();
+        Delay_Ms (5);
+    }
+    return 3;
+}
+
 uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len) {
     CBW_t cbw; CSW_t csw; uint8_t res; uint16_t plen = len;
     memset (&cbw, 0, sizeof (cbw));
@@ -597,6 +720,53 @@ uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len) {
     res = usb_recv_csw (&csw);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
     return 0;
+}
+
+/* SCSI INQUIRY (opcode 0x12). Reads the standard 36-byte response into
+ * `buf`. Used by the UREAD CLI test to confirm the device speaks SCSI
+ * and to print the vendor/product/revision strings without going
+ * through FATFS. `len` should be at least 36. */
+uint8_t usb_scsi_inquiry (uint8_t *buf, uint16_t len) {
+    CBW_t cbw; CSW_t csw; uint8_t res; uint16_t plen = len;
+    memset (&cbw, 0, sizeof (cbw));
+    cbw.dCBWSignature          = 0x43425355;
+    cbw.dCBWTag                = 0xCAFEBAB0;
+    cbw.dCBWDataTransferLength = len;
+    cbw.bmCBWFlags             = 0x80;   /* IN */
+    cbw.bCBWLUN                = 0;
+    cbw.bCBWCBLength           = 6;
+    cbw.CBWCB[0] = 0x12;                  /* INQUIRY */
+    cbw.CBWCB[4] = (uint8_t)len;
+    res = usb_send_cbw (&cbw);
+    if (res != ERR_SUCCESS) return 1;
+    Delay_Ms (1);
+    res = bulk_in_read_retry (buf, &plen, 40);
+    if (res != ERR_SUCCESS) return 2;
+    Delay_Ms (1);
+    res = usb_recv_csw (&csw);
+    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
+    return 0;
+}
+
+/* SCSI TEST UNIT READY (opcode 0x00). No data phase. Returns 0 on
+ * success, non-zero on failure (CSW status, request-sense may then
+ * tell us why). */
+uint8_t usb_scsi_test_unit_ready (void) {
+    CBW_t cbw; CSW_t csw; uint8_t res;
+    memset (&cbw, 0, sizeof (cbw));
+    cbw.dCBWSignature          = 0x43425355;
+    cbw.dCBWTag                = 0xCAFEBAB1;
+    cbw.dCBWDataTransferLength = 0;
+    cbw.bmCBWFlags             = 0x80;   /* IN but zero-length */
+    cbw.bCBWLUN                = 0;
+    cbw.bCBWCBLength           = 6;
+    cbw.CBWCB[0] = 0x00;                  /* TEST UNIT READY */
+    res = usb_send_cbw (&cbw);
+    if (res != ERR_SUCCESS) return 1;
+    Delay_Ms (1);
+    res = usb_recv_csw (&csw);
+    if (res != ERR_SUCCESS) return 2;
+    return (csw.bCSWStatus == 0) ? 0 : 3;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -643,264 +813,6 @@ __attribute__ ((aligned (4))) static uint8_t s_sector_buf[512];
  * on every disconnect (so the next file op re-mounts).  Keeps the
  * "am I mounted?" check out of every f_opendir / f_open. */
 static uint8_t s_fatfs_mounted = 0U;
-
-/* ------------------------------------------------------------------------ */
-/* Verbose enumeration diagnostic (USBD CLI command)                        */
-/* ------------------------------------------------------------------------ */
-
-/* Print one row of a USB device descriptor field. */
-static void print_desc_field (const char *name, uint16_t val) {
-    printf ("    %-12s = 0x%04x (%u)\r\n", name, val, val);
-}
-
-/* Print the parsed device descriptor in human-readable form. */
-static void dump_dev_descriptor (const uint8_t *buf) {
-    PUSB_DEV_DESCR d = (PUSB_DEV_DESCR)buf;
-    printf ("  Device Descriptor:\r\n");
-    printf ("    bLength         = %u\r\n", d->bLength);
-    printf ("    bDescriptorType = 0x%02x\r\n", d->bDescriptorType);
-    print_desc_field ("bcdUSB",     d->bcdUSB);
-    printf ("    bDeviceClass    = 0x%02x\r\n", d->bDeviceClass);
-    printf ("    bDeviceSubClass = 0x%02x\r\n", d->bDeviceSubClass);
-    printf ("    bDeviceProtocol = 0x%02x\r\n", d->bDeviceProtocol);
-    printf ("    bMaxPacketSize0 = %u\r\n", d->bMaxPacketSize0);
-    print_desc_field ("idVendor",   d->idVendor);
-    print_desc_field ("idProduct",  d->idProduct);
-    print_desc_field ("bcdDevice",  d->bcdDevice);
-    printf ("    iManufacturer   = %u\r\n", d->iManufacturer);
-    printf ("    iProduct        = %u\r\n", d->iProduct);
-    printf ("    iSerialNumber   = %u\r\n", d->iSerialNumber);
-    printf ("    bNumConfigurations = %u\r\n", d->bNumConfigurations);
-}
-
-/* Print the contents of a SCSI REQUEST SENSE reply. The first byte is
- * the response code (0x70 = current error, 0x71 = deferred), bytes
- * 2..3 are the sense key + additional sense code (ASC).  This is the
- * raw data that tells us why a SCSI command failed. */
-static void dump_request_sense (const uint8_t *s, uint8_t n) {
-    if (n < 4) {
-        printf ("USB: REQUEST SENSE returned only %u bytes\r\n",
-                (unsigned)n);
-        return;
-    }
-    uint8_t resp_code    = s[0] & 0x7F;
-    uint8_t sense_key    = s[2] & 0x0F;
-    uint8_t asc          = s[12];
-    uint8_t ascq         = s[13];
-    const char *skname =
-        (sense_key == 0x00) ? "NO SENSE"          :
-        (sense_key == 0x01) ? "RECOVERED ERROR"   :
-        (sense_key == 0x02) ? "NOT READY"         :
-        (sense_key == 0x03) ? "MEDIUM ERROR"      :
-        (sense_key == 0x04) ? "HARDWARE ERROR"    :
-        (sense_key == 0x05) ? "ILLEGAL REQUEST"   :
-        (sense_key == 0x06) ? "UNIT ATTENTION"    :
-        (sense_key == 0x07) ? "DATA PROTECT"      :
-        (sense_key == 0x0B) ? "ABORTED COMMAND"   :
-        (sense_key == 0x0D) ? "VOLUME OVERFLOW"   :
-                              "RESERVED";
-    printf ("USB: REQUEST SENSE resp=%02x key=0x%02x (%s) "
-            "asc=0x%02x ascq=0x%02x\r\n",
-            (unsigned)resp_code, (unsigned)sense_key, skname,
-            (unsigned)asc, (unsigned)ascq);
-}
-
-/* Walk the full enumeration + SCSI READ CAPACITY pipeline, printing
- * every step.  Does NOT call f_mount (that's the caller's job); the
- * purpose is to figure out why a stick refuses to enumerate or
- * mount. */
-void USB_DiagEnumerate (void) {
-    uint8_t port = DEF_USB_PORT;
-
-    printf ("USBD: USBHS diagnostic enumeration\r\n");
-    printf ("      Root hub state: status=%u dev_addr=%u ep0_max=%u speed=%u\r\n",
-            (unsigned)RootHubDev[port].bStatus,
-            (unsigned)RootHubDev[port].bAddress,
-            (unsigned)RootHubDev[port].bEp0MaxPks,
-            (unsigned)RootHubDev[port].bSpeed);
-
-    /* Force a re-enumeration by clearing the root hub state. */
-    ClearUSB ();
-    printf ("USBD: cleared root hub state, polling port...\r\n");
-
-    /* Step 1: poll the port.  USBHSH_CheckRootHubPortStatus returns
-     * ROOT_DEV_CONNECTED only if the device is currently attached. */
-    uint8_t port_status = USBHSH_CheckRootHubPortStatus (RootHubDev[port].bStatus);
-    printf ("USBD: step 1 - port status = %u "
-            "(0=DISCONNECT 1=CONNECTED 2=FAILED 3=SUCCESS)\r\n",
-            (unsigned)port_status);
-
-    if (port_status == ROOT_DEV_DISCONNECT) {
-        printf ("USBD: nothing plugged in - connect a USB stick and try again\r\n");
-        return;
-    }
-
-    /* Step 2: enable the port + detect speed. */
-    uint8_t speed = 0xFF;
-    uint8_t rc_e = USBHSH_EnableRootHubPort (&speed);
-    printf ("USBD: step 2 - EnableRootHubPort rc=%02x speed=%u ",
-            (unsigned)rc_e, (unsigned)speed);
-    if (rc_e == ERR_SUCCESS) {
-        const char *sname =
-            (speed == USB_HIGH_SPEED) ? "HIGH-SPEED" :
-            (speed == USB_FULL_SPEED) ? "FULL-SPEED" :
-            (speed == USB_LOW_SPEED)  ? "LOW-SPEED"  : "?";
-        printf ("(%s)\r\n", sname);
-    } else {
-        printf ("\r\nUSBD: port enable failed (rc=%02x). Check cable/power.\r\n",
-                (unsigned)rc_e);
-        return;
-    }
-
-    /* Step 3: GET DESCRIPTOR (device, 18 bytes).  USBHSH_GetDeviceDescr
-     * stores the EP0 size into *pep0_size. */
-    uint8_t ep0_size = 0;
-    uint8_t rc_d = USBHSH_GetDeviceDescr (&ep0_size, DevDesc_Buf);
-    printf ("USBD: step 3 - GET_DESCRIPTOR(DEVICE) rc=%02x ep0=%u\r\n",
-            (unsigned)rc_d, (unsigned)ep0_size);
-    if (rc_d != ERR_SUCCESS) {
-        printf ("USBD: device descriptor fetch failed; "
-                "stick may be in a weird state. Try replugging.\r\n");
-        return;
-    }
-    dump_dev_descriptor (DevDesc_Buf);
-
-    /* Sanity: refuse non-MSC class-0 devices up here.  If it's a hub,
-     * complain (we don't speak USB hubs yet).  Mass storage is class 8
-     * at the INTERFACE level, not device - the device descriptor often
-     * says class 0 for composite / MSC-only sticks. */
-    {
-        uint16_t vid = ((uint16_t)DevDesc_Buf[8])
-                     | ((uint16_t)DevDesc_Buf[9] << 8);
-        uint16_t pid = ((uint16_t)DevDesc_Buf[10])
-                     | ((uint16_t)DevDesc_Buf[11] << 8);
-        printf ("USBD: VID:PID = %04x:%04x\r\n", vid, pid);
-    }
-
-    /* Step 4: SET_ADDRESS. */
-    uint8_t addr = (uint8_t)(port + USB_DEVICE_ADDR);
-    uint8_t rc_a = USBHSH_SetUsbAddress (ep0_size, addr);
-    printf ("USBD: step 4 - SET_ADDRESS(%u) rc=%02x\r\n",
-            (unsigned)addr, (unsigned)rc_a);
-    if (rc_a != ERR_SUCCESS) {
-        printf ("USBD: SET_ADDRESS failed; stick rejected the address.\r\n");
-        return;
-    }
-    Delay_Ms (5);
-
-    /* Step 5: GET_DESCRIPTOR(CONFIG). */
-    uint16_t cfglen = 0;
-    uint8_t rc_c = USBHSH_GetConfigDescr (ep0_size, Com_Buffer,
-                                          DEF_COM_BUF_LEN, &cfglen);
-    printf ("USBD: step 5 - GET_DESCRIPTOR(CONFIG) rc=%02x cfg_len=%u\r\n",
-            (unsigned)rc_c, (unsigned)cfglen);
-    if (rc_c != ERR_SUCCESS || cfglen < 4) {
-        printf ("USBD: config descriptor fetch failed.\r\n");
-        return;
-    }
-    uint8_t cfg_val = ((PUSB_CFG_DESCR)Com_Buffer)->bConfigurationValue;
-    printf ("USBD:   bConfigurationValue = %u, total length = %u\r\n",
-            (unsigned)cfg_val, (unsigned)cfglen);
-
-    /* Step 6: SET_CONFIGURATION. */
-    uint8_t rc_sc = USBHSH_SetUsbConfig (ep0_size, cfg_val);
-    printf ("USBD: step 6 - SET_CONFIGURATION(%u) rc=%02x\r\n",
-            (unsigned)cfg_val, (unsigned)rc_sc);
-    if (rc_sc != ERR_SUCCESS) {
-        printf ("USBD: SET_CONFIGURATION failed.\r\n");
-        return;
-    }
-
-    /* Step 7: scan the config descriptor for the MSC interface + bulk
-     * endpoints (same logic as USBH_EnumRootDevice, but with prints). */
-    uint8_t in_ep = 0, out_ep = 0;
-    {
-        uint8_t *p   = Com_Buffer;
-        uint8_t *end = Com_Buffer + cfglen;
-        uint8_t ifcnt = 0;
-        while (p < end) {
-            if (p[1] == 0x04) {  /* INTERFACE */
-                ifcnt++;
-                uint8_t cls = p[5], sub = p[6], proto = p[7];
-                printf ("USBD:   interface %u: class=0x%02x subclass=0x%02x "
-                        "proto=0x%02x\r\n",
-                        (unsigned)p[2], (unsigned)cls,
-                        (unsigned)sub, (unsigned)proto);
-            } else if (p[1] == 0x05) {  /* ENDPOINT */
-                uint8_t ep_addr = p[2];
-                uint8_t ep_attr = p[3];
-                uint16_t ep_size = (uint16_t)p[4] | ((uint16_t)p[5] << 8);
-                const char *tname =
-                    (ep_attr & 0x03) == 0x00 ? "CTRL" :
-                    (ep_attr & 0x03) == 0x01 ? "ISOC" :
-                    (ep_attr & 0x03) == 0x02 ? "BULK" :
-                                              "INTR";
-                printf ("USBD:     endpoint 0x%02x %s maxpktsize=%u\r\n",
-                        (unsigned)ep_addr, tname, (unsigned)ep_size);
-                if ((ep_attr & 0x03) == 0x02) {
-                    if (ep_addr & 0x80) in_ep  = ep_addr & 0x0F;
-                    else                 out_ep = ep_addr & 0x0F;
-                }
-            }
-            if (p[0] == 0) break;
-            p += p[0];
-        }
-        printf ("USBD:   found %u interface(s), bulk IN=0x%02x OUT=0x%02x\r\n",
-                (unsigned)ifcnt, (unsigned)in_ep, (unsigned)out_ep);
-    }
-    if (in_ep == 0 || out_ep == 0) {
-        printf ("USBD: no MSC bulk endpoints found - stick isn't MSC?\r\n");
-        return;
-    }
-
-    /* Step 8: bulk-only mass storage reset (some sticks need this even
-     * before any SCSI command, but most don't - the diagnostic just
-     * prints the result either way). */
-    uint8_t msc_rst = msc_mass_storage_reset ();
-    printf ("USBD: step 8 - mass_storage_reset rc=%u (0=ok)\r\n",
-            (unsigned)msc_rst);
-
-    /* Step 9: SCSI READ CAPACITY (10), once.  Print every step + the
-     * REQUEST SENSE data on failure. */
-    printf ("USBD: step 9 - SCSI READ CAPACITY (10):\r\n");
-    uint32_t bc = 0, bs = 0;
-    for (int attempt = 1; attempt <= 3; attempt++) {
-        printf ("USBD:   attempt %d...\r\n", attempt);
-        uint8_t r = scsi_read_capacity10_once (&bc, &bs);
-        if (r == 0) {
-            printf ("USBD:   OK last_lba=%u (=%u blocks) block_size=%u\r\n",
-                    (unsigned)bc, (unsigned)(bc + 1U), (unsigned)bs);
-            printf ("USBD: enumeration + READ CAPACITY succeeded!\r\n");
-            return;
-        }
-        printf ("USBD:   attempt %d failed at stage %u\r\n",
-                (unsigned)attempt, (unsigned)r);
-        /* On failure, always pull REQUEST SENSE so we know why. */
-        uint8_t sense[18] = {0};
-        uint16_t slen = sizeof (sense);
-        uint8_t s_rc = bulk_in_read_retry (sense, &slen, 20);
-        if (s_rc == ERR_SUCCESS && slen >= 4) {
-            dump_request_sense (sense, (uint8_t)slen);
-        } else {
-            printf ("USBD:   REQUEST SENSE also failed (rc=%02x len=%u)\r\n",
-                    (unsigned)s_rc, (unsigned)slen);
-        }
-        Delay_Ms (100);
-    }
-
-    /* Step 10: try READ CAPACITY (16). */
-    printf ("USBD: step 10 - SCSI READ CAPACITY (16):\r\n");
-    {
-        uint8_t r16 = scsi_read_capacity16_once (&bc, &bs);
-        if (r16 == 0) {
-            printf ("USBD:   OK last_lba=%u block_size=%u\r\n",
-                    (unsigned)bc, (unsigned)bs);
-            return;
-        }
-        printf ("USBD:   CAP16 also failed (rc=%u)\r\n", (unsigned)r16);
-    }
-    printf ("USBD: full diagnostic finished - stick not usable.\r\n");
-}
 
 /* Attempt to (re-)enumerate the USB device and mount the FAT volume.
  * Returns 0 on success, non-zero (DEF_ERR_*) on failure.
@@ -973,12 +885,11 @@ uint8_t USB_TryEnsureMounted (void) {
 }
 
 /* Read `len` bytes of `path` (a FatFS path like "0:/GAMES/ROM1.ROM")
- * and write them into PSRAM at `psram_addr`.  Returns the number of
- * bytes actually copied, or 0 on error. */
+ * and write them into PSRAM at `psram_addr`.  If `len` is 0, the file
+ * size is used.  Returns the number of bytes actually copied, or 0 on
+ * error. */
 uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
                           uint32_t len) {
-    if (len == 0U) return 0U;
-
     /* Lazy-mount: if the user skipped `USB` (or replugged after a
      // disconnect), get the stick enumerated and the volume mounted
      // before we try to open the file. */
@@ -993,6 +904,23 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
     if (fr != FR_OK) {
         printf ("USB: f_open('%s') failed (%u)\r\n", path, (unsigned)fr);
         return 0U;
+    }
+
+        if (psram_addr < PSRAM_CART_BASE
+            || psram_addr >= (PSRAM_CART_BASE + PSRAM_CART_SIZE)) {
+        f_close (&fp);
+        printf ("USB: PSRAM address 0x%08lx out of range\r\n",
+                (unsigned long)psram_addr);
+        return 0U;
+    }
+
+    if (len == 0U) {
+        len = (uint32_t)f_size (&fp);
+    }
+
+    uint32_t remaining = (PSRAM_CART_BASE + PSRAM_CART_SIZE) - psram_addr;
+    if (len > remaining) {
+        len = remaining;
     }
 
     while (total < len) {

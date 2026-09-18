@@ -1,0 +1,58 @@
+                                      1 ;-------------------------------------------------------------------------------
+                                      2 ; crt0.s - C runtime startup for the RISKYMSX2 ROM LOADER cartridge.
+                                      3 ;
+                                      4 ; ROM layout (see Makefile for how the image is assembled):
+                                      5 ;   0x4000  "AB" MSX ROM header, INIT -> init
+                                      6 ;   0x4010  payload_len (word, patched by the Makefile after linking)
+                                      7 ;   0x4020  copy stub: LDIRs the payload to 0xC000, jumps to 0xC000.
+                                      8 ;   0x4040  PAYLOAD: the C loader, linked to run at 0xC000 in MSX RAM.
+                                      9 ;
+                                     10 ; The payload is position-DEPENDENT (sdcc emits absolute jp/call), so
+                                     11 ; the stub MUST copy it to its link address before jumping.
+                                     12 ;
+                                     13 ; Note: the SDCC z80 port merges all globals (zero-initialised ones
+                                     14 ; included) into the _DATA area, which the linker places directly
+                                     15 ; after _CODE.  makebin zero-fills the uninitialised tail, so copying
+                                     16 ; the whole span 0xC000..end covers data+bss - no separate BSS step.
+                                     17 ;
+                                     18 ; Entry (INIT, via CALSLT, IF=0):
+                                     19 ;   1. DI (keep interrupts off; the loader polls keys via SNSMAT so
+                                     20 ;      it never needs the BIOS keyboard ISR).
+                                     21 ;   2. LDIR payload -> 0xC000.
+                                     22 ;   3. JP 0xC000 (_main is the first symbol of _CODE).
+                                     23 ;-------------------------------------------------------------------------------
+                                     24 
+                                     25 	.module crt0
+                                     26 
+                                     27 	.area	_HEADER (ABS)
+                                     28 
+      004000                         29 	.org	0x4000
+                                     30 
+                                     31 	;; --- MSX ROM header (16 bytes) ---
+      004000 41 42                   32 	.db	0x41, 0x42		; 'A' 'B' cartridge ID
+      004002r20r40                   33 	.dw	init			; INIT: auto-start entry point
+      004004 00 00                   34 	.dw	0x0000			; STATEMENT
+      004006 00 00                   35 	.dw	0x0000			; DEVICE
+      004008 00 00                   36 	.dw	0x0000			; TEXT
+      00400A 00 00 00 00 00 00       37 	.dw	0x0000, 0x0000, 0x0000	; reserved
+                                     38 
+                                     39 	;; --- patched-by-Makefile constant (file offset 0x10) ---
+      004010                         40 	.org	0x4010
+      004010 00 00                   41 payload_len:	.dw	0		; bytes to copy (payload span)
+      004012 00 00 00 00 00 00       42 	.dw	0, 0, 0		; spare (aligns stub to 0x4020)
+                                     43 
+                                     44 	;; --- copy stub (0x4020) ---
+      004020                         45 	.org	0x4020
+      004020                         46 init:
+      004020 F3               [ 4]   47 	di
+                                     48 
+      004021 21 40 40         [10]   49 	ld	hl, #0x4040		; source: payload in ROM
+      004024 11 00 C0         [10]   50 	ld	de, #0xC000		; destination: MSX RAM
+      004027 ED 4Br10r40      [20]   51 	ld	bc, (payload_len)	; length (patched by Makefile)
+      00402B ED B0            [21]   52 	ldir
+                                     53 
+      00402D C3 00 C0         [10]   54 	jp	0xC000			; -> RAM-resident _main
+                                     55 
+                                     56 	;; _main never returns; if it somehow did, park.
+      004030 F3               [ 4]   57 	di
+      004031 76               [ 4]   58 	halt

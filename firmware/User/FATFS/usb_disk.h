@@ -68,7 +68,10 @@ uint8_t USBH_PreDeal (void);
 /* SCSI commands used by the disk layer */
 uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size);
 uint8_t usb_scsi_read_sector (uint32_t lba, uint8_t *buf, uint32_t block_size);
+uint8_t usb_scsi_write_sector (uint32_t lba, const uint8_t *buf, uint32_t block_size);
 uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len);
+uint8_t usb_scsi_inquiry (uint8_t *buf, uint16_t len);
+uint8_t usb_scsi_test_unit_ready (void);
 uint8_t msc_mass_storage_reset (void);
 
 /* Clear enumerator state (called by disk_initialize before re-enum). */
@@ -79,6 +82,26 @@ void ClearUSB (void);
 extern uint8_t  usb_in_ep;
 extern uint8_t  usb_out_ep;
 
+/* Descriptor scratch buffers used by the enumeration diagnostic
+ * (usb_tests.c reads them).  DevDesc_Buf holds the 18-byte device
+ * descriptor; Com_Buffer holds the configuration descriptor set. */
+extern __attribute__ ((aligned (4))) uint8_t DevDesc_Buf[18];
+extern __attribute__ ((aligned (4))) uint8_t Com_Buffer[];
+
+/* Publish the bulk endpoint pair discovered during enumeration into
+ * the global usb_in_ep/usb_out_ep (and reset the data toggles).  The
+ * enumeration diagnostic and USBH_EnumRootDevice both call this once
+ * the MSC interface has been parsed. */
+void USB_PublishEndpoints (uint8_t in_ep, uint8_t out_ep);
+
+/* Single-shot SCSI READ CAPACITY helpers (used by the enumeration
+ * diagnostic).  usb_scsi_read_capacity below is the retrying version
+ * used by production paths. */
+uint8_t USB_ScsiReadCapacityOnce  (uint32_t *block_count,
+                                   uint32_t *block_size);
+uint8_t USB_ScsiReadCapacity16Once (uint32_t *block_count,
+                                    uint32_t *block_size);
+
 /* Single FATFS volume handle (mounted once after first successful
  * enumeration). */
 extern FATFS g_fatfs;
@@ -86,9 +109,10 @@ extern FATFS g_fatfs;
 /* --- High-level helpers used by the CLI ------------------------------- */
 
 /* Read `len` bytes of `path` into the PSRAM buffer at `psram_addr`.
- * Uses FATFS to seek/open/read and PSRAMDMAWrite to push the sector
- * into PSRAM. `len` is capped at the available cart-image space.
- * Returns number of bytes actually copied, or 0 on error. */
+ * If `len` is 0, the file size is used. Uses FATFS to seek/open/read
+ * and PSRAM DMA to push each chunk into PSRAM. `len` is capped at the
+ * available cart-image space. Returns number of bytes actually copied,
+ * or 0 on error. */
 uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr, uint32_t len);
 
 /* Print the first `max` directory entries of `path` to the UART.
@@ -101,10 +125,9 @@ void USB_ListDir (const char *path, uint16_t max);
  * missed `USB` step doesn't silently produce FR_NO_FILESYSTEM. */
 uint8_t USB_TryEnsureMounted (void);
 
-/* Verbose enumeration diagnostic.  Walks the full USBHS host +
- * enumeration + SCSI READ CAPACITY pipeline, printing every step +
- * REQUEST SENSE data after each failure.  Does NOT call f_mount, so
- * this is safe to run even if the stick refuses to enumerate. */
-void USB_DiagEnumerate (void);
+/* NOTE: the standalone tests (verbose enumeration diagnostic, SCSI
+ * read test, FAT integration test) now live in USB_Host/usb_tests.{c,h}
+ * - see USB_Tests_Enumerate / USB_Tests_Scsi / USB_Tests_Fat /
+ * USB_Tests_RunAll.  This module is purely driver glue. */
 
 #endif /* __USB_DISK_H */

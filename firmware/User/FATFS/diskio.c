@@ -8,11 +8,9 @@
 /  utility buffer is from a different project; the disk layer here only
 /  needs the USBHS enumeration glue from usb_disk.{c,h}).
 /
-/  Writes are intentionally NOT supported: ffconf.h has FF_FS_READONLY=0
-/  but the cart-loader use case is read-only (load ROMs from the stick
-/  into PSRAM).  If write support is ever wanted, add a
-/  usb_scsi_write_sector() implementation in usb_disk.c mirroring
-/  usb_scsi_read_sector().
+/  Read AND write are supported (FF_FS_READONLY = 0).  Writes go
+/  through usb_scsi_write_sector() which implements SCSI WRITE(10)
+/  over the bulk-OUT pipe.
 /-----------------------------------------------------------------------*/
 
 #include "ff.h"     /* Obtains integer types */
@@ -63,11 +61,16 @@ DRESULT disk_read (BYTE pdrv, BYTE *buff, LBA_t sector, UINT count) {
 }
 
 /*-----------------------------------------------------------------------*/
-/* Write Sector(s) - not supported                                       */
+/* Write Sector(s)                                                        */
 /*-----------------------------------------------------------------------*/
 DRESULT disk_write (BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
-    (void)pdrv; (void)buff; (void)sector; (void)count;
-    return RES_WRPRT;
+    for (UINT i = 0; i < count; i++) {
+        if (usb_scsi_write_sector (sector + i, buff + i * 512,
+                                   block_size) != 0) {
+            return RES_ERROR;
+        }
+    }
+    return RES_OK;
 }
 
 /*-----------------------------------------------------------------------*/

@@ -75,7 +75,11 @@ typedef enum {
                                   * SCC emulator (see scc.c). Read path treats
                                   * the 0x9800..0x98FF register window as the
                                   * sound chip, like real hardware. */
-    CART_MAP_MAX        = 11,
+    CART_MAP_LOADER     = 11,  /* ROM-loader: serves the embedded loader ROM
+                                  * + the 0x7FF0..0x7FFF mailbox (see loader.h).
+                                  * Set at boot so the MSX comes up in the
+                                  * ROM selector. */
+    CART_MAP_MAX        = 12,
 } Cart_Mapper;
 
 /* Mapper names used by `MAP ?` and CLI error messages. */

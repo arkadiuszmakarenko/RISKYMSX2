@@ -1,0 +1,10 @@
+-mjwx
+-i payload.ihx
+-b _CODE = 0xc000
+-b _DATA = 0xc800
+-k /usr/bin/../share/sdcc/lib/z80
+-k /usr/share/sdcc/lib/z80
+-l z80
+payload.rel
+
+-e

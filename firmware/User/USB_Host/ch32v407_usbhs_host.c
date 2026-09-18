@@ -66,24 +66,18 @@ void USBHS_RCC_Init(FunctionalState sta)
         {
             RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, DISABLE);
             RCC->CTLR &= ~RCC_USBHSPLLON;
-            /* Force the USBHS PLL to use the internal HSI (20 MHz reference)
-             * even when the system clock is on HSE. The WCH library's stock
-             * path picks HSE @25 MHz when HSE is on, which on this board
-             * trips a brownout during the 25 MHz -> 480 MHz USBHSPLL startup
-             * transient -- RCC->RSTSCKR shows PINRSTF|PORRSTF, i.e. the chip
-             * is power-cycling. Driving USBHSPLL from HSI keeps the system
-             * PLL on HSE@25 MHz -> 400 MHz (proven to work) but avoids the
-             * high-transient HSE->480 MHz USBHSPLL. */
-            RCC_USBHSPLLCLKConfig(RCC_USBHSPLLCLKSource_HSI);
-            RCC_USBHSPLLReferConfig(RCC_USBHSPLLCKREFCLK_20M);
-            RCC->CTLR |= RCC_USBHSPLLON;
-            /* Bound the lock wait so a hung PLL doesn't loop forever. */
+            if(RCC->CTLR & RCC_HSEON)
             {
-                volatile uint32_t spin = 200000;  /* ~ a few ms at 200 MHz */
-                while (spin-- && (!(RCC->CTLR & RCC_USBHSPLLRDY))) {
-                    __asm volatile("nop");
-                }
+                RCC_USBHSPLLCLKConfig(RCC_USBHSPLLCLKSource_HSE);
+                RCC_USBHSPLLReferConfig(RCC_USBHSPLLCKREFCLK_25M);
             }
+            else
+            {
+                RCC_USBHSPLLCLKConfig(RCC_USBHSPLLCLKSource_HSI);
+                RCC_USBHSPLLReferConfig(RCC_USBHSPLLCKREFCLK_20M);
+            }
+            RCC->CTLR |= RCC_USBHSPLLON;
+            while (!(RCC->CTLR & RCC_USBHSPLLRDY));
         }
 
         /* Enable UTMI Clock */
@@ -99,6 +93,7 @@ void USBHS_RCC_Init(FunctionalState sta)
 		RCC->CTLR &= ~RCC_USBHSPLLON;
     }
 }
+
 
 /*********************************************************************
  * @fn      USBHS_Host_Init
@@ -723,12 +718,25 @@ uint8_t USBHSH_GetEndpData( uint8_t endp_num, uint16_t *pendp_tog, uint8_t *pbuf
 {
     uint8_t  s;
 
-    s = USBHSH_Transact( ( USB_PID_IN << 4 ) | endp_num, *pendp_tog, 0 );
+    /* CONTROL register: bits[7:4]=endpoint, bits[3:0]=token PID.
+     * The endpoint number must be shifted left, NOT the PID. */
+    s = USBHSH_Transact( ( endp_num << 4 ) | USB_PID_IN, *pendp_tog, 0 );
     if( s == ERR_SUCCESS )
     {
         *plen = USBHSH->RX_LEN;
-        memcpy( pbuf, RxBuffer, *plen );
-        *pendp_tog ^= USBHS_UH_T_TOG_DATA1;
+        /* Copy what we got (could be 0 if the stick ZLP'd). */
+        if (*plen > 0) {
+            memcpy( pbuf, RxBuffer, *plen );
+        }
+        /* Only advance the data toggle when we actually received
+         * a DATAx packet. If the transaction succeeded but the
+         * device returned a ZLP (RX_LEN==0), the toggle must NOT
+         * advance - the next IN still expects the same DATAx, and
+         * the caller's retry logic will reissue with the same
+         * toggle bit. */
+        if (*plen > 0) {
+            *pendp_tog ^= USBHS_UH_T_TOG_DATA1;
+        }
     }
     return s;
 }
@@ -751,7 +759,9 @@ uint8_t USBHSH_SendEndpData( uint8_t endp_num, uint16_t *pendp_tog, uint8_t *pbu
 
     memcpy( TxBuffer, pbuf, len );
     USBHSH->TX_LEN = len;
-    s = USBHSH_Transact( ( USB_PID_OUT << 4 ) | endp_num, *pendp_tog, 0 );
+    /* CONTROL register: bits[7:4]=endpoint, bits[3:0]=token PID.
+     * The endpoint number must be shifted left, NOT the PID. */
+    s = USBHSH_Transact( ( endp_num << 4 ) | USB_PID_OUT, *pendp_tog, 0 );
     if( s == ERR_SUCCESS )
     {
         *pendp_tog ^= USBHS_UH_T_TOG_DATA1;

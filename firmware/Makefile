@@ -125,6 +125,10 @@ SRCDIRS        := Startup Debug Core Peripheral/src \
 INCDIRS        := -IDebug -ICore \
                   -IUser -IUser/FATFS -IUser/USB_Host \
                   -IPeripheral/inc -IStartup
+MSX_SOFTWARE_DIR := $(CURDIR)/../MSXSoftware
+ROM_LOADER_DIR   := $(MSX_SOFTWARE_DIR)/RomLoader
+ROM_EMBED_SRC    := User/hello_rom.c
+ROM_EMBED_DEPS   :=
 OBJDIR         := obj
 
 # --- Discover sources automatically ------------------------------------------
@@ -135,7 +139,9 @@ SRC_C          := $(wildcard Startup/*.c  Startup/*.S \
                     Peripheral/src/*.c \
                     User/*.c \
                     User/FATFS/*.c \
-                    User/USB_Host/*.c)
+					User/USB_Host/*.c) $(ROM_EMBED_SRC)
+SRC_C          := $(filter-out User/selector_rom.c,$(SRC_C))
+SRC_C          := $(sort $(SRC_C))
 
 # Objects mirror source tree under $(OBJDIR)/<subdir>/<name>.o.
 OBJ_C          := $(patsubst %.c,$(OBJDIR)/%.o,$(SRC_C))
@@ -219,6 +225,10 @@ $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 		-Wl,-Map,"$(MAP)" \
 		--specs=nano.specs --specs=nosys.specs \
 		-o "$@" $(OBJS) $(EXTRA_OBJS) -lm
+
+$(ROM_EMBED_SRC): $(ROM_EMBED_DEPS)
+	@echo "  EMBED $(notdir $@)"
+	@"$(MAKE)" -C "$(ROM_LOADER_DIR)" embed
 
 $(HEX): $(ELF)
 	@echo "  HEX   $@"

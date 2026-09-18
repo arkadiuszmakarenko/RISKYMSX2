@@ -1,6 +1,6 @@
 /********************************** (C) COPYRIGHT *******************************
  * File Name          : psram.c
- * Description        : PSRAM init + self-test + hello_rom mirror for RISKYMSX2.
+ * Description        : PSRAM init + self-test + selector_rom mirror for RISKYMSX2.
  *
  *                      The init sequence is a near-byte-for-byte port of the
  *                      WCH reference example at PSRAM/PSRAM/User/main.c
@@ -36,9 +36,9 @@
  * (no embedded ROM), and taking sizeof() on a 32768-declared extern
  * would always report 32768 - the placeholder branch would be dead
  * code and the full-32K copy would read past the 1-byte object in
- * flash. Use hello_rom_len to decide which path to take. */
-extern const uint8_t  hello_rom[];
-extern const uint32_t hello_rom_len;
+ * flash. Use selector_rom_len to decide which path to take. */
+extern unsigned char  hello_rom[];
+extern unsigned int    hello_rom_len;
 
 /* ---------- PSRAM device MR encodings (copied from PSRAM/PSRAM/User/PSRAM.h) */
 #define PSRAM_MR_ADDR_0          0x00U  /* read latency / operating range */
@@ -191,7 +191,7 @@ static void psram_set_rd_latency(uint32_t mr0_freq, uint32_t latency,
 /* Fill the entire cart image window with 0xFF (the MSX "open bus"
  * pattern for an unpopulated slot). NO embedded ROM is mirrored at
  * boot any more: with the mapper left at NONE the MSX drops to BASIC;
- * a cart image is expected via XLOAD. (The hello_rom[] mirror + verify
+ * a cart image is expected via XLOAD. (The selector_rom[] mirror + verify
  * this replaces was the boot-time "initial tests" the diagnostic ROM
  * ran on every reset.) */
 static uint8_t psram_copy_rom(void)
@@ -379,7 +379,7 @@ uint8_t PSRAM_Init(void)
         return err;
     }
 
-    /* 6. Mirror hello_rom[] into PSRAM and verify byte-for-byte. */
+    /* 6. Mirror selector_rom[] into PSRAM and verify byte-for-byte. */
     err = psram_copy_rom();
     if (err != PSRAM_OK) {
         return err;

@@ -1,6 +1,7 @@
 #include "cart.h"
 #include "psram.h"
 #include "scc.h"
+#include "loader.h"
 #include "ch32v4x7.h"
 #include "debug.h"
 
@@ -108,6 +109,15 @@ void Cart_EXTI0_ROM32k_Handler (void) __attribute__((section(".ramfunc"), noinli
 void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                        interrupt("WCH-Interrupt-fast")));
 
+/* Flash-selector mapper: serves the embedded selector ROM (selector_rom[])
+ * for ordinary cart reads, and decodes the mailbox window 0x7FF0..0x7FFF
+ * that the RAM-resident loader uses to talk to the firmware (see
+ * loader.h / MSXSoftware/RomLoader). Keep this handler in flash: the
+ * cart flash path is zero-wait, so there is no reason to delay boot on
+ * PSRAM configuration just to reach the selector. */
+void Cart_EXTI0_Loader_Handler (void) __attribute__((noinline,
+                                                     interrupt("WCH-Interrupt-fast")));
+
 /* No-mapper fallback: just clears the pending bit and releases the bus.
  * The Z80 reads 0xFF (floating bus). */
 void Cart_EXTI0_None_Handler (void) __attribute__((section(".ramfunc"), noinline,
@@ -129,6 +139,7 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "NEO8",
     "NEO16",
     "KONAMISCC",
+    "LOADER",
 };
 
 uint32_t Cart_GetImageBase (void) { return PSRAM_CART_BASE; }
@@ -137,7 +148,12 @@ Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
 
 int Cart_SetMapper (Cart_Mapper m) {
     if ((unsigned)m >= CART_MAP_MAX) return -1;
-    if (m != CART_MAP_NONE && PSRAM_GetRomMirrorBase() == 0U) return -1;
+    if (m != CART_MAP_NONE
+        && m != CART_MAP_ROM16k
+        && m != CART_MAP_ROM32k
+        && m != CART_MAP_ROM48k
+        && m != CART_MAP_LOADER
+        && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
      * leak stale offsets. Only the bank-switching mappers touch these;
@@ -155,7 +171,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     switch (m) {
     case CART_MAP_NONE:        h = (uint32_t)Cart_EXTI0_None_Handler; break;
     case CART_MAP_ROM16k:      h = (uint32_t)Cart_EXTI0_ROM16k_Handler; break;
-    case CART_MAP_ROM32k:      h = (uint32_t)Cart_EXTI0_ROM32k_Handler; break;
+    case CART_MAP_ROM32k:      h = (uint32_t)Cart_EXTI0_Loader_Handler; break;
     case CART_MAP_ROM48k:      h = (uint32_t)Cart_EXTI0_ROM48k_Handler; break;
     case CART_MAP_KONAMI:
     case CART_MAP_KONAMISCC:
@@ -164,9 +180,15 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_KONAMINOSCC: h = (uint32_t)Cart_EXTI0_KonamiNOSCC_Handler; break;
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
+    case CART_MAP_LOADER:      h = (uint32_t)Cart_EXTI0_Loader_Handler; break;
     default:                   return -1;
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
+
+    /* Flash selector mappers: reset the mailbox so the loader starts clean. */
+    if (m == CART_MAP_ROM32k || m == CART_MAP_LOADER) {
+        Loader_Reset ();
+    }
 
     /* Initial-bank assignment for bank-switching mappers so the first
      * Z80 read sees bank 0 (or bank 2 for Konami-with-SCC-mirror-less
@@ -1322,6 +1344,138 @@ void Cart_EXTI0_ROM48k_Handler (void) {
         "2:                                \n"
         : : : "t0", "t1", "t2", "a0", "a1", "a2", "a3", "a4",
               "a5", "a6", "a7", "memory");
+}
+
+/* ------------------------------------------------------------------ */
+/* Flash-selector handler: serve the embedded selector ROM for ordinary */
+/* cart reads; decode the mailbox window at 0x7FF0..0x7FFF. The loader */
+/* (MSXSoftware/RomLoader) runs from MSX RAM, so its cart cycles are   */
+/* deliberate mailbox accesses - C here is fast enough.               */
+/* ------------------------------------------------------------------ */
+
+/* Embedded temporary hello ROM image (flash-resident). */
+extern unsigned char hello_rom[];
+
+/* Mailbox window: cart address 0x7FF0..0x7FFF. */
+#define LOADER_MBOX_ADDR   0x7FF0U
+
+/* Args-per-command table (MUST match romloader.c): only LOAD_ROM
+ * (11-byte filename) and SET_MAPPER (1 byte) take args. */
+static const uint8_t s_loader_args_of[6] = { 0, 0, 0, 11, 1, 0 };
+
+void Cart_EXTI0_Loader_Handler (void) {
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl = GPIOE->INDR;
+
+    /* Late entry: SLTSL already high, this cycle is already over. */
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    /* RD/WR lag SLTSL by a gate delay - a single sample here races that
+     * delay and misclassifies reads as the "neither asserted" spurious
+     * case (same bug documented above for KonamiNOSCC/ASCII8k/ASCII16k).
+     * Poll until one settles, or bail if SLTSL rises first. */
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        /* READ cycle. */
+        uint8_t v;
+        if (address >= LOADER_MBOX_ADDR) {
+            uint16_t off = (uint16_t)(address - LOADER_MBOX_ADDR);
+            switch (off) {
+            case 0:  /* status */
+                v = g_loader_mbox.status;
+                break;
+            case 1:  /* pop one result byte */
+                if (g_loader_mbox.res_n > 0U) {
+                    v = g_loader_mbox.res[g_loader_mbox.res_head];
+                    g_loader_mbox.res_head = (uint8_t)(
+                        (g_loader_mbox.res_head + 1U)
+                        % LOADER_FIFO_DEPTH);
+                    g_loader_mbox.res_n--;
+                } else {
+                    v = 0xFFU;
+                }
+                break;
+            default:
+                v = 0xFFU;
+                break;
+            }
+        } else if (address >= 0x4000U && address < 0xC000U) {
+            /* Serve the embedded hello ROM (32 KiB image, mapped at
+             * 0x4000 like ROM32k). */
+            v = hello_rom[address - 0x4000U];
+        } else {
+            /* Out of the loader's window: float. */
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            GPIOB->CFGHR = CART_BUS_OFF;
+            return;
+        }
+        /* Drive the byte. */
+        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                     | ((uint32_t)v << 8);
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+        return;
+    }
+
+    /* WRITE cycle: WR is low now; data valid on PB8..15. */
+    if ((ctrl & CART_WR_MASK) == 0U) {
+        const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+        if (address == LOADER_MBOX_ADDR) {
+            /* Mailbox command byte stream. */
+            if (g_loader_mbox.arg_n > 0U) {
+                /* collecting args for the current command */
+                g_loader_mbox.args[
+                    s_loader_args_of[
+                        g_loader_mbox.cmd < 6U
+                            ? g_loader_mbox.cmd : 0U]
+                    - g_loader_mbox.arg_n] = w;
+                g_loader_mbox.arg_n--;
+                if (g_loader_mbox.arg_n == 0U) {
+                    g_loader_mbox.have_cmd = 1U;
+                    g_loader_mbox.status &=
+                        (uint8_t)~LOADER_ST_DONE;
+                }
+            } else {
+                /* new command */
+                g_loader_mbox.cmd = w;
+                uint8_t need =
+                    (w < 6U) ? s_loader_args_of[w] : 0U;
+                if (need == 0U) {
+                    g_loader_mbox.have_cmd = 1U;
+                    g_loader_mbox.status &=
+                        (uint8_t)~LOADER_ST_DONE;
+                } else {
+                    g_loader_mbox.arg_n = need;
+                }
+            }
+        }
+        /* Other writes: ignore (the loader never writes elsewhere
+         * through the cart window). */
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+        return;
+    }
+
+    /* Neither RD nor WR asserted - spurious; release. */
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    GPIOB->CFGHR = CART_BUS_OFF;
 }
 
 /* ------------------------------------------------------------------ */

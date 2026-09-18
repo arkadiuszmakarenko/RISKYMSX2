@@ -1,0 +1,1189 @@
+                                      1 ;--------------------------------------------------------
+                                      2 ; File Created by SDCC : free open source ANSI-C Compiler
+                                      3 ; Version 4.2.0 #13081 (Linux)
+                                      4 ;--------------------------------------------------------
+                                      5 	.module romloader
+                                      6 	.optsdcc -mz80
+                                      7 	
+                                      8 ;--------------------------------------------------------
+                                      9 ; Public variables in this module
+                                     10 ;--------------------------------------------------------
+                                     11 	.globl _main
+                                     12 ;--------------------------------------------------------
+                                     13 ; special function registers
+                                     14 ;--------------------------------------------------------
+                                     15 ;--------------------------------------------------------
+                                     16 ; ram data
+                                     17 ;--------------------------------------------------------
+                                     18 	.area _DATA
+      000000                         19 _s_files:
+      000000                         20 	.ds 1536
+      000600                         21 _s_count:
+      000600                         22 	.ds 2
+      000602                         23 _main_file_ptrs_65537_55:
+      000602                         24 	.ds 256
+                                     25 ;--------------------------------------------------------
+                                     26 ; ram data
+                                     27 ;--------------------------------------------------------
+                                     28 	.area _INITIALIZED
+                                     29 ;--------------------------------------------------------
+                                     30 ; absolute external ram data
+                                     31 ;--------------------------------------------------------
+                                     32 	.area _DABS (ABS)
+                                     33 ;--------------------------------------------------------
+                                     34 ; global & static initialisations
+                                     35 ;--------------------------------------------------------
+                                     36 	.area _HOME
+                                     37 	.area _GSINIT
+                                     38 	.area _GSFINAL
+                                     39 	.area _GSINIT
+                                     40 ;--------------------------------------------------------
+                                     41 ; Home
+                                     42 ;--------------------------------------------------------
+                                     43 	.area _HOME
+                                     44 	.area _HOME
+                                     45 ;--------------------------------------------------------
+                                     46 ; code
+                                     47 ;--------------------------------------------------------
+                                     48 	.area _CODE
+                                     49 ;romloader.c:98: static uint8_t snsmat(uint8_t row) __z88dk_fastcall __naked
+                                     50 ;	---------------------------------
+                                     51 ; Function snsmat
+                                     52 ; ---------------------------------
+      000000                         53 _snsmat:
+                                     54 ;romloader.c:112: __endasm;
+      000000 DD E5            [15]   55 	push	ix
+      000002 FD E5            [15]   56 	push	iy
+      000004 7D               [ 4]   57 	ld	a, l
+      000005 FD 21 C0 FC      [14]   58 	ld	iy, #0xFCC0
+      000009 DD 21 41 01      [14]   59 	ld	ix, #0x0141 ; SNSMAT
+      00000D CD 1C 00         [17]   60 	call	0x001C ; CALSLT
+      000010 6F               [ 4]   61 	ld	l, a ; return value in L
+      000011 FD E1            [14]   62 	pop	iy
+      000013 DD E1            [14]   63 	pop	ix
+      000015 C9               [10]   64 	ret
+                                     65 ;romloader.c:113: }
+                                     66 ;romloader.c:116: static void chput(char c) __z88dk_fastcall
+                                     67 ;	---------------------------------
+                                     68 ; Function chput
+                                     69 ; ---------------------------------
+      000016                         70 _chput:
+                                     71 ;romloader.c:130: __endasm;
+      000016 DD E5            [15]   72 	push	ix
+      000018 FD E5            [15]   73 	push	iy
+      00001A 08               [ 4]   74 	ex	af, af'
+      00001B 7D               [ 4]   75 	ld	a, l
+      00001C FD 21 C0 FC      [14]   76 	ld	iy, #0xFCC0
+      000020 DD 21 A2 00      [14]   77 	ld	ix, #0x00A2 ; CHPUT
+      000024 CD 1C 00         [17]   78 	call	0x001C ; CALSLT
+      000027 08               [ 4]   79 	ex	af, af'
+      000028 FD E1            [14]   80 	pop	iy
+      00002A DD E1            [14]   81 	pop	ix
+                                     82 ;romloader.c:131: }
+      00002C C9               [10]   83 	ret
+                                     84 ;romloader.c:134: static void chgmod(uint8_t mode) __z88dk_fastcall
+                                     85 ;	---------------------------------
+                                     86 ; Function chgmod
+                                     87 ; ---------------------------------
+      00002D                         88 _chgmod:
+                                     89 ;romloader.c:148: __endasm;
+      00002D DD E5            [15]   90 	push	ix
+      00002F FD E5            [15]   91 	push	iy
+      000031 08               [ 4]   92 	ex	af, af'
+      000032 7D               [ 4]   93 	ld	a, l
+      000033 FD 21 C0 FC      [14]   94 	ld	iy, #0xFCC0
+      000037 DD 21 5F 00      [14]   95 	ld	ix, #0x005F ; CHGMOD
+      00003B CD 1C 00         [17]   96 	call	0x001C ; CALSLT
+      00003E 08               [ 4]   97 	ex	af, af'
+      00003F FD E1            [14]   98 	pop	iy
+      000041 DD E1            [14]   99 	pop	ix
+                                    100 ;romloader.c:149: }
+      000043 C9               [10]  101 	ret
+                                    102 ;romloader.c:156: static uint8_t mbox_status(void)     { return mbox[MBOX_STATUS]; }
+                                    103 ;	---------------------------------
+                                    104 ; Function mbox_status
+                                    105 ; ---------------------------------
+      000044                        106 _mbox_status:
+      000044 2Ar49r00         [16]  107 	ld	hl, (_mbox)
+      000047 7E               [ 7]  108 	ld	a, (hl)
+      000048 C9               [10]  109 	ret
+      000049                        110 _mbox:
+      000049 F0 7F                  111 	.dw #0x7ff0
+                                    112 ;romloader.c:157: static uint8_t mbox_pop(void)        { return mbox[MBOX_DATA];   }
+                                    113 ;	---------------------------------
+                                    114 ; Function mbox_pop
+                                    115 ; ---------------------------------
+      00004B                        116 _mbox_pop:
+      00004B 2Ar49r00         [16]  117 	ld	hl, (_mbox)
+      00004E 23               [ 6]  118 	inc	hl
+      00004F 7E               [ 7]  119 	ld	a, (hl)
+      000050 C9               [10]  120 	ret
+                                    121 ;romloader.c:158: static void    mbox_push(uint8_t v)  { mbox[MBOX_CMD] = v;       }
+                                    122 ;	---------------------------------
+                                    123 ; Function mbox_push
+                                    124 ; ---------------------------------
+      000051                        125 _mbox_push:
+      000051 4F               [ 4]  126 	ld	c, a
+      000052 2Ar49r00         [16]  127 	ld	hl, (_mbox)
+      000055 71               [ 7]  128 	ld	(hl), c
+      000056 C9               [10]  129 	ret
+                                    130 ;romloader.c:161: static void mbox_wait_done(void)
+                                    131 ;	---------------------------------
+                                    132 ; Function mbox_wait_done
+                                    133 ; ---------------------------------
+      000057                        134 _mbox_wait_done:
+                                    135 ;romloader.c:163: while ((mbox_status() & ST_DONE) == 0U) {
+      000057                        136 00101$:
+      000057 CDr44r00         [17]  137 	call	_mbox_status
+      00005A CB 77            [ 8]  138 	bit	6, a
+      00005C 28 F9            [12]  139 	jr	Z, 00101$
+                                    140 ;romloader.c:165: }
+      00005E C9               [10]  141 	ret
+                                    142 ;romloader.c:169: static void mbox_cmd(uint8_t cmd, const uint8_t *args, uint8_t argc)
+                                    143 ;	---------------------------------
+                                    144 ; Function mbox_cmd
+                                    145 ; ---------------------------------
+      00005F                        146 _mbox_cmd:
+      00005F CDr00r00         [17]  147 	call	___sdcc_enter_ix
+      000062 4F               [ 4]  148 	ld	c, a
+                                    149 ;romloader.c:171: mbox_push(cmd);
+      000063 D5               [11]  150 	push	de
+      000064 79               [ 4]  151 	ld	a, c
+      000065 CDr51r00         [17]  152 	call	_mbox_push
+      000068 D1               [10]  153 	pop	de
+                                    154 ;romloader.c:172: for (uint8_t i = 0; i < argc; i++)
+      000069 0E 00            [ 7]  155 	ld	c, #0x00
+      00006B                        156 00103$:
+      00006B 79               [ 4]  157 	ld	a, c
+      00006C DD 96 04         [19]  158 	sub	a, 4 (ix)
+      00006F 30 10            [12]  159 	jr	NC, 00101$
+                                    160 ;romloader.c:173: mbox_push(args[i]);
+      000071 69               [ 4]  161 	ld	l, c
+      000072 26 00            [ 7]  162 	ld	h, #0x00
+      000074 19               [11]  163 	add	hl, de
+      000075 46               [ 7]  164 	ld	b, (hl)
+      000076 C5               [11]  165 	push	bc
+      000077 D5               [11]  166 	push	de
+      000078 78               [ 4]  167 	ld	a, b
+      000079 CDr51r00         [17]  168 	call	_mbox_push
+      00007C D1               [10]  169 	pop	de
+      00007D C1               [10]  170 	pop	bc
+                                    171 ;romloader.c:172: for (uint8_t i = 0; i < argc; i++)
+      00007E 0C               [ 4]  172 	inc	c
+      00007F 18 EA            [12]  173 	jr	00103$
+      000081                        174 00101$:
+                                    175 ;romloader.c:174: mbox_wait_done();
+      000081 CDr57r00         [17]  176 	call	_mbox_wait_done
+                                    177 ;romloader.c:175: }
+      000084 DD E1            [14]  178 	pop	ix
+      000086 E1               [10]  179 	pop	hl
+      000087 33               [ 6]  180 	inc	sp
+      000088 E9               [ 4]  181 	jp	(hl)
+                                    182 ;romloader.c:179: static void print(const char *s)
+                                    183 ;	---------------------------------
+                                    184 ; Function print
+                                    185 ; ---------------------------------
+      000089                        186 _print:
+      000089 EB               [ 4]  187 	ex	de, hl
+                                    188 ;romloader.c:181: while (*s)
+      00008A                        189 00101$:
+      00008A 1A               [ 7]  190 	ld	a, (de)
+      00008B B7               [ 4]  191 	or	a, a
+      00008C C8               [11]  192 	ret	Z
+                                    193 ;romloader.c:182: chput(*s++);
+      00008D 6F               [ 4]  194 	ld	l, a
+                                    195 ;	spillPairReg hl
+                                    196 ;	spillPairReg hl
+      00008E 13               [ 6]  197 	inc	de
+      00008F D5               [11]  198 	push	de
+      000090 CDr16r00         [17]  199 	call	_chput
+      000093 D1               [10]  200 	pop	de
+                                    201 ;romloader.c:183: }
+      000094 18 F4            [12]  202 	jr	00101$
+                                    203 ;romloader.c:185: static void print_dec(uint16_t v)
+                                    204 ;	---------------------------------
+                                    205 ; Function print_dec
+                                    206 ; ---------------------------------
+      000096                        207 _print_dec:
+      000096 DD E5            [15]  208 	push	ix
+      000098 DD 21 00 00      [14]  209 	ld	ix,#0
+      00009C DD 39            [15]  210 	add	ix,sp
+      00009E F5               [11]  211 	push	af
+      00009F F5               [11]  212 	push	af
+      0000A0 F5               [11]  213 	push	af
+      0000A1 EB               [ 4]  214 	ex	de, hl
+                                    215 ;romloader.c:189: if (v == 0) {
+      0000A2 7A               [ 4]  216 	ld	a, d
+      0000A3 B3               [ 4]  217 	or	a, e
+      0000A4 20 07            [12]  218 	jr	NZ, 00113$
+                                    219 ;romloader.c:190: chput('0');
+      0000A6 2E 30            [ 7]  220 	ld	l, #0x30
+                                    221 ;	spillPairReg hl
+                                    222 ;	spillPairReg hl
+      0000A8 CDr16r00         [17]  223 	call	_chput
+                                    224 ;romloader.c:191: return;
+      0000AB 18 4B            [12]  225 	jr	00109$
+                                    226 ;romloader.c:193: while (v) {
+      0000AD                        227 00113$:
+      0000AD 0E 00            [ 7]  228 	ld	c, #0x00
+      0000AF                        229 00103$:
+      0000AF 7A               [ 4]  230 	ld	a, d
+      0000B0 B3               [ 4]  231 	or	a, e
+      0000B1 28 30            [12]  232 	jr	Z, 00115$
+                                    233 ;romloader.c:194: buf[i++] = (char)('0' + (v % 10U));
+      0000B3 D5               [11]  234 	push	de
+      0000B4 59               [ 4]  235 	ld	e, c
+      0000B5 16 00            [ 7]  236 	ld	d, #0x00
+      0000B7 21 02 00         [10]  237 	ld	hl, #2
+      0000BA 39               [11]  238 	add	hl, sp
+      0000BB 19               [11]  239 	add	hl, de
+      0000BC D1               [10]  240 	pop	de
+      0000BD 0C               [ 4]  241 	inc	c
+      0000BE D5               [11]  242 	push	de
+      0000BF FD E1            [14]  243 	pop	iy
+      0000C1 E5               [11]  244 	push	hl
+      0000C2 C5               [11]  245 	push	bc
+      0000C3 FD E5            [15]  246 	push	iy
+      0000C5 11 0A 00         [10]  247 	ld	de, #0x000a
+      0000C8 FD E5            [15]  248 	push	iy
+      0000CA E1               [10]  249 	pop	hl
+      0000CB CDr00r00         [17]  250 	call	__moduint
+      0000CE FD E1            [14]  251 	pop	iy
+      0000D0 C1               [10]  252 	pop	bc
+      0000D1 E1               [10]  253 	pop	hl
+      0000D2 7B               [ 4]  254 	ld	a, e
+      0000D3 C6 30            [ 7]  255 	add	a, #0x30
+      0000D5 77               [ 7]  256 	ld	(hl), a
+                                    257 ;romloader.c:195: v /= 10U;
+      0000D6 C5               [11]  258 	push	bc
+      0000D7 11 0A 00         [10]  259 	ld	de, #0x000a
+      0000DA FD E5            [15]  260 	push	iy
+      0000DC E1               [10]  261 	pop	hl
+      0000DD CDr00r00         [17]  262 	call	__divuint
+      0000E0 C1               [10]  263 	pop	bc
+      0000E1 18 CC            [12]  264 	jr	00103$
+                                    265 ;romloader.c:197: while (i)
+      0000E3                        266 00115$:
+      0000E3                        267 00106$:
+      0000E3 79               [ 4]  268 	ld	a, c
+      0000E4 B7               [ 4]  269 	or	a, a
+      0000E5 28 11            [12]  270 	jr	Z, 00109$
+                                    271 ;romloader.c:198: chput(buf[--i]);
+      0000E7 0D               [ 4]  272 	dec	c
+      0000E8 59               [ 4]  273 	ld	e, c
+      0000E9 16 00            [ 7]  274 	ld	d, #0x00
+      0000EB 21 00 00         [10]  275 	ld	hl, #0
+      0000EE 39               [11]  276 	add	hl, sp
+      0000EF 19               [11]  277 	add	hl, de
+      0000F0 6E               [ 7]  278 	ld	l, (hl)
+                                    279 ;	spillPairReg hl
+      0000F1 C5               [11]  280 	push	bc
+      0000F2 CDr16r00         [17]  281 	call	_chput
+      0000F5 C1               [10]  282 	pop	bc
+      0000F6 18 EB            [12]  283 	jr	00106$
+      0000F8                        284 00109$:
+                                    285 ;romloader.c:199: }
+      0000F8 DD F9            [10]  286 	ld	sp, ix
+      0000FA DD E1            [14]  287 	pop	ix
+      0000FC C9               [10]  288 	ret
+                                    289 ;romloader.c:201: static void cls(void)
+                                    290 ;	---------------------------------
+                                    291 ; Function cls
+                                    292 ; ---------------------------------
+      0000FD                        293 _cls:
+                                    294 ;romloader.c:203: chput(0x0C);		/* CHPUT ctrl-L = clear screen */
+      0000FD 2E 0C            [ 7]  295 	ld	l, #0x0c
+                                    296 ;	spillPairReg hl
+                                    297 ;	spillPairReg hl
+                                    298 ;romloader.c:204: }
+      0000FF C3r16r00         [10]  299 	jp	_chput
+                                    300 ;romloader.c:209: static uint8_t any_key_down(void)
+                                    301 ;	---------------------------------
+                                    302 ; Function any_key_down
+                                    303 ; ---------------------------------
+      000102                        304 _any_key_down:
+                                    305 ;romloader.c:211: for (uint8_t row = 0; row < 10; row++) {
+      000102 0E 00            [ 7]  306 	ld	c, #0x00
+      000104                        307 00105$:
+      000104 79               [ 4]  308 	ld	a, c
+      000105 D6 0A            [ 7]  309 	sub	a, #0x0a
+      000107 30 0F            [12]  310 	jr	NC, 00103$
+                                    311 ;romloader.c:212: if (snsmat(row) != 0xFFU)
+      000109 C5               [11]  312 	push	bc
+      00010A 69               [ 4]  313 	ld	l, c
+                                    314 ;	spillPairReg hl
+                                    315 ;	spillPairReg hl
+      00010B CDr00r00         [17]  316 	call	_snsmat
+      00010E C1               [10]  317 	pop	bc
+      00010F 2C               [ 4]  318 	inc	l
+      000110 28 03            [12]  319 	jr	Z, 00106$
+                                    320 ;romloader.c:213: return 1;
+      000112 3E 01            [ 7]  321 	ld	a, #0x01
+      000114 C9               [10]  322 	ret
+      000115                        323 00106$:
+                                    324 ;romloader.c:211: for (uint8_t row = 0; row < 10; row++) {
+      000115 0C               [ 4]  325 	inc	c
+      000116 18 EC            [12]  326 	jr	00105$
+      000118                        327 00103$:
+                                    328 ;romloader.c:215: return 0;
+      000118 AF               [ 4]  329 	xor	a, a
+                                    330 ;romloader.c:216: }
+      000119 C9               [10]  331 	ret
+                                    332 ;romloader.c:219: static void delay_ms(uint16_t ms)
+                                    333 ;	---------------------------------
+                                    334 ; Function delay_ms
+                                    335 ; ---------------------------------
+      00011A                        336 _delay_ms:
+                                    337 ;romloader.c:221: while (ms--)
+      00011A                        338 00101$:
+      00011A 7D               [ 4]  339 	ld	a, l
+      00011B 4C               [ 4]  340 	ld	c, h
+      00011C 2B               [ 6]  341 	dec	hl
+      00011D B1               [ 4]  342 	or	a, c
+      00011E C8               [11]  343 	ret	Z
+                                    344 ;romloader.c:222: (void)any_key_down();
+      00011F E5               [11]  345 	push	hl
+      000120 CDr02r01         [17]  346 	call	_any_key_down
+      000123 E1               [10]  347 	pop	hl
+                                    348 ;romloader.c:223: }
+      000124 18 F4            [12]  349 	jr	00101$
+                                    350 ;romloader.c:233: static uint8_t wait_key_event(void)
+                                    351 ;	---------------------------------
+                                    352 ; Function wait_key_event
+                                    353 ; ---------------------------------
+      000126                        354 _wait_key_event:
+                                    355 ;romloader.c:236: while (!any_key_down()) { }
+      000126                        356 00101$:
+      000126 CDr02r01         [17]  357 	call	_any_key_down
+      000129 B7               [ 4]  358 	or	a, a
+      00012A 28 FA            [12]  359 	jr	Z, 00101$
+                                    360 ;romloader.c:240: while (any_key_down()) {
+      00012C 01 00 00         [10]  361 	ld	bc, #0x0000
+      00012F                        362 00106$:
+      00012F C5               [11]  363 	push	bc
+      000130 CDr02r01         [17]  364 	call	_any_key_down
+      000133 C1               [10]  365 	pop	bc
+      000134 B7               [ 4]  366 	or	a, a
+      000135 28 0E            [12]  367 	jr	Z, 00108$
+                                    368 ;romloader.c:241: held++;
+      000137 03               [ 6]  369 	inc	bc
+                                    370 ;romloader.c:242: if (held >= HOLD_MS)
+      000138 59               [ 4]  371 	ld	e, c
+      000139 50               [ 4]  372 	ld	d, b
+      00013A 7B               [ 4]  373 	ld	a, e
+      00013B D6 90            [ 7]  374 	sub	a, #0x90
+      00013D 7A               [ 4]  375 	ld	a, d
+      00013E DE 01            [ 7]  376 	sbc	a, #0x01
+      000140 38 ED            [12]  377 	jr	C, 00106$
+                                    378 ;romloader.c:243: return 1U;		/* HOLD */
+      000142 3E 01            [ 7]  379 	ld	a, #0x01
+      000144 C9               [10]  380 	ret
+      000145                        381 00108$:
+                                    382 ;romloader.c:246: delay_ms(30);
+      000145 21 1E 00         [10]  383 	ld	hl, #0x001e
+      000148 CDr1Ar01         [17]  384 	call	_delay_ms
+                                    385 ;romloader.c:247: return 0U;
+      00014B AF               [ 4]  386 	xor	a, a
+                                    387 ;romloader.c:248: }
+      00014C C9               [10]  388 	ret
+                                    389 ;romloader.c:258: static void fetch_file_list(void)
+                                    390 ;	---------------------------------
+                                    391 ; Function fetch_file_list
+                                    392 ; ---------------------------------
+      00014D                        393 _fetch_file_list:
+      00014D CDr00r00         [17]  394 	call	___sdcc_enter_ix
+      000150 F5               [11]  395 	push	af
+      000151 3B               [ 6]  396 	dec	sp
+                                    397 ;romloader.c:260: mbox_cmd(CMD_DIR_OPEN, 0, 0);
+      000152 AF               [ 4]  398 	xor	a, a
+      000153 F5               [11]  399 	push	af
+      000154 33               [ 6]  400 	inc	sp
+      000155 11 00 00         [10]  401 	ld	de, #0x0000
+      000158 AF               [ 4]  402 	xor	a, a
+      000159 CDr5Fr00         [17]  403 	call	_mbox_cmd
+                                    404 ;romloader.c:261: uint8_t cnt_lo = mbox_pop();
+      00015C CDr4Br00         [17]  405 	call	_mbox_pop
+      00015F 4F               [ 4]  406 	ld	c, a
+                                    407 ;romloader.c:262: uint8_t cnt_hi = mbox_pop();
+      000160 C5               [11]  408 	push	bc
+      000161 CDr4Br00         [17]  409 	call	_mbox_pop
+      000164 C1               [10]  410 	pop	bc
+                                    411 ;romloader.c:263: s_count = (uint16_t)cnt_lo | ((uint16_t)cnt_hi << 8);
+      000165 06 00            [ 7]  412 	ld	b, #0x00
+      000167 5F               [ 4]  413 	ld	e, a
+      000168 AF               [ 4]  414 	xor	a, a
+      000169 B1               [ 4]  415 	or	a, c
+      00016A 32r00r06         [13]  416 	ld	(_s_count+0), a
+      00016D 7B               [ 4]  417 	ld	a, e
+      00016E B0               [ 4]  418 	or	a, b
+      00016F 32r01r06         [13]  419 	ld	(_s_count+1), a
+                                    420 ;romloader.c:264: if (s_count > MAX_FILES)
+      000172 2Ar00r06         [16]  421 	ld	hl, (_s_count)
+      000175 3E 80            [ 7]  422 	ld	a, #0x80
+      000177 BD               [ 4]  423 	cp	a, l
+      000178 3E 00            [ 7]  424 	ld	a, #0x00
+      00017A 9C               [ 4]  425 	sbc	a, h
+      00017B 30 06            [12]  426 	jr	NC, 00117$
+                                    427 ;romloader.c:265: s_count = MAX_FILES;
+      00017D 21 80 00         [10]  428 	ld	hl, #0x0080
+      000180 22r00r06         [16]  429 	ld	(_s_count), hl
+                                    430 ;romloader.c:267: for (uint16_t i = 0; i < s_count; i++) {
+      000183                        431 00117$:
+      000183 01 00 00         [10]  432 	ld	bc, #0x0000
+      000186                        433 00109$:
+      000186 21r00r06         [10]  434 	ld	hl, #_s_count
+      000189 79               [ 4]  435 	ld	a, c
+      00018A 96               [ 7]  436 	sub	a, (hl)
+      00018B 23               [ 6]  437 	inc	hl
+      00018C 78               [ 4]  438 	ld	a, b
+      00018D 9E               [ 7]  439 	sbc	a, (hl)
+      00018E 30 4D            [12]  440 	jr	NC, 00104$
+                                    441 ;romloader.c:268: mbox_cmd(CMD_DIR_READ, 0, 0);
+      000190 C5               [11]  442 	push	bc
+      000191 AF               [ 4]  443 	xor	a, a
+      000192 F5               [11]  444 	push	af
+      000193 33               [ 6]  445 	inc	sp
+      000194 11 00 00         [10]  446 	ld	de, #0x0000
+      000197 3E 01            [ 7]  447 	ld	a, #0x01
+      000199 CDr5Fr00         [17]  448 	call	_mbox_cmd
+      00019C C1               [10]  449 	pop	bc
+                                    450 ;romloader.c:269: for (uint8_t j = 0; j < 11; j++)
+      00019D 69               [ 4]  451 	ld	l, c
+      00019E 60               [ 4]  452 	ld	h, b
+      00019F 29               [11]  453 	add	hl, hl
+      0001A0 09               [11]  454 	add	hl, bc
+      0001A1 29               [11]  455 	add	hl, hl
+      0001A2 29               [11]  456 	add	hl, hl
+      0001A3 EB               [ 4]  457 	ex	de, hl
+      0001A4 21r00r00         [10]  458 	ld	hl, #_s_files
+      0001A7 19               [11]  459 	add	hl, de
+      0001A8 E3               [19]  460 	ex	(sp), hl
+      0001A9 DD 36 FF 00      [19]  461 	ld	-1 (ix), #0x00
+      0001AD                        462 00106$:
+      0001AD DD 7E FF         [19]  463 	ld	a, -1 (ix)
+      0001B0 D6 0B            [ 7]  464 	sub	a, #0x0b
+      0001B2 30 1C            [12]  465 	jr	NC, 00103$
+                                    466 ;romloader.c:270: s_files[i][j] = (char)mbox_pop();
+      0001B4 DD 7E FD         [19]  467 	ld	a, -3 (ix)
+      0001B7 DD 86 FF         [19]  468 	add	a, -1 (ix)
+      0001BA 6F               [ 4]  469 	ld	l, a
+                                    470 ;	spillPairReg hl
+                                    471 ;	spillPairReg hl
+      0001BB DD 7E FE         [19]  472 	ld	a, -2 (ix)
+      0001BE CE 00            [ 7]  473 	adc	a, #0x00
+      0001C0 67               [ 4]  474 	ld	h, a
+                                    475 ;	spillPairReg hl
+                                    476 ;	spillPairReg hl
+      0001C1 E5               [11]  477 	push	hl
+      0001C2 C5               [11]  478 	push	bc
+      0001C3 D5               [11]  479 	push	de
+      0001C4 CDr4Br00         [17]  480 	call	_mbox_pop
+      0001C7 D1               [10]  481 	pop	de
+      0001C8 C1               [10]  482 	pop	bc
+      0001C9 E1               [10]  483 	pop	hl
+      0001CA 77               [ 7]  484 	ld	(hl), a
+                                    485 ;romloader.c:269: for (uint8_t j = 0; j < 11; j++)
+      0001CB DD 34 FF         [23]  486 	inc	-1 (ix)
+      0001CE 18 DD            [12]  487 	jr	00106$
+      0001D0                        488 00103$:
+                                    489 ;romloader.c:271: s_files[i][11] = '\0';
+      0001D0 21r00r00         [10]  490 	ld	hl, #_s_files
+      0001D3 19               [11]  491 	add	hl, de
+      0001D4 11 0B 00         [10]  492 	ld	de, #0x000b
+      0001D7 19               [11]  493 	add	hl, de
+      0001D8 36 00            [10]  494 	ld	(hl), #0x00
+                                    495 ;romloader.c:267: for (uint16_t i = 0; i < s_count; i++) {
+      0001DA 03               [ 6]  496 	inc	bc
+      0001DB 18 A9            [12]  497 	jr	00109$
+      0001DD                        498 00104$:
+                                    499 ;romloader.c:274: mbox_cmd(CMD_DIR_CLOSE, 0, 0);
+      0001DD AF               [ 4]  500 	xor	a, a
+      0001DE F5               [11]  501 	push	af
+      0001DF 33               [ 6]  502 	inc	sp
+      0001E0 11 00 00         [10]  503 	ld	de, #0x0000
+      0001E3 3E 02            [ 7]  504 	ld	a, #0x02
+      0001E5 CDr5Fr00         [17]  505 	call	_mbox_cmd
+                                    506 ;romloader.c:275: }
+      0001E8 DD F9            [10]  507 	ld	sp, ix
+      0001EA DD E1            [14]  508 	pop	ix
+      0001EC C9               [10]  509 	ret
+                                    510 ;romloader.c:280: static uint16_t choose(const char *title, const char *const *names,
+                                    511 ;	---------------------------------
+                                    512 ; Function choose
+                                    513 ; ---------------------------------
+      0001ED                        514 _choose:
+      0001ED DD E5            [15]  515 	push	ix
+      0001EF DD 21 00 00      [14]  516 	ld	ix,#0
+      0001F3 DD 39            [15]  517 	add	ix,sp
+      0001F5 FD 21 F8 FF      [14]  518 	ld	iy, #-8
+      0001F9 FD 39            [15]  519 	add	iy, sp
+      0001FB FD F9            [10]  520 	ld	sp, iy
+      0001FD DD 75 FC         [19]  521 	ld	-4 (ix), l
+      000200 DD 74 FD         [19]  522 	ld	-3 (ix), h
+                                    523 ;romloader.c:283: uint16_t sel = start < count ? start : 0;
+      000203 DD 7E 08         [19]  524 	ld	a, 8 (ix)
+      000206 DD 96 06         [19]  525 	sub	a, 6 (ix)
+      000209 DD 7E 09         [19]  526 	ld	a, 9 (ix)
+      00020C DD 9E 07         [19]  527 	sbc	a, 7 (ix)
+      00020F 30 08            [12]  528 	jr	NC, 00116$
+      000211 DD 7E 08         [19]  529 	ld	a, 8 (ix)
+      000214 DD 4E 09         [19]  530 	ld	c, 9 (ix)
+      000217 18 02            [12]  531 	jr	00117$
+      000219                        532 00116$:
+      000219 AF               [ 4]  533 	xor	a, a
+      00021A 4F               [ 4]  534 	ld	c, a
+      00021B                        535 00117$:
+      00021B DD 77 FE         [19]  536 	ld	-2 (ix), a
+      00021E DD 71 FF         [19]  537 	ld	-1 (ix), c
+      000221                        538 00112$:
+                                    539 ;romloader.c:286: cls();
+      000221 CDrFDr00         [17]  540 	call	_cls
+                                    541 ;romloader.c:287: print(title);
+      000224 DD 6E FC         [19]  542 	ld	l, -4 (ix)
+                                    543 ;	spillPairReg hl
+                                    544 ;	spillPairReg hl
+      000227 DD 66 FD         [19]  545 	ld	h, -3 (ix)
+                                    546 ;	spillPairReg hl
+                                    547 ;	spillPairReg hl
+      00022A CDr89r00         [17]  548 	call	_print
+                                    549 ;romloader.c:288: print("\r\n\r\n");
+      00022D 21r11r03         [10]  550 	ld	hl, #___str_0
+      000230 CDr89r00         [17]  551 	call	_print
+                                    552 ;romloader.c:291: uint16_t top = sel >= 5U ? (uint16_t)(sel - 5U) : 0U;
+      000233 DD 7E FE         [19]  553 	ld	a, -2 (ix)
+      000236 DD 77 F8         [19]  554 	ld	-8 (ix), a
+      000239 DD 7E FF         [19]  555 	ld	a, -1 (ix)
+      00023C DD 77 F9         [19]  556 	ld	-7 (ix), a
+      00023F DD 7E F8         [19]  557 	ld	a, -8 (ix)
+      000242 D6 05            [ 7]  558 	sub	a, #0x05
+      000244 DD 7E F9         [19]  559 	ld	a, -7 (ix)
+      000247 DE 00            [ 7]  560 	sbc	a, #0x00
+      000249 38 12            [12]  561 	jr	C, 00118$
+      00024B DD 7E F8         [19]  562 	ld	a, -8 (ix)
+      00024E C6 FB            [ 7]  563 	add	a, #0xfb
+      000250 DD 77 FA         [19]  564 	ld	-6 (ix), a
+      000253 DD 7E F9         [19]  565 	ld	a, -7 (ix)
+      000256 CE FF            [ 7]  566 	adc	a, #0xff
+      000258 DD 77 FB         [19]  567 	ld	-5 (ix), a
+      00025B 18 07            [12]  568 	jr	00119$
+      00025D                        569 00118$:
+      00025D AF               [ 4]  570 	xor	a, a
+      00025E DD 77 FA         [19]  571 	ld	-6 (ix), a
+      000261 DD 77 FB         [19]  572 	ld	-5 (ix), a
+      000264                        573 00119$:
+      000264 E1               [10]  574 	pop	hl
+      000265 C1               [10]  575 	pop	bc
+      000266 C5               [11]  576 	push	bc
+      000267 E5               [11]  577 	push	hl
+                                    578 ;romloader.c:292: uint16_t bot = top + 10U;
+      000268 59               [ 4]  579 	ld	e, c
+      000269 50               [ 4]  580 	ld	d, b
+      00026A 21 0A 00         [10]  581 	ld	hl, #0x000a
+      00026D 19               [11]  582 	add	hl, de
+      00026E DD 75 FA         [19]  583 	ld	-6 (ix), l
+      000271 DD 74 FB         [19]  584 	ld	-5 (ix), h
+                                    585 ;romloader.c:293: if (bot > count)
+      000274 DD 7E 06         [19]  586 	ld	a, 6 (ix)
+      000277 DD 96 FA         [19]  587 	sub	a, -6 (ix)
+      00027A DD 7E 07         [19]  588 	ld	a, 7 (ix)
+      00027D DD 9E FB         [19]  589 	sbc	a, -5 (ix)
+      000280 30 0C            [12]  590 	jr	NC, 00127$
+                                    591 ;romloader.c:294: bot = count;
+      000282 DD 7E 06         [19]  592 	ld	a, 6 (ix)
+      000285 DD 77 FA         [19]  593 	ld	-6 (ix), a
+      000288 DD 7E 07         [19]  594 	ld	a, 7 (ix)
+      00028B DD 77 FB         [19]  595 	ld	-5 (ix), a
+                                    596 ;romloader.c:295: for (uint16_t i = top; i < bot; i++) {
+      00028E                        597 00127$:
+      00028E                        598 00110$:
+      00028E 79               [ 4]  599 	ld	a, c
+      00028F DD 96 FA         [19]  600 	sub	a, -6 (ix)
+      000292 78               [ 4]  601 	ld	a, b
+      000293 DD 9E FB         [19]  602 	sbc	a, -5 (ix)
+      000296 30 3B            [12]  603 	jr	NC, 00103$
+                                    604 ;romloader.c:296: print(i == sel ? ">" : " ");
+      000298 DD 6E FE         [19]  605 	ld	l, -2 (ix)
+      00029B DD 66 FF         [19]  606 	ld	h, -1 (ix)
+      00029E BF               [ 4]  607 	cp	a, a
+      00029F ED 42            [15]  608 	sbc	hl, bc
+      0002A1 20 05            [12]  609 	jr	NZ, 00120$
+      0002A3 21r16r03         [10]  610 	ld	hl, #___str_1
+      0002A6 18 03            [12]  611 	jr	00121$
+      0002A8                        612 00120$:
+      0002A8 21r18r03         [10]  613 	ld	hl, #___str_2
+      0002AB                        614 00121$:
+      0002AB C5               [11]  615 	push	bc
+      0002AC CDr89r00         [17]  616 	call	_print
+      0002AF 21r18r03         [10]  617 	ld	hl, #___str_2
+      0002B2 CDr89r00         [17]  618 	call	_print
+      0002B5 C1               [10]  619 	pop	bc
+                                    620 ;romloader.c:298: print(names[i]);
+      0002B6 69               [ 4]  621 	ld	l, c
+                                    622 ;	spillPairReg hl
+                                    623 ;	spillPairReg hl
+      0002B7 60               [ 4]  624 	ld	h, b
+                                    625 ;	spillPairReg hl
+                                    626 ;	spillPairReg hl
+      0002B8 29               [11]  627 	add	hl, hl
+      0002B9 EB               [ 4]  628 	ex	de,hl
+      0002BA DD 6E 04         [19]  629 	ld	l, 4 (ix)
+      0002BD DD 66 05         [19]  630 	ld	h, 5 (ix)
+      0002C0 19               [11]  631 	add	hl, de
+      0002C1 5E               [ 7]  632 	ld	e, (hl)
+      0002C2 23               [ 6]  633 	inc	hl
+      0002C3 56               [ 7]  634 	ld	d, (hl)
+      0002C4 C5               [11]  635 	push	bc
+      0002C5 EB               [ 4]  636 	ex	de, hl
+      0002C6 CDr89r00         [17]  637 	call	_print
+      0002C9 21r1Ar03         [10]  638 	ld	hl, #___str_3
+      0002CC CDr89r00         [17]  639 	call	_print
+      0002CF C1               [10]  640 	pop	bc
+                                    641 ;romloader.c:295: for (uint16_t i = top; i < bot; i++) {
+      0002D0 03               [ 6]  642 	inc	bc
+      0002D1 18 BB            [12]  643 	jr	00110$
+      0002D3                        644 00103$:
+                                    645 ;romloader.c:301: print("\r\nTAP=NEXT  HOLD=SELECT\r\n");
+      0002D3 21r1Dr03         [10]  646 	ld	hl, #___str_4
+      0002D6 CDr89r00         [17]  647 	call	_print
+                                    648 ;romloader.c:303: if (wait_key_event() == 1U)
+      0002D9 CDr26r01         [17]  649 	call	_wait_key_event
+      0002DC 3D               [ 4]  650 	dec	a
+      0002DD 20 08            [12]  651 	jr	NZ, 00105$
+                                    652 ;romloader.c:304: return sel;		/* HOLD on the highlighted line */
+      0002DF DD 5E FE         [19]  653 	ld	e, -2 (ix)
+      0002E2 DD 56 FF         [19]  654 	ld	d, -1 (ix)
+      0002E5 18 21            [12]  655 	jr	00114$
+      0002E7                        656 00105$:
+                                    657 ;romloader.c:305: sel++;
+      0002E7 DD 34 FE         [23]  658 	inc	-2 (ix)
+      0002EA 20 03            [12]  659 	jr	NZ, 00172$
+      0002EC DD 34 FF         [23]  660 	inc	-1 (ix)
+      0002EF                        661 00172$:
+                                    662 ;romloader.c:306: if (sel >= count)
+      0002EF DD 7E FE         [19]  663 	ld	a, -2 (ix)
+      0002F2 DD 96 06         [19]  664 	sub	a, 6 (ix)
+      0002F5 DD 7E FF         [19]  665 	ld	a, -1 (ix)
+      0002F8 DD 9E 07         [19]  666 	sbc	a, 7 (ix)
+      0002FB DAr21r02         [10]  667 	jp	C, 00112$
+                                    668 ;romloader.c:307: sel = 0;
+      0002FE AF               [ 4]  669 	xor	a, a
+      0002FF DD 77 FE         [19]  670 	ld	-2 (ix), a
+      000302 DD 77 FF         [19]  671 	ld	-1 (ix), a
+      000305 C3r21r02         [10]  672 	jp	00112$
+      000308                        673 00114$:
+                                    674 ;romloader.c:309: }
+      000308 DD F9            [10]  675 	ld	sp, ix
+      00030A DD E1            [14]  676 	pop	ix
+      00030C E1               [10]  677 	pop	hl
+      00030D F1               [10]  678 	pop	af
+      00030E F1               [10]  679 	pop	af
+      00030F F1               [10]  680 	pop	af
+      000310 E9               [ 4]  681 	jp	(hl)
+      000311                        682 ___str_0:
+      000311 0D                     683 	.db 0x0d
+      000312 0A                     684 	.db 0x0a
+      000313 0D                     685 	.db 0x0d
+      000314 0A                     686 	.db 0x0a
+      000315 00                     687 	.db 0x00
+      000316                        688 ___str_1:
+      000316 3E                     689 	.ascii ">"
+      000317 00                     690 	.db 0x00
+      000318                        691 ___str_2:
+      000318 20                     692 	.ascii " "
+      000319 00                     693 	.db 0x00
+      00031A                        694 ___str_3:
+      00031A 0D                     695 	.db 0x0d
+      00031B 0A                     696 	.db 0x0a
+      00031C 00                     697 	.db 0x00
+      00031D                        698 ___str_4:
+      00031D 0D                     699 	.db 0x0d
+      00031E 0A                     700 	.db 0x0a
+      00031F 54 41 50 3D 4E 45 58   701 	.ascii "TAP=NEXT  HOLD=SELECT"
+             54 20 20 48 4F 4C 44
+             3D 53 45 4C 45 43 54
+      000334 0D                     702 	.db 0x0d
+      000335 0A                     703 	.db 0x0a
+      000336 00                     704 	.db 0x00
+                                    705 ;romloader.c:313: int main(void)
+                                    706 ;	---------------------------------
+                                    707 ; Function main
+                                    708 ; ---------------------------------
+      000337                        709 _main::
+      000337 CDr00r00         [17]  710 	call	___sdcc_enter_ix
+      00033A 21 E9 FF         [10]  711 	ld	hl, #-23
+      00033D 39               [11]  712 	add	hl, sp
+      00033E F9               [ 6]  713 	ld	sp, hl
+                                    714 ;romloader.c:315: chgmod(0);		/* SCREEN 0, 40 columns */
+      00033F 2E 00            [ 7]  715 	ld	l, #0x00
+                                    716 ;	spillPairReg hl
+                                    717 ;	spillPairReg hl
+      000341 CDr2Dr00         [17]  718 	call	_chgmod
+                                    719 ;romloader.c:317: cls();
+      000344 CDrFDr00         [17]  720 	call	_cls
+                                    721 ;romloader.c:318: print("RISKYMSX2 ROM LOADER\r\n\r\n");
+      000347 21rC9r05         [10]  722 	ld	hl, #___str_17
+      00034A CDr89r00         [17]  723 	call	_print
+                                    724 ;romloader.c:319: print("Reading USB directory...\r\n");
+      00034D 21rE2r05         [10]  725 	ld	hl, #___str_18
+      000350 CDr89r00         [17]  726 	call	_print
+                                    727 ;romloader.c:321: fetch_file_list();
+      000353 CDr4Dr01         [17]  728 	call	_fetch_file_list
+                                    729 ;romloader.c:323: if (s_count == 0U) {
+      000356 3Ar01r06         [13]  730 	ld	a, (_s_count+1)
+      000359 21r00r06         [10]  731 	ld	hl, #_s_count
+      00035C B6               [ 7]  732 	or	a, (hl)
+      00035D 20 1A            [12]  733 	jr	NZ, 00131$
+                                    734 ;romloader.c:324: cls();
+      00035F CDrFDr00         [17]  735 	call	_cls
+                                    736 ;romloader.c:325: print("NO .ROM FILES ON USB STICK\r\n\r\n");
+      000362 21rFDr05         [10]  737 	ld	hl, #___str_19
+      000365 CDr89r00         [17]  738 	call	_print
+                                    739 ;romloader.c:326: print("Plug a stick with .ROM files,\r\n");
+      000368 21r1Cr06         [10]  740 	ld	hl, #___str_20
+      00036B CDr89r00         [17]  741 	call	_print
+                                    742 ;romloader.c:327: print("power-cycle the MSX.\r\n");
+      00036E 21r3Cr06         [10]  743 	ld	hl, #___str_21
+      000371 CDr89r00         [17]  744 	call	_print
+      000374                        745 00111$:
+                                    746 ;romloader.c:329: (void)wait_key_event();
+      000374 CDr26r01         [17]  747 	call	_wait_key_event
+      000377 18 FB            [12]  748 	jr	00111$
+                                    749 ;romloader.c:334: for (uint16_t i = 0; i < s_count; i++)
+      000379                        750 00131$:
+      000379 01 00 00         [10]  751 	ld	bc, #0x0000
+      00037C                        752 00114$:
+      00037C 21r00r06         [10]  753 	ld	hl, #_s_count
+      00037F 79               [ 4]  754 	ld	a, c
+      000380 96               [ 7]  755 	sub	a, (hl)
+      000381 23               [ 6]  756 	inc	hl
+      000382 78               [ 4]  757 	ld	a, b
+      000383 9E               [ 7]  758 	sbc	a, (hl)
+      000384 30 24            [12]  759 	jr	NC, 00104$
+                                    760 ;romloader.c:335: file_ptrs[i] = s_files[i];
+      000386 69               [ 4]  761 	ld	l, c
+                                    762 ;	spillPairReg hl
+                                    763 ;	spillPairReg hl
+      000387 60               [ 4]  764 	ld	h, b
+                                    765 ;	spillPairReg hl
+                                    766 ;	spillPairReg hl
+      000388 29               [11]  767 	add	hl, hl
+      000389 11r02r06         [10]  768 	ld	de, #_main_file_ptrs_65537_55
+      00038C 19               [11]  769 	add	hl, de
+      00038D DD 75 FE         [19]  770 	ld	-2 (ix), l
+      000390 DD 74 FF         [19]  771 	ld	-1 (ix), h
+      000393 69               [ 4]  772 	ld	l, c
+      000394 60               [ 4]  773 	ld	h, b
+      000395 29               [11]  774 	add	hl, hl
+      000396 09               [11]  775 	add	hl, bc
+      000397 29               [11]  776 	add	hl, hl
+      000398 29               [11]  777 	add	hl, hl
+      000399 11r00r00         [10]  778 	ld	de, #_s_files
+      00039C 19               [11]  779 	add	hl, de
+      00039D EB               [ 4]  780 	ex	de, hl
+      00039E DD 6E FE         [19]  781 	ld	l, -2 (ix)
+      0003A1 DD 66 FF         [19]  782 	ld	h, -1 (ix)
+      0003A4 73               [ 7]  783 	ld	(hl), e
+      0003A5 23               [ 6]  784 	inc	hl
+      0003A6 72               [ 7]  785 	ld	(hl), d
+                                    786 ;romloader.c:334: for (uint16_t i = 0; i < s_count; i++)
+      0003A7 03               [ 6]  787 	inc	bc
+      0003A8 18 D2            [12]  788 	jr	00114$
+      0003AA                        789 00104$:
+                                    790 ;romloader.c:336: uint16_t sel = choose("SELECT ROM FILE:", file_ptrs, s_count, 0);
+      0003AA 21 00 00         [10]  791 	ld	hl, #0x0000
+      0003AD E5               [11]  792 	push	hl
+      0003AE 2Ar00r06         [16]  793 	ld	hl, (_s_count)
+      0003B1 E5               [11]  794 	push	hl
+      0003B2 21r02r06         [10]  795 	ld	hl, #_main_file_ptrs_65537_55
+      0003B5 E5               [11]  796 	push	hl
+      0003B6 21r47r05         [10]  797 	ld	hl, #___str_5
+      0003B9 CDrEDr01         [17]  798 	call	_choose
+                                    799 ;romloader.c:339: cls();
+      0003BC D5               [11]  800 	push	de
+      0003BD CDrFDr00         [17]  801 	call	_cls
+      0003C0 21r53r06         [10]  802 	ld	hl, #___str_22
+      0003C3 CDr89r00         [17]  803 	call	_print
+      0003C6 D1               [10]  804 	pop	de
+                                    805 ;romloader.c:341: print(s_files[sel]);
+      0003C7 6B               [ 4]  806 	ld	l, e
+      0003C8 62               [ 4]  807 	ld	h, d
+      0003C9 29               [11]  808 	add	hl, hl
+      0003CA 19               [11]  809 	add	hl, de
+      0003CB 29               [11]  810 	add	hl, hl
+      0003CC 29               [11]  811 	add	hl, hl
+      0003CD 11r00r00         [10]  812 	ld	de, #_s_files
+      0003D0 19               [11]  813 	add	hl, de
+                                    814 ;	spillPairReg hl
+                                    815 ;	spillPairReg hl
+                                    816 ;	spillPairReg hl
+                                    817 ;	spillPairReg hl
+      0003D1 E5               [11]  818 	push	hl
+      0003D2 CDr89r00         [17]  819 	call	_print
+      0003D5 21r5Cr06         [10]  820 	ld	hl, #___str_23
+      0003D8 CDr89r00         [17]  821 	call	_print
+      0003DB C1               [10]  822 	pop	bc
+                                    823 ;romloader.c:345: for (uint8_t i = 0; i < 11; i++)
+      0003DC 21 00 00         [10]  824 	ld	hl, #0
+      0003DF 39               [11]  825 	add	hl, sp
+      0003E0 EB               [ 4]  826 	ex	de, hl
+      0003E1 DD 36 FF 00      [19]  827 	ld	-1 (ix), #0x00
+      0003E5                        828 00117$:
+      0003E5 DD 7E FF         [19]  829 	ld	a, -1 (ix)
+      0003E8 D6 0B            [ 7]  830 	sub	a, #0x0b
+      0003EA 30 1E            [12]  831 	jr	NC, 00105$
+                                    832 ;romloader.c:346: args[i] = (uint8_t)s_files[sel][i];
+      0003EC DD 6E FF         [19]  833 	ld	l, -1 (ix)
+      0003EF 26 00            [ 7]  834 	ld	h, #0x00
+      0003F1 19               [11]  835 	add	hl, de
+      0003F2 FD E5            [15]  836 	push	iy
+      0003F4 E3               [19]  837 	ex	(sp), hl
+      0003F5 DD 6E FF         [19]  838 	ld	l, -1 (ix)
+                                    839 ;	spillPairReg hl
+                                    840 ;	spillPairReg hl
+      0003F8 E3               [19]  841 	ex	(sp), hl
+      0003F9 E3               [19]  842 	ex	(sp), hl
+      0003FA 26 00            [ 7]  843 	ld	h, #0x00
+                                    844 ;	spillPairReg hl
+                                    845 ;	spillPairReg hl
+      0003FC E3               [19]  846 	ex	(sp), hl
+      0003FD FD E1            [14]  847 	pop	iy
+      0003FF FD 09            [15]  848 	add	iy, bc
+      000401 FD 7E 00         [19]  849 	ld	a, 0 (iy)
+      000404 77               [ 7]  850 	ld	(hl), a
+                                    851 ;romloader.c:345: for (uint8_t i = 0; i < 11; i++)
+      000405 DD 34 FF         [23]  852 	inc	-1 (ix)
+      000408 18 DB            [12]  853 	jr	00117$
+      00040A                        854 00105$:
+                                    855 ;romloader.c:347: mbox_cmd(CMD_LOAD_ROM, args, 11);
+      00040A 3E 0B            [ 7]  856 	ld	a, #0x0b
+      00040C F5               [11]  857 	push	af
+      00040D 33               [ 6]  858 	inc	sp
+      00040E 3E 03            [ 7]  859 	ld	a, #0x03
+      000410 CDr5Fr00         [17]  860 	call	_mbox_cmd
+                                    861 ;romloader.c:350: for (uint8_t i = 0; i < 4; i++)
+      000413 0E 00            [ 7]  862 	ld	c, #0x00
+      000415                        863 00120$:
+      000415 79               [ 4]  864 	ld	a, c
+      000416 D6 04            [ 7]  865 	sub	a, #0x04
+      000418 30 13            [12]  866 	jr	NC, 00106$
+                                    867 ;romloader.c:351: len[i] = mbox_pop();
+      00041A 59               [ 4]  868 	ld	e, c
+      00041B 16 00            [ 7]  869 	ld	d, #0x00
+      00041D 21 0B 00         [10]  870 	ld	hl, #11
+      000420 39               [11]  871 	add	hl, sp
+      000421 19               [11]  872 	add	hl, de
+      000422 E5               [11]  873 	push	hl
+      000423 C5               [11]  874 	push	bc
+      000424 CDr4Br00         [17]  875 	call	_mbox_pop
+      000427 C1               [10]  876 	pop	bc
+      000428 E1               [10]  877 	pop	hl
+      000429 77               [ 7]  878 	ld	(hl), a
+                                    879 ;romloader.c:350: for (uint8_t i = 0; i < 4; i++)
+      00042A 0C               [ 4]  880 	inc	c
+      00042B 18 E8            [12]  881 	jr	00120$
+      00042D                        882 00106$:
+                                    883 ;romloader.c:352: uint32_t total = ((uint32_t)len[0] << 24)
+      00042D DD 4E F4         [19]  884 	ld	c, -12 (ix)
+      000430 DD 71 FB         [19]  885 	ld	-5 (ix), c
+      000433 AF               [ 4]  886 	xor	a, a
+      000434 DD 77 F8         [19]  887 	ld	-8 (ix), a
+      000437 DD 77 F9         [19]  888 	ld	-7 (ix), a
+      00043A DD 77 FA         [19]  889 	ld	-6 (ix), a
+      00043D DD 4E F5         [19]  890 	ld	c, -11 (ix)
+      000440 06 00            [ 7]  891 	ld	b, #0x00
+      000442 11 00 00         [10]  892 	ld	de, #0x0000
+      000445 DD 7E F8         [19]  893 	ld	a, -8 (ix)
+      000448 B3               [ 4]  894 	or	a, e
+      000449 DD 77 FC         [19]  895 	ld	-4 (ix), a
+      00044C DD 7E F9         [19]  896 	ld	a, -7 (ix)
+      00044F B2               [ 4]  897 	or	a, d
+      000450 DD 77 FD         [19]  898 	ld	-3 (ix), a
+      000453 DD 7E FA         [19]  899 	ld	a, -6 (ix)
+      000456 B1               [ 4]  900 	or	a, c
+      000457 DD 77 FE         [19]  901 	ld	-2 (ix), a
+      00045A DD 7E FB         [19]  902 	ld	a, -5 (ix)
+      00045D B0               [ 4]  903 	or	a, b
+      00045E DD 77 FF         [19]  904 	ld	-1 (ix), a
+      000461 DD 4E F6         [19]  905 	ld	c, -10 (ix)
+      000464 AF               [ 4]  906 	xor	a, a
+      000465 47               [ 4]  907 	ld	b, a
+      000466 51               [ 4]  908 	ld	d, c
+      000467 68               [ 4]  909 	ld	l, b
+                                    910 ;	spillPairReg hl
+                                    911 ;	spillPairReg hl
+      000468 67               [ 4]  912 	ld	h, a
+                                    913 ;	spillPairReg hl
+                                    914 ;	spillPairReg hl
+      000469 1E 00            [ 7]  915 	ld	e, #0x00
+      00046B DD 7E FC         [19]  916 	ld	a, -4 (ix)
+      00046E B3               [ 4]  917 	or	a, e
+      00046F 4F               [ 4]  918 	ld	c, a
+      000470 DD 7E FD         [19]  919 	ld	a, -3 (ix)
+      000473 B2               [ 4]  920 	or	a, d
+      000474 47               [ 4]  921 	ld	b, a
+      000475 DD 7E FE         [19]  922 	ld	a, -2 (ix)
+      000478 B5               [ 4]  923 	or	a, l
+      000479 5F               [ 4]  924 	ld	e, a
+      00047A DD 7E FF         [19]  925 	ld	a, -1 (ix)
+      00047D B4               [ 4]  926 	or	a, h
+      00047E 57               [ 4]  927 	ld	d, a
+      00047F DD 7E F7         [19]  928 	ld	a, -9 (ix)
+      000482 DD 77 FC         [19]  929 	ld	-4 (ix), a
+      000485 AF               [ 4]  930 	xor	a, a
+      000486 DD 77 FD         [19]  931 	ld	-3 (ix), a
+      000489 DD 77 FE         [19]  932 	ld	-2 (ix), a
+      00048C DD 77 FF         [19]  933 	ld	-1 (ix), a
+      00048F 79               [ 4]  934 	ld	a, c
+      000490 DD B6 FC         [19]  935 	or	a, -4 (ix)
+      000493 4F               [ 4]  936 	ld	c, a
+      000494 78               [ 4]  937 	ld	a, b
+      000495 DD B6 FD         [19]  938 	or	a, -3 (ix)
+      000498 47               [ 4]  939 	ld	b, a
+      000499 7B               [ 4]  940 	ld	a, e
+      00049A DD B6 FE         [19]  941 	or	a, -2 (ix)
+      00049D 5F               [ 4]  942 	ld	e, a
+      00049E 7A               [ 4]  943 	ld	a, d
+      00049F DD B6 FF         [19]  944 	or	a, -1 (ix)
+      0004A2 57               [ 4]  945 	ld	d, a
+      0004A3 DD 71 FC         [19]  946 	ld	-4 (ix), c
+      0004A6 DD 70 FD         [19]  947 	ld	-3 (ix), b
+      0004A9 DD 73 FE         [19]  948 	ld	-2 (ix), e
+      0004AC DD 72 FF         [19]  949 	ld	-1 (ix), d
+                                    950 ;romloader.c:356: print("LOADED ");
+      0004AF 21r62r06         [10]  951 	ld	hl, #___str_24
+      0004B2 CDr89r00         [17]  952 	call	_print
+                                    953 ;romloader.c:357: print_dec((uint16_t)((total + 1023U) / 1024U));
+      0004B5 DD 7E FC         [19]  954 	ld	a, -4 (ix)
+      0004B8 C6 FF            [ 7]  955 	add	a, #0xff
+      0004BA DD 7E FD         [19]  956 	ld	a, -3 (ix)
+      0004BD CE 03            [ 7]  957 	adc	a, #0x03
+      0004BF 47               [ 4]  958 	ld	b, a
+      0004C0 DD 7E FE         [19]  959 	ld	a, -2 (ix)
+      0004C3 CE 00            [ 7]  960 	adc	a, #0x00
+      0004C5 5F               [ 4]  961 	ld	e, a
+      0004C6 DD 7E FF         [19]  962 	ld	a, -1 (ix)
+      0004C9 CE 00            [ 7]  963 	adc	a, #0x00
+      0004CB 57               [ 4]  964 	ld	d, a
+      0004CC 68               [ 4]  965 	ld	l, b
+                                    966 ;	spillPairReg hl
+                                    967 ;	spillPairReg hl
+      0004CD 63               [ 4]  968 	ld	h, e
+                                    969 ;	spillPairReg hl
+                                    970 ;	spillPairReg hl
+      0004CE 5A               [ 4]  971 	ld	e, d
+      0004CF 06 02            [ 7]  972 	ld	b, #0x02
+      0004D1                        973 00192$:
+      0004D1 CB 3B            [ 8]  974 	srl	e
+      0004D3 CB 1C            [ 8]  975 	rr	h
+      0004D5 CB 1D            [ 8]  976 	rr	l
+      0004D7 10 F8            [13]  977 	djnz	00192$
+      0004D9 CDr96r00         [17]  978 	call	_print_dec
+                                    979 ;romloader.c:358: print(" KiB\r\n\r\n");
+      0004DC 21r6Ar06         [10]  980 	ld	hl, #___str_25
+      0004DF CDr89r00         [17]  981 	call	_print
+                                    982 ;romloader.c:375: uint8_t chosen = (uint8_t)choose("SELECT MAPPER:",
+      0004E2 21 01 00         [10]  983 	ld	hl, #0x0001
+      0004E5 E5               [11]  984 	push	hl
+      0004E6 2E 0A            [ 7]  985 	ld	l, #0x0a
+      0004E8 E5               [11]  986 	push	hl
+      0004E9 21r58r05         [10]  987 	ld	hl, #_main_mapper_names_65539_63
+      0004EC E5               [11]  988 	push	hl
+      0004ED 21rBAr05         [10]  989 	ld	hl, #___str_16
+      0004F0 CDrEDr01         [17]  990 	call	_choose
+      0004F3 DD 73 FF         [19]  991 	ld	-1 (ix), e
+                                    992 ;romloader.c:379: cls();
+      0004F6 CDrFDr00         [17]  993 	call	_cls
+                                    994 ;romloader.c:380: print("MAPPER: ");
+      0004F9 21r73r06         [10]  995 	ld	hl, #___str_26
+      0004FC CDr89r00         [17]  996 	call	_print
+                                    997 ;romloader.c:381: print(mapper_names[chosen]);
+      0004FF DD 6E FF         [19]  998 	ld	l, -1 (ix)
+                                    999 ;	spillPairReg hl
+                                   1000 ;	spillPairReg hl
+      000502 26 00            [ 7] 1001 	ld	h, #0x00
+                                   1002 ;	spillPairReg hl
+                                   1003 ;	spillPairReg hl
+      000504 29               [11] 1004 	add	hl, hl
+      000505 11r58r05         [10] 1005 	ld	de, #_main_mapper_names_65539_63
+      000508 19               [11] 1006 	add	hl, de
+      000509 5E               [ 7] 1007 	ld	e, (hl)
+      00050A 23               [ 6] 1008 	inc	hl
+      00050B 56               [ 7] 1009 	ld	d, (hl)
+      00050C EB               [ 4] 1010 	ex	de, hl
+      00050D CDr89r00         [17] 1011 	call	_print
+                                   1012 ;romloader.c:382: print("\r\n");
+      000510 21r7Cr06         [10] 1013 	ld	hl, #___str_27
+      000513 CDr89r00         [17] 1014 	call	_print
+                                   1015 ;romloader.c:385: args[0] = (uint8_t)(chosen + 1U);	/* Cart_Mapper index */
+      000516 21 0E 00         [10] 1016 	ld	hl, #14
+      000519 39               [11] 1017 	add	hl, sp
+      00051A EB               [ 4] 1018 	ex	de, hl
+      00051B DD 7E FF         [19] 1019 	ld	a, -1 (ix)
+      00051E 3C               [ 4] 1020 	inc	a
+      00051F 12               [ 7] 1021 	ld	(de), a
+                                   1022 ;romloader.c:386: mbox_cmd(CMD_SET_MAPPER, args, 1);
+      000520 3E 01            [ 7] 1023 	ld	a, #0x01
+      000522 F5               [11] 1024 	push	af
+      000523 33               [ 6] 1025 	inc	sp
+      000524 3E 04            [ 7] 1026 	ld	a, #0x04
+      000526 CDr5Fr00         [17] 1027 	call	_mbox_cmd
+                                   1028 ;romloader.c:387: uint8_t rc = mbox_pop();
+      000529 CDr4Br00         [17] 1029 	call	_mbox_pop
+                                   1030 ;romloader.c:388: if (rc != 0U) {
+      00052C B7               [ 4] 1031 	or	a, a
+      00052D 28 0B            [12] 1032 	jr	Z, 00109$
+                                   1033 ;romloader.c:389: print("REFUSED! (PSRAM not ready?)\r\n");
+      00052F 21r7Fr06         [10] 1034 	ld	hl, #___str_28
+      000532 CDr89r00         [17] 1035 	call	_print
+      000535                       1036 00122$:
+                                   1037 ;romloader.c:391: (void)wait_key_event();
+      000535 CDr26r01         [17] 1038 	call	_wait_key_event
+      000538 18 FB            [12] 1039 	jr	00122$
+      00053A                       1040 00109$:
+                                   1041 ;romloader.c:396: print("RESET...");
+      00053A 21r9Dr06         [10] 1042 	ld	hl, #___str_29
+      00053D CDr89r00         [17] 1043 	call	_print
+                                   1044 ;romloader.c:397: mbox_push(CMD_RESET);
+      000540 3E 05            [ 7] 1045 	ld	a, #0x05
+      000542 CDr51r00         [17] 1046 	call	_mbox_push
+      000545                       1047 00125$:
+                                   1048 ;romloader.c:402: }
+      000545 18 FE            [12] 1049 	jr	00125$
+      000547                       1050 ___str_5:
+      000547 53 45 4C 45 43 54 20  1051 	.ascii "SELECT ROM FILE:"
+             52 4F 4D 20 46 49 4C
+             45 3A
+      000557 00                    1052 	.db 0x00
+      000558                       1053 _main_mapper_names_65539_63:
+      000558r6Cr05                 1054 	.dw ___str_6
+      00055Ar73r05                 1055 	.dw ___str_7
+      00055Cr7Ar05                 1056 	.dw ___str_8
+      00055Er81r05                 1057 	.dw ___str_9
+      000560r88r05                 1058 	.dw ___str_10
+      000562r94r05                 1059 	.dw ___str_11
+      000564r9Cr05                 1060 	.dw ___str_12
+      000566rA5r05                 1061 	.dw ___str_13
+      000568rAAr05                 1062 	.dw ___str_14
+      00056ArB0r05                 1063 	.dw ___str_15
+      00056C                       1064 ___str_6:
+      00056C 52 4F 4D 31 36 4B     1065 	.ascii "ROM16K"
+      000572 00                    1066 	.db 0x00
+      000573                       1067 ___str_7:
+      000573 52 4F 4D 33 32 4B     1068 	.ascii "ROM32K"
+      000579 00                    1069 	.db 0x00
+      00057A                       1070 ___str_8:
+      00057A 52 4F 4D 34 38 4B     1071 	.ascii "ROM48K"
+      000580 00                    1072 	.db 0x00
+      000581                       1073 ___str_9:
+      000581 4B 4F 4E 41 4D 49     1074 	.ascii "KONAMI"
+      000587 00                    1075 	.db 0x00
+      000588                       1076 ___str_10:
+      000588 4B 4F 4E 41 4D 49 4E  1077 	.ascii "KONAMINOSCC"
+             4F 53 43 43
+      000593 00                    1078 	.db 0x00
+      000594                       1079 ___str_11:
+      000594 41 53 43 49 49 38 4B  1080 	.ascii "ASCII8K"
+      00059B 00                    1081 	.db 0x00
+      00059C                       1082 ___str_12:
+      00059C 41 53 43 49 49 31 36  1083 	.ascii "ASCII16K"
+             4B
+      0005A4 00                    1084 	.db 0x00
+      0005A5                       1085 ___str_13:
+      0005A5 4E 45 4F 38           1086 	.ascii "NEO8"
+      0005A9 00                    1087 	.db 0x00
+      0005AA                       1088 ___str_14:
+      0005AA 4E 45 4F 31 36        1089 	.ascii "NEO16"
+      0005AF 00                    1090 	.db 0x00
+      0005B0                       1091 ___str_15:
+      0005B0 4B 4F 4E 41 4D 49 53  1092 	.ascii "KONAMISCC"
+             43 43
+      0005B9 00                    1093 	.db 0x00
+      0005BA                       1094 ___str_16:
+      0005BA 53 45 4C 45 43 54 20  1095 	.ascii "SELECT MAPPER:"
+             4D 41 50 50 45 52 3A
+      0005C8 00                    1096 	.db 0x00
+      0005C9                       1097 ___str_17:
+      0005C9 52 49 53 4B 59 4D 53  1098 	.ascii "RISKYMSX2 ROM LOADER"
+             58 32 20 52 4F 4D 20
+             4C 4F 41 44 45 52
+      0005DD 0D                    1099 	.db 0x0d
+      0005DE 0A                    1100 	.db 0x0a
+      0005DF 0D                    1101 	.db 0x0d
+      0005E0 0A                    1102 	.db 0x0a
+      0005E1 00                    1103 	.db 0x00
+      0005E2                       1104 ___str_18:
+      0005E2 52 65 61 64 69 6E 67  1105 	.ascii "Reading USB directory..."
+             20 55 53 42 20 64 69
+             72 65 63 74 6F 72 79
+             2E 2E 2E
+      0005FA 0D                    1106 	.db 0x0d
+      0005FB 0A                    1107 	.db 0x0a
+      0005FC 00                    1108 	.db 0x00
+      0005FD                       1109 ___str_19:
+      0005FD 4E 4F 20 2E 52 4F 4D  1110 	.ascii "NO .ROM FILES ON USB STICK"
+             20 46 49 4C 45 53 20
+             4F 4E 20 55 53 42 20
+             53 54 49 43 4B
+      000617 0D                    1111 	.db 0x0d
+      000618 0A                    1112 	.db 0x0a
+      000619 0D                    1113 	.db 0x0d
+      00061A 0A                    1114 	.db 0x0a
+      00061B 00                    1115 	.db 0x00
+      00061C                       1116 ___str_20:
+      00061C 50 6C 75 67 20 61 20  1117 	.ascii "Plug a stick with .ROM files,"
+             73 74 69 63 6B 20 77
+             69 74 68 20 2E 52 4F
+             4D 20 66 69 6C 65 73
+             2C
+      000639 0D                    1118 	.db 0x0d
+      00063A 0A                    1119 	.db 0x0a
+      00063B 00                    1120 	.db 0x00
+      00063C                       1121 ___str_21:
+      00063C 70 6F 77 65 72 2D 63  1122 	.ascii "power-cycle the MSX."
+             79 63 6C 65 20 74 68
+             65 20 4D 53 58 2E
+      000650 0D                    1123 	.db 0x0d
+      000651 0A                    1124 	.db 0x0a
+      000652 00                    1125 	.db 0x00
+      000653                       1126 ___str_22:
+      000653 4C 4F 41 44 49 4E 47  1127 	.ascii "LOADING "
+             20
+      00065B 00                    1128 	.db 0x00
+      00065C                       1129 ___str_23:
+      00065C 2E 2E 2E              1130 	.ascii "..."
+      00065F 0D                    1131 	.db 0x0d
+      000660 0A                    1132 	.db 0x0a
+      000661 00                    1133 	.db 0x00
+      000662                       1134 ___str_24:
+      000662 4C 4F 41 44 45 44 20  1135 	.ascii "LOADED "
+      000669 00                    1136 	.db 0x00
+      00066A                       1137 ___str_25:
+      00066A 20 4B 69 42           1138 	.ascii " KiB"
+      00066E 0D                    1139 	.db 0x0d
+      00066F 0A                    1140 	.db 0x0a
+      000670 0D                    1141 	.db 0x0d
+      000671 0A                    1142 	.db 0x0a
+      000672 00                    1143 	.db 0x00
+      000673                       1144 ___str_26:
+      000673 4D 41 50 50 45 52 3A  1145 	.ascii "MAPPER: "
+             20
+      00067B 00                    1146 	.db 0x00
+      00067C                       1147 ___str_27:
+      00067C 0D                    1148 	.db 0x0d
+      00067D 0A                    1149 	.db 0x0a
+      00067E 00                    1150 	.db 0x00
+      00067F                       1151 ___str_28:
+      00067F 52 45 46 55 53 45 44  1152 	.ascii "REFUSED! (PSRAM not ready?)"
+             21 20 28 50 53 52 41
+             4D 20 6E 6F 74 20 72
+             65 61 64 79 3F 29
+      00069A 0D                    1153 	.db 0x0d
+      00069B 0A                    1154 	.db 0x0a
+      00069C 00                    1155 	.db 0x00
+      00069D                       1156 ___str_29:
+      00069D 52 45 53 45 54 2E 2E  1157 	.ascii "RESET..."
+             2E
+      0006A5 00                    1158 	.db 0x00
+                                   1159 	.area _CODE
+                                   1160 	.area _INITIALIZER
+                                   1161 	.area _CABS (ABS)

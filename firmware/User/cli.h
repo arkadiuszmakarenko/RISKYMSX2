@@ -40,12 +40,26 @@
  *                                Does NOT mount the volume, so it's
  *                                safe to run when the stick refuses to
  *                                enumerate.
+ *   UREAD                      - low-level USB drive read test. Bypasses
+ *                                FATFS - issues SCSI INQUIRY, TEST UNIT
+ *                                READY, READ CAPACITY(10), hexdumps LBA
+ *                                0 (with MBR parse), spot-reads 4 LBAs
+ *                                across the volume, and times a 32 KiB
+ *                                contiguous read for throughput.
+ *                                Useful for sticks that enumerate but
+ *                                won't mount.
+ *   FAT                        - full FAT integration test: mounts the
+ *                                volume, lists the root directory,
+ *                                creates 0:/RISKYMSX2.TXT, reads it
+ *                                back and verifies byte-for-byte.
+ *                                Exercises the SCSI WRITE(10) path.
  *   LS [path]                  - list the first 16 entries of the root
  *                                directory (or `path` if given) of the
  *                                mounted FAT volume. Path defaults to "/".
- *   CAT <path> <addr> <len>    - copy <len> bytes of <path> from the USB
- *                                stick into PSRAM at <addr>. Uses DMA to
- *                                land the data. Replies "OK <copied>"
+ *   CAT <path> <addr> [len]    - copy <len> bytes of <path> from the USB
+ *                                stick into PSRAM at <addr>. If [len] is
+ *                                omitted, the file size is used. Uses DMA
+ *                                to land the data. Replies "OK <copied>"
  *                                or ERR.
  *
  * The RX side runs from USART1_IRQHandler in cli.c; CLI_Init() configures

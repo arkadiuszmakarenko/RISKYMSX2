@@ -13,6 +13,7 @@
  * Dispatched commands:
  *   PING / HELP / RST [ms] / SRC [SRAM|PSRAM]
  *   LOAD <hexaddr> <hexbytes> / XLOAD <hexaddr> <len> / DUMP <hexaddr> <len>
+ *   CAT <path> <addr> [len]
  *
  * LOAD / XLOAD / DUMP target the PSRAM cart image window (8 MiB at
  * 0x80000000). The active mapper (see Cart_SetMapper) interprets reads
@@ -24,6 +25,7 @@
 #include "cart.h"
 #include "psram.h"
 #include "usb_disk.h"
+#include "usb_tests.h"
 #include "ff.h"
 #include "scc.h"
 #include "debug.h"
@@ -187,8 +189,12 @@ static void CLI_HandleLine(char *line)
         printf ("  SCC                        - SCC emulator diagnostics (queue level, mapper)\r\n");
         printf ("  USB                        - enumerate/mount attached USB stick\r\n");
         printf ("  USBD                       - verbose USB enumeration diagnostic\r\n");
+        printf ("  UREAD                      - low-level SCSI read test (INQUIRY, "
+                "READ CAPACITY, hexdump MBR, throughput)\r\n");
+        printf ("  FAT                        - FAT integration test (mount, list, "
+                "create + verify a text file)\r\n");
         printf ("  LS [path]                  - list directory (default root)\r\n");
-        printf ("  CAT <path> <addr> <len>    - copy file from USB stick into PSRAM\r\n");
+        printf ("  CAT <path> <addr> [len]    - copy file from USB stick into PSRAM\r\n");
         printf ("  LOAD <hexaddr> <bytes...>  - write hex bytes into PSRAM image window\r\n");
         printf ("  XLOAD <hexaddr> <len>      - raw binary upload (script-driven)\r\n");
         printf ("  DUMP <hexaddr> <len>       - read <len> bytes from PSRAM image window\r\n");
@@ -253,11 +259,17 @@ static void CLI_HandleLine(char *line)
         }
     }
     else if (CLI_Token(line, "USBD")) {
-        /* Verbose enumeration diagnostic.  Prints every step of the
-         * USBHS host controller path + each SCSI retry, including
-         * REQUEST SENSE data after a failed READ CAPACITY.  Use this
-         * when `USB` fails silently with FR_NOT_READY (3). */
-        USB_DiagEnumerate ();
+        /* Verbose enumeration diagnostic (see usb_tests.c). */
+        USB_Tests_Enumerate ();
+    }
+    else if (CLI_Token(line, "UREAD")) {
+        /* Low-level USB drive read test (see usb_tests.c). */
+        USB_Tests_Scsi ();
+    }
+    else if (CLI_Token(line, "FAT")) {
+        /* FAT integration test: mount, list, create RISKYMSX2.TXT,
+         * read back, verify (see usb_tests.c). */
+        (void)USB_Tests_Fat ();
     }
     else if (CLI_Token(line, "LS")) {
         const char *p = line + 2;
@@ -266,9 +278,10 @@ static void CLI_HandleLine(char *line)
         USB_ListDir (p, 16);
     }
     else if (CLI_Token(line, "CAT")) {
-        /* CAT <path> <psram_hexaddr> <hex_len_bytes>  -- copy file into PSRAM.
+        /* CAT <path> <psram_hexaddr> [hex_len_bytes] -- copy file into PSRAM.
          * Uses FATFS reads into a small SRAM scratch buffer (512 B) and
-         * PSRAM DMA to push each chunk into the cart image window. */
+         * PSRAM DMA to push each chunk into the cart image window.
+         * If <len> is omitted, the helper uses the file's actual size. */
         const char *p = line + 3;
         while (*p == ' ' || *p == '\t') p++;
         /* Path is everything up to the next space. */
@@ -281,14 +294,22 @@ static void CLI_HandleLine(char *line)
         path[pi] = '\0';
         while (*p == ' ' || *p == '\t') p++;
         uint32_t addr = 0U, len = 0U;
+        uint8_t has_len = 0U;
         if (CLI_ParseHex (&p, &addr, 8) != 0
-            || CLI_ParseHex (&p, &len,  8) != 0) {
-            printf ("ERR CAT: bad args (need CAT <path> <addr> <len>)\r\n");
+            ) {
+            printf ("ERR CAT: bad args (need CAT <path> <addr> [len])\r\n");
             return;
         }
-        if (len == 0U) { printf ("OK 0\r\n"); return; }
-        if (addr >= PSRAM_CART_SIZE
-            || addr + len > PSRAM_CART_SIZE) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '\0' && *p != '\r' && *p != '\n') {
+            has_len = 1U;
+            if (CLI_ParseHex (&p, &len, 8) != 0) {
+                printf ("ERR CAT: bad args (need CAT <path> <addr> [len])\r\n");
+                return;
+            }
+        }
+        if (has_len && (addr >= PSRAM_CART_SIZE
+            || addr + len > PSRAM_CART_SIZE)) {
             printf ("ERR CAT: addr+len > PSRAM cart window\r\n");
             return;
         }
@@ -327,6 +348,49 @@ static void CLI_HandleLine(char *line)
         if (ms > 10000U) ms = 10000U;   /* sanity cap */
         Cart_AssertMSXReset(ms);
         printf ("OK %ums\r\n", (unsigned)ms);
+    }
+    else if (CLI_Token(line, "CAT")) {
+        /* CAT <path> <psram_hexaddr> [hex_len_bytes] -- copy file into PSRAM.
+         * Uses FATFS reads into a small SRAM scratch buffer (512 B) and
+         * PSRAM DMA to push each chunk into the cart image window.
+         * If <len> is omitted, the helper uses the file's actual size. */
+        const char *p = line + 3;
+        while (*p == ' ' || *p == '\t') p++;
+        char path[64];
+        uint8_t pi = 0;
+        while (*p && *p != ' ' && *p != '\t'
+               && *p != '\r' && *p != '\n' && pi < 63) {
+            path[pi++] = *p++;
+        }
+        path[pi] = '\0';
+        while (*p == ' ' || *p == '\t') p++;
+        uint32_t addr = 0U;
+        uint32_t len = 0U;
+        uint8_t has_len = 0U;
+        if (CLI_ParseHex (&p, &addr, 8) != 0) {
+            printf ("ERR CAT: bad args (need CAT <path> <addr> [len])\r\n");
+            return;
+        }
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '\0' && *p != '\r' && *p != '\n') {
+            has_len = 1U;
+            if (CLI_ParseHex (&p, &len, 8) != 0) {
+                printf ("ERR CAT: bad args (need CAT <path> <addr> [len])\r\n");
+                return;
+            }
+        }
+        if (has_len && (addr >= PSRAM_CART_SIZE
+            || addr + len > PSRAM_CART_SIZE)) {
+            printf ("ERR CAT: addr+len > PSRAM cart window\r\n");
+            return;
+        }
+        uint32_t got = USB_FileToPSRAM (path,
+                                        PSRAM_CART_BASE + addr, len);
+        if (got == 0U) {
+            printf ("ERR CAT: copy failed\r\n");
+        } else {
+            printf ("OK %u\r\n", (unsigned)got);
+        }
     }
     else if (CLI_Token(line, "LOAD")) {
         const char *p = line + 4;

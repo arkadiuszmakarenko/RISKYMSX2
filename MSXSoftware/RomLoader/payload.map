@@ -1,0 +1,77 @@
+ASxxxx Linker V03.00 + NoICE + sdld,  page 1.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000000  .__.ABS.                           
+     00000000  l__CABS                         
+     00000000  l__DABS                         
+     00000000  l__GSFINAL                      
+     00000000  l__GSINIT                       
+     00000000  l__HOME                         
+     00000000  l__INITIALIZED                  
+     00000000  l__INITIALIZER                  
+     00000000  s__CABS                         
+     00000000  s__DABS                         
+     000006F0  l__CODE                         
+     00000702  l__DATA                         
+     0000C000  s__CODE                         
+     0000C800  s__DATA                         
+     0000CF02  s__GSFINAL                      
+     0000CF02  s__GSINIT                       
+     0000CF02  s__HOME                         
+     0000CF02  s__INITIALIZED                  
+     0000CF02  s__INITIALIZER                  
+
+ASxxxx Linker V03.00 + NoICE + sdld,  page 2.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+_CODE                               0000C000    000006F0 =        1776. bytes (REL,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     0000C337  _main                              romloader
+     0000C6A6  __divuchar                         
+     0000C6A8  __divu8                            
+     0000C6AB  __divu16                           
+     0000C6AB  __divuint                          
+     0000C6DA  ___sdcc_enter_ix                   
+     0000C6E4  __moduchar                         
+     0000C6EB  __moduint                          
+
+ASxxxx Linker V03.00 + NoICE + sdld,  page 3.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+_DATA                               0000C800    00000702 =        1794. bytes (REL,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00 + NoICE + sdld,  page 4.
+
+Files Linked                              [ module(s) ]
+
+payload.rel                               [ romloader ]
+
+
+Libraries Linked                          [ object file ]
+
+/usr/bin/../share/sdcc/lib/z80/z80.lib    [ divunsigned.rel ]
+/usr/bin/../share/sdcc/lib/z80/z80.lib    [ crtenter.rel ]
+/usr/bin/../share/sdcc/lib/z80/z80.lib    [ modunsigned.rel ]
+
+ASxxxx Linker V03.00 + NoICE + sdld,  page 5.
+
+User Base Address Definitions
+
+_CODE = 0xc000
+_DATA = 0xc800
+
+
