@@ -43,8 +43,13 @@ extern "C" {
  * window; this only bounds the directory scan. */
 #define LOADER_MAX_FILES     128U
 
-/* Filename storage per file: 11 bytes of 8.3 name. */
-#define LOADER_NAME_LEN       11U
+/* Filename storage per file. The MSX-side loader pushes exactly this
+ * many bytes as LOAD_ROM arguments and expects to receive this many
+ * bytes per file from DIR_READ. The on-disk 8.3 SFN includes a
+ * "~N" tilde-tail when the original LFN was longer than 8 chars (e.g.
+ * "Knightmare.rom" -> "KNIGHT~1.ROM", 12 chars), so 12 is the minimum
+ * wire size that fits every FAT volume's short name. */
+#define LOADER_NAME_LEN       12U
 
 /* Interrupt-side mailbox state (written by the cart IRQ handler in
  * cart.c, drained by Loader_Service in the main loop). */

@@ -51,11 +51,15 @@
  *   firmware main loop).
  * ------------------------------------------------------------------ *
  *
- * UI interaction model (keyboard-layout independent - ANY key works):
- *   TAP  (press + release quickly)  = advance the cursor
- *   HOLD (press >= ~400 ms)          = choose the highlighted line
- * The SNSMAT PSG matrix scan needs no BIOS key ISR; crt0 keeps
- * interrupts disabled throughout (INIT is entered with IF=0).
+ * UI interaction model:
+ *   UP / DOWN arrows = move the cursor (with wrap-around)
+ *   SPACE            = choose the highlighted line
+ *   Any other key    = ignored
+ *
+ * crt0 keeps interrupts disabled throughout (INIT is entered with
+ * IF=0), so the BIOS keyboard ISR cannot run. We poll the PSG
+ * keyboard matrix directly via SNSMAT 0x0141 - that does not need
+ * an ISR.
  */
 
 #include <stdint.h>
@@ -200,59 +204,95 @@ static void print_dec(uint16_t v)
 
 static void cls(void)
 {
-	chput(0x0C);		/* CHPUT ctrl-L = clear screen */
+	chput(0x0C);		/* CHPUT ctrl-L = clear screen + home cursor */
 }
 
-/* ---- key input: SNSMAT scan, TAP / HOLD detection ------------------ */
+/* ---- key input: SNSMAT scan, arrow / space navigation --------------
+ *
+ * crt0 keeps interrupts disabled (the BIOS keyboard ISR does not get
+ * along with the cart EXTI0 emulation, and INIT is entered with
+ * IF=0 anyway), so we poll the PSG keyboard matrix directly via
+ * SNSMAT 0x0141.  No ISR dependency.
+ *
+ * MSX keyboard matrix (international layout), row 8 = cursor keys:
+ *
+ *     bit 7 = RIGHT arrow
+ *     bit 6 = DOWN  arrow
+ *     bit 5 = UP    arrow
+ *     bit 4 = LEFT  arrow
+ *     bit 0 = SPACE
+ *
+ * (Row 6 is F1/F2/F3/CODE/CAPS/GRAPH/CTRL/SHIFT - NOT the arrows.
+ * Row 7 is RET/SELECT/BS/STOP/TAB/ESC/F5/F4.)
+ */
 
-/* Scan all 10 rows; return 1 if any key is down. */
-static uint8_t any_key_down(void)
-{
-	for (uint8_t row = 0; row < 10; row++) {
-		if (snsmat(row) != 0xFFU)
-			return 1;
-	}
-	return 0;
-}
+enum {
+    KEY_NONE   = 0,
+    KEY_DOWN   = 1,
+    KEY_UP     = 2,
+    KEY_SELECT = 3   /* SPACE */
+};
 
-/* Crude millisecond delay (SNSMAT read ~ 100 us; 10 rows ~ 1 ms). */
+/* Bit masks for row 8 (active-low: bit=0 => key down). */
+#define R8_RIGHT  0x80U
+#define R8_DOWN   0x40U
+#define R8_UP     0x20U
+#define R8_LEFT   0x10U
+#define R8_SPACE  0x01U
+
+/* Crude delay - SNSMAT read takes ~100 us per row; 10 iterations
+ * of snsmat(0) is roughly 1 ms. */
 static void delay_ms(uint16_t ms)
 {
-	while (ms--)
-		(void)any_key_down();
+    while (ms--)
+        (void)snsmat(0);
 }
 
-#define HOLD_MS 400U   /* press held this long = "choose" */
-
-/* Wait for a key event: returns 0 for TAP, 1 for HOLD.
- *
- * While the key is held we keep polling the matrix (which also
- * provides the delay ticks); after HOLD_MS of continuous press we
- * return HOLD immediately (no need to wait for release).  For a TAP
- * we wait for full release, then debounce. */
-static uint8_t wait_key_event(void)
+/* Wait for a DOWN / UP / SPACE press on row 8. Returns KEY_DOWN,
+ * KEY_UP, KEY_SELECT, or KEY_NONE for any other key. */
+static uint8_t wait_arrow(void)
 {
-	/* wait for a press */
-	while (!any_key_down()) { }
+    /* Wait for the first press on row 8. */
+    while ((snsmat(8) & (R8_DOWN | R8_UP | R8_SPACE)) ==
+           (R8_DOWN | R8_UP | R8_SPACE)) { }
 
-	/* count how long it stays down */
-	uint16_t held = 0;
-	while (any_key_down()) {
-		held++;
-		if (held >= HOLD_MS)
-			return 1U;		/* HOLD */
-	}
-	/* released early enough - debounce release, report TAP */
-	delay_ms(30);
-	return 0U;
+    /* 10 ms debounce. */
+    delay_ms(10);
+    uint8_t row = snsmat(8);
+    if ((row & (R8_DOWN | R8_UP | R8_SPACE)) ==
+        (R8_DOWN | R8_UP | R8_SPACE)) {
+        return KEY_NONE;
+    }
+
+    uint8_t key = KEY_NONE;
+    if ((row & R8_SPACE) == 0U) key = KEY_SELECT;
+    else if ((row & R8_DOWN) == 0U && (row & R8_UP) == 0U) key = KEY_DOWN;
+    else if ((row & R8_DOWN) == 0U) key = KEY_DOWN;
+    else if ((row & R8_UP)   == 0U) key = KEY_UP;
+
+    /* Wait for release. */
+    while ((snsmat(8) & (R8_DOWN | R8_UP | R8_SPACE)) !=
+           (R8_DOWN | R8_UP | R8_SPACE)) { }
+    delay_ms(10);
+    return key;
+}
+
+/* Wait until any key on any row is down. */
+static void wait_any_key(void)
+{
+    while (1) {
+        for (uint8_t row = 0; row < 10; row++) {
+            if (snsmat(row) != 0xFFU) return;
+        }
+    }
 }
 
 /* ---- file list ------------------------------------------------------ */
 
 #define MAX_FILES 128U
 
-/* 8.3 names, 11 bytes each ("NAME    ROM"), NUL-terminated for print */
-static char s_files[MAX_FILES][12];
+#define LOADER_NAME_LEN 12
+static char s_files[MAX_FILES][LOADER_NAME_LEN + 1];
 static uint16_t s_count;
 
 static void fetch_file_list(void)
@@ -266,46 +306,73 @@ static void fetch_file_list(void)
 
 	for (uint16_t i = 0; i < s_count; i++) {
 		mbox_cmd(CMD_DIR_READ, 0, 0);
-		for (uint8_t j = 0; j < 11; j++)
+		for (uint8_t j = 0; j < LOADER_NAME_LEN; j++)
 			s_files[i][j] = (char)mbox_pop();
-		s_files[i][11] = '\0';
+		s_files[i][LOADER_NAME_LEN] = '\0';
 	}
 
 	mbox_cmd(CMD_DIR_CLOSE, 0, 0);
 }
 
 /* ---- selector: generic single-choice list ---------------------------
- * Draws up to 10 visible lines + a one-line hint.  TAP moves, HOLD
- * chooses.  Returns the chosen index. */
+ * DOWN / UP arrows move the cursor (with wrap-around). SPACE selects.
+ * Full cls() + redraw per keypress. Simple and reliable. */
 static uint16_t choose(const char *title, const char *const *names,
                        uint16_t count, uint16_t start)
 {
-	uint16_t sel = start < count ? start : 0;
+    if (count == 0U) return 0U;
+    uint16_t sel = start < count ? start : 0;
 
-	for (;;) {
-		cls();
-		print(title);
-		print("\r\n\r\n");
+    for (;;) {
+        cls();
+        print(title);
+        print("\r\n\r\n");
 
-		/* 10-line scrolling window centred on sel */
-		uint16_t top = sel >= 5U ? (uint16_t)(sel - 5U) : 0U;
-		uint16_t bot = top + 10U;
-		if (bot > count)
-			bot = count;
-		for (uint16_t i = top; i < bot; i++) {
-			print(i == sel ? ">" : " ");
-			print(" ");
-			print(names[i]);
-			print("\r\n");
-		}
-		print("\r\nTAP=NEXT  HOLD=SELECT\r\n");
+        /* 10-line scrolling window. Keep the window FULL (10 lines)
+         * whenever possible: clamp top so top+10 <= count, rather
+         * than letting bot get capped and shrinking the window.
+         * The old code did `top = sel-5; bot = top+10; if (bot >
+         * count) bot = count;` which for count=10, sel=6..9
+         * produced top=1..4, bot=10 -> only 6..9 entries visible
+         * (the list visibly shrank while navigating down). */
+        uint16_t top, bot;
+        if (count <= 10U) {
+            top = 0U;
+            bot = count;
+        } else if (sel < 5U) {
+            top = 0U;
+            bot = 10U;
+        } else if (sel >= (uint16_t)(count - 5U)) {
+            top = (uint16_t)(count - 10U);
+            bot = count;
+        } else {
+            top = (uint16_t)(sel - 5U);
+            bot = (uint16_t)(sel + 5U);
+        }
+        for (uint16_t i = top; i < bot; i++) {
+            print(i == sel ? "> " : "  ");
+            print(names[i]);
+            print("\r\n");
+        }
+        print("\r\nUP/DOWN=navigate  SPACE=select\r\n");
 
-		if (wait_key_event() == 1U)
-			return sel;		/* HOLD on the highlighted line */
-		sel++;
-		if (sel >= count)
-			sel = 0;
-	}
+        uint8_t k;
+        do {
+            k = wait_arrow();
+        } while (k == KEY_NONE);
+
+        if (k == KEY_SELECT) {
+            return sel;
+        }
+
+        if (k == KEY_DOWN) {
+            sel++;
+            if (sel >= count) sel = 0U;
+        } else if (k == KEY_UP) {
+            if (sel == 0U) sel = (uint16_t)(count - 1U);
+            else sel--;
+        }
+    }
 }
 
 /* ---- main ----------------------------------------------------------- */
@@ -326,7 +393,7 @@ int main(void)
 		print("Plug a stick with .ROM files,\r\n");
 		print("power-cycle the MSX.\r\n");
 		for (;;)
-			(void)wait_key_event();
+			wait_any_key();
 	}
 
 	/* ---- screen 1: pick the file ---- */
@@ -341,10 +408,10 @@ int main(void)
 	print(s_files[sel]);
 	print("...\r\n");
 	{
-		uint8_t args[11];
-		for (uint8_t i = 0; i < 11; i++)
+		uint8_t args[LOADER_NAME_LEN];
+		for (uint8_t i = 0; i < LOADER_NAME_LEN; i++)
 			args[i] = (uint8_t)s_files[sel][i];
-		mbox_cmd(CMD_LOAD_ROM, args, 11);
+		mbox_cmd(CMD_LOAD_ROM, args, LOADER_NAME_LEN);
 		/* result: 4-byte length, big-endian */
 		uint8_t len[4];
 		for (uint8_t i = 0; i < 4; i++)
@@ -388,7 +455,7 @@ int main(void)
 		if (rc != 0U) {
 			print("REFUSED! (PSRAM not ready?)\r\n");
 			for (;;)
-				(void)wait_key_event();
+				wait_any_key();
 		}
 	}
 

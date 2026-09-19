@@ -91,6 +91,24 @@ CFLAGS_COMMON  = $(ARCH_FLAGS) \
                  -Wunused -Wuninitialized \
                  -g -gdwarf-4 -std=gnu99
 
+# --- Game base (PSRAM placement diagnostic) ----------------------------------
+# Where inside the 8 MiB PSRAM window the served cart image starts, in
+# whole MiB. 0 = image at PSRAM start (default). Valid: 0..7.
+#
+# The constant flows to cart.h as CART_GAME_BASE_MB via this -D; every
+# mapper read path (C + asm) and the LOAD_ROM/CAT/XLOAD/DUMP write paths
+# fold the same offset in, so the image moves as one block. Use it to
+# test whether a game failure is PSRAM-address-dependent:
+#
+#     make rebuild GAME_BASE_MB=0 && make flash   # baseline
+#     make rebuild GAME_BASE_MB=2 && make flash   # image at PSRAM+2MiB
+#     make rebuild GAME_BASE_MB=4 && make flash
+#
+# NOTE: changing this requires a FULL rebuild (the constant is baked
+# into asm `lui` immediates) - use `make rebuild`, not `make`.
+GAME_BASE_MB ?= 0
+CFLAGS_COMMON += -DCART_GAME_BASE_MB=$(GAME_BASE_MB)
+
 # --- Flash tool --------------------------------------------------------------
 # CH32V4x7 (chip id 0xa6) is NOT supported by upstream `wlink` or `minichlink`
 # (they report "Chip Type unknown [a6]" and refuse to program). The WCH-LinkE
@@ -127,8 +145,11 @@ INCDIRS        := -IDebug -ICore \
                   -IPeripheral/inc -IStartup
 MSX_SOFTWARE_DIR := $(CURDIR)/../MSXSoftware
 ROM_LOADER_DIR   := $(MSX_SOFTWARE_DIR)/RomLoader
-ROM_EMBED_SRC    := User/hello_rom.c
-ROM_EMBED_DEPS   :=
+ROM_EMBED_SRC    := User/maptest_rom.c
+ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/MapperTest/Makefile \
+					$(MSX_SOFTWARE_DIR)/MapperTest/crt0.s \
+					$(MSX_SOFTWARE_DIR)/MapperTest/maptest.c \
+					$(CURDIR)/../tools/rom2c.py
 OBJDIR         := obj
 
 # --- Discover sources automatically ------------------------------------------
@@ -140,6 +161,10 @@ SRC_C          := $(wildcard Startup/*.c  Startup/*.S \
                     User/*.c \
                     User/FATFS/*.c \
 					User/USB_Host/*.c) $(ROM_EMBED_SRC)
+SRC_C          := $(filter-out User/envtest_rom.c,$(SRC_C))
+# selector_rom.c is a legacy mirror of maptest_rom.c kept only so debug
+# paths that grep for the name still find it - it defines the SAME
+# symbols (maptest_rom, maptest_rom_len), so it can't be linked twice.
 SRC_C          := $(filter-out User/selector_rom.c,$(SRC_C))
 SRC_C          := $(sort $(SRC_C))
 
@@ -264,7 +289,8 @@ clean:
 	@echo "  CLEAN $(OBJDIR)"
 	@rm -rf $(OBJDIR)
 
-rebuild: clean all
+rebuild: clean
+	@$(MAKE) -j1 all
 
 # --- Convenience targets -----------------------------------------------------
 # MRS's $(SIZ) target printed the size to stdout (no redirect), so $(SIZ)

@@ -109,13 +109,16 @@ void Cart_EXTI0_ROM32k_Handler (void) __attribute__((section(".ramfunc"), noinli
 void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                        interrupt("WCH-Interrupt-fast")));
 
-/* Flash-selector mapper: serves the embedded selector ROM (selector_rom[])
+/* Embedded envelope-test ROM image (flash-resident). */
+extern const uint8_t maptest_rom[];
+
+/* Flash-selector mapper: serves the embedded test ROM (maptest_rom[])
  * for ordinary cart reads, and decodes the mailbox window 0x7FF0..0x7FFF
  * that the RAM-resident loader uses to talk to the firmware (see
  * loader.h / MSXSoftware/RomLoader). Keep this handler in flash: the
  * cart flash path is zero-wait, so there is no reason to delay boot on
  * PSRAM configuration just to reach the selector. */
-void Cart_EXTI0_Loader_Handler (void) __attribute__((noinline,
+void Cart_EXTI0_Flash_Handler (void) __attribute__((noinline,
                                                      interrupt("WCH-Interrupt-fast")));
 
 /* No-mapper fallback: just clears the pending bit and releases the bus.
@@ -139,11 +142,12 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "NEO8",
     "NEO16",
     "KONAMISCC",
-    "LOADER",
+    "FLASH",
 };
 
 uint32_t Cart_GetImageBase (void) { return PSRAM_CART_BASE; }
 uint32_t Cart_GetImageSize (void) { return PSRAM_CART_SIZE; }
+uint32_t Cart_GetGameBase (void) { return CART_GAME_BASE; }
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
 
 int Cart_SetMapper (Cart_Mapper m) {
@@ -152,7 +156,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         && m != CART_MAP_ROM16k
         && m != CART_MAP_ROM32k
         && m != CART_MAP_ROM48k
-        && m != CART_MAP_LOADER
+        && m != CART_MAP_FLASH
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -171,22 +175,22 @@ int Cart_SetMapper (Cart_Mapper m) {
     switch (m) {
     case CART_MAP_NONE:        h = (uint32_t)Cart_EXTI0_None_Handler; break;
     case CART_MAP_ROM16k:      h = (uint32_t)Cart_EXTI0_ROM16k_Handler; break;
-    case CART_MAP_ROM32k:      h = (uint32_t)Cart_EXTI0_Loader_Handler; break;
+    case CART_MAP_ROM32k:      h = (uint32_t)Cart_EXTI0_ROM32k_Handler; break;
     case CART_MAP_ROM48k:      h = (uint32_t)Cart_EXTI0_ROM48k_Handler; break;
-    case CART_MAP_KONAMI:
+    case CART_MAP_KONAMI:     h = (uint32_t)RunKonami; break;
     case CART_MAP_KONAMISCC:
     case CART_MAP_NEO8:
     case CART_MAP_NEO16:       h = (uint32_t)Cart_Banked_Dispatch; break;
     case CART_MAP_KONAMINOSCC: h = (uint32_t)Cart_EXTI0_KonamiNOSCC_Handler; break;
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
-    case CART_MAP_LOADER:      h = (uint32_t)Cart_EXTI0_Loader_Handler; break;
+    case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
     default:                   return -1;
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
 
     /* Flash selector mappers: reset the mailbox so the loader starts clean. */
-    if (m == CART_MAP_ROM32k || m == CART_MAP_LOADER) {
+    if (m == CART_MAP_ROM32k || m == CART_MAP_FLASH) {
         Loader_Reset ();
     }
 
@@ -209,18 +213,34 @@ int Cart_SetMapper (Cart_Mapper m) {
         s_state.bankOffsets[4] = 0U - 0x8000U;  /* 0x8000..0x9FFF -> PSRAM[0..0x1FFF] */
         s_state.bankOffsets[5] = 0U - 0xA000U;  /* 0xA000..0xBFFF -> PSRAM[0..0x1FFF] */
     } else if (m == CART_MAP_KONAMINOSCC || m == CART_MAP_KONAMISCC) {
-        /* Konami-without-SCC variant: same layout as KONAMI but bank
-         * writes are accepted at any address in 0x4000..0xBFFF, not
-         * just 0x6000/0x8000/0xA000. Same bias math. KONAMISCC shares
-         * the identical bank layout AND the legacy v303 initial-bank
-         * defaults (bankOffsets[2]=-0x4000, [3]=-0x6000, [4]=-0x8000,
-         * [5]=-0xA000 - see Init_Cart's KonamiWithSCC case there),
-         * which pre-map pages 1..3 to image offset 0 before any
-         * bank-select write. */
-        s_state.bankOffsets[2] = 0U - 0x4000U;
-        s_state.bankOffsets[3] = 0U - 0x6000U;
-        s_state.bankOffsets[4] = 0U - 0x8000U;
-        s_state.bankOffsets[5] = 0U - 0xA000U;
+        /* Konami-without-SCC / Konami-with-SCC INITIAL bank layout.
+         * All four page biases are -0x4000 so the read formula
+         * PSRAM[addr + bias + game_base] lands at:
+         *   page 1 (0x4000..0x5FFF) -> image[0x0000..0x1FFF] (bank 0)
+         *   page 2 (0x6000..0x7FFF) -> image[0x2000..0x3FFF] (bank 1)
+         *   page 3 (0x8000..0x9FFF) -> image[0x4000..0x5FFF] (bank 2)
+         *   page 4 (0xA000..0xBFFF) -> image[0x6000..0x7FFF] (bank 3)
+         * This matches WebMSX 6.x's CartridgeKonamiUltimateCollection
+         * reset state (bank1No=0, bank2No=1, bank3No=2, bank4No=3),
+         * which WebMSX selects for any AB-header cart with an 8 KiB-
+         * aligned size; verified byte-for-byte against WebMSX for f1,
+         * Nemesis, Knightmare, Space Manbow, Hydlide 3 and Metal Gear 2.
+         *
+         * The legacy v303 defaults this replaces ([2..5] = -0x4000,
+         * -0x6000, -0x8000, -0xA000 - every page pre-mapped to bank 0)
+         * break any cart whose init reads code/data from pages 2..4
+         * BEFORE its first bank-switch write: e.g. Metal Gear 2
+         * (512 KiB) LDIRs from 0xA0B6/0xA021/0xA14B/0xA186 and CALLs
+         * 0x9DD4/0x6011/0x7243 during init - with every page mapped
+         * to bank 0 it fetches garbage and the MSX hangs on a blue
+         * screen while the AB header at 0x4000 still reads fine (the
+         * exact "games >256 KiB don't boot" symptom; carts that stay
+         * in page 1 during init - most <=256 KiB games - happen to
+         * work with either layout). */
+        s_state.bankOffsets[2] = 0U - 0x4000U;  /* page 1 -> bank 0 */
+        s_state.bankOffsets[3] = 0U - 0x4000U;  /* page 2 -> bank 1 */
+        s_state.bankOffsets[4] = 0U - 0x4000U;  /* page 3 -> bank 2 */
+        s_state.bankOffsets[5] = 0U - 0x4000U;  /* page 4 -> bank 3 */
         if (m == CART_MAP_KONAMISCC) {
             /* Bring up the SCC emulator core (emu2212) + its DMA->DAC
              * sample pump. Safe to call repeatedly; scc.c ignores a
@@ -300,21 +320,50 @@ void Init_Cart (void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Cart_AssertMSXReset - PE4 pulse                                     */
+/* MSX reset control (PE4). The MSX reset line is active LOW. We hold
+ * the MSX in reset from the very start of `main()` (so its BIOS waits
+ * while the firmware boots) and release it only after the cart is
+ * armed - otherwise the BIOS probes 0x4000 with no slot active and
+ * drops to BASIC. Cart_AssertMSXReset() is the legacy one-shot pulse,
+ * still used by the loader's CMD_RESET flow.                       */
 /* ------------------------------------------------------------------ */
 
-void Cart_AssertMSXReset (uint32_t ms) {
+static void msx_reset_drive_low (void) {
     GPIO_InitTypeDef io = {0};
     io.GPIO_Pin   = GPIO_Pin_4;
     io.GPIO_Mode  = GPIO_Mode_Out_PP;
     io.GPIO_Speed = GPIO_Speed_High;
     GPIO_Init (GPIOE, &io);
-    GPIO_SetBits   (GPIOE, GPIO_Pin_4);
     GPIO_ResetBits (GPIOE, GPIO_Pin_4);
-    Delay_Ms (ms);
+}
+
+static void msx_reset_release (void) {
+    GPIO_InitTypeDef io = {0};
+    io.GPIO_Pin   = GPIO_Pin_4;
+    io.GPIO_Mode  = GPIO_Mode_Out_PP;
+    io.GPIO_Speed = GPIO_Speed_High;
+    GPIO_Init (GPIOE, &io);
     GPIO_SetBits (GPIOE, GPIO_Pin_4);
+    /* Small RC settle on PE4 (the MSX has its own pull-up), then
+     * return the pin to floating input so we don't fight the MSX
+     * reset circuit during normal operation. */
+    for (volatile int i = 0; i < 64; i++) { __asm__ volatile ("nop"); }
     io.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init (GPIOE, &io);
+}
+
+void Cart_AssertMSXReset_Begin (void) {
+    msx_reset_drive_low ();
+}
+
+void Cart_AssertMSXReset_End (void) {
+    msx_reset_release ();
+}
+
+void Cart_AssertMSXReset (uint32_t ms) {
+    msx_reset_drive_low ();
+    Delay_Ms (ms);
+    msx_reset_release ();
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,8 +375,12 @@ static inline __attribute__((always_inline))
 void Cart_DriveByteFromPSRAM (uint32_t addr, uint32_t bias) {
     /* Read the byte with the bus STILL TRI-STATED. PSRAM read takes
      * ~30 cycles; the old handler relied on this exact order to avoid
-     * driving a stale OUTDR value during the controller latency. */
-    uint8_t b = *(const volatile uint8_t *)(PSRAM_CART_BASE + addr + bias);
+     * driving a stale OUTDR value during the controller latency.
+     * CART_GAME_BASE (compile-time, cart.h) shifts the whole image
+     * within the PSRAM window - every read path adds the same
+     * constant, so the image moves as one block. */
+    uint8_t b = *(const volatile uint8_t *)
+        (PSRAM_CART_BASE + CART_GAME_BASE + addr + bias);
     GPIOB->OUTDR = (uint32_t)b << 8;
     GPIOB->CFGHR = CART_BUS_ON;
 }
@@ -372,6 +425,8 @@ uint8_t Cart_ReadWriteData (void) {
  *   Z80_page_start = i * 0x2000.
  */
 static void RunKonami (void) {
+    /* Debug: toggle PA0 so we can see on the LA that this fired. */
+    GPIOA->OUTDR ^= (1u << 0);
     const uint16_t address = (uint16_t)GPIOD->INDR;
     const uint32_t ctrl   = GPIOE->INDR;
     const uint32_t bank   = address >> 13;  /* 2..3 valid, 0..1 ignored */
@@ -814,6 +869,27 @@ _Static_assert (CART_RD_MASK     == 0x0002U, "asm RD drift");
 _Static_assert (CART_WR_MASK     == 0x0004U, "asm WR drift");
 _Static_assert (CART_MREQ_MASK    == 0x0020U, "asm MREQ drift");
 
+/* Game-base immediates for the asm handlers below. These must be
+ * GAS-evaluable constant expressions (no C type suffixes) because
+ * they are stringified into the asm templates; the assembler folds
+ * them exactly like the compiler folds the C-side CART_GAME_BASE.
+ * The two asserts pin the expressions to the cart.h constants so a
+ * drift in either direction breaks the build instead of silently
+ * serving bytes from the wrong PSRAM offset. */
+#define ASM_STR_(s)  #s
+#define ASM_STR(s)   ASM_STR_(s)
+#define ASM_GAME_BASE_BYTES  ((CART_GAME_BASE_MB) * (1024) * (1024))
+#define ASM_PSRAM_GAME_HI    (((0x80000000) + ASM_GAME_BASE_BYTES) >> 12)
+#define ASM_ROM_BIAS_HI      (((0x80000000) + ASM_GAME_BASE_BYTES - (0x4000)) >> 12)
+
+_Static_assert (ASM_PSRAM_GAME_HI
+                == (uint32_t)((PSRAM_CART_BASE + CART_GAME_BASE) >> 12),
+                "asm PSRAM game-base immediate drifted");
+_Static_assert (ASM_ROM_BIAS_HI
+                == (uint32_t)((PSRAM_CART_BASE + CART_GAME_BASE
+                               - 0x4000UL) >> 12),
+                "asm ROM bias immediate drifted");
+
 /* Konami-no-SCC, hand-scheduled asm. Port of RunKonamiNOSCC. Direct
  * VTF entry - no Cart_Banked_Dispatch hop on any cycle.
  *
@@ -904,7 +980,7 @@ void Cart_EXTI0_KonamiNOSCC_Handler (void) {
         "slli  a1, a1, 2                   \n" /* page * 4                 */
         "add   a2, a2, a1                  \n" /* %hi(s_state) + page*4    */
         "lw    a3, %%lo(s_state)(a2)       \n" /* a3 = bankOffsets[page]   */
-        "lui   a2, 0x80000                 \n" /* PSRAM base               */
+        "lui   a2, " ASM_STR(ASM_PSRAM_GAME_HI) "\n" /* PSRAM base + game base */
         "add   a2, a2, a3                  \n" /* base + bias              */
         "add   a2, a2, a0                  \n" /* + addr                   */
         "lbu   a3, 0(a2)                   \n" /* byte, bus tri-stated     */
@@ -1053,7 +1129,7 @@ void Cart_EXTI0_ASCII8k_Handler (void) {
         "lui   a2, %%hi(s_state)           \n"
         "add   a2, a2, a1                  \n" /* %hi(s_state) + slot*4    */
         "lw    a3, %%lo(s_state)(a2)       \n" /* a3 = bankOffsets[slot]   */
-        "lui   a2, 0x80000                 \n" /* PSRAM base               */
+        "lui   a2, " ASM_STR(ASM_PSRAM_GAME_HI) "\n" /* PSRAM base + game base */
         "add   a2, a2, a3                  \n" /* base + bias              */
         "add   a2, a2, a0                  \n" /* + addr                   */
         "lbu   a3, 0(a2)                   \n" /* byte, bus tri-stated     */
@@ -1197,7 +1273,7 @@ void Cart_EXTI0_ASCII16k_Handler (void) {
         "lui   a4, %%hi(s_state)           \n"
         "add   a2, a4, a2                  \n" /* %hi + byte offset        */
         "lw    a3, %%lo(s_state)(a2)       \n" /* bankOffsets[slot]        */
-        "lui   a2, 0x80000                 \n" /* PSRAM base               */
+        "lui   a2, " ASM_STR(ASM_PSRAM_GAME_HI) "\n" /* PSRAM base + game base */
         "add   a2, a2, a3                  \n" /* base + bias              */
         "add   a2, a2, a0                  \n" /* + addr                   */
         "lbu   a3, 0(a2)                   \n" /* byte, bus tri-stated     */
@@ -1238,7 +1314,7 @@ void Cart_EXTI0_ROM16k_Handler (void) {
         "j     2f                          \n"
         "1:                                \n"
         "lw    a0, 1032(t0)                \n" /* GPIOD->INDR = A0..A15     */
-        "lui   a1, 0x7FFFC                 \n" /* bias = 0x80000000 - 0x4000 */
+        "lui   a1, " ASM_STR(ASM_ROM_BIAS_HI) "\n" /* bias = PSRAM base + game base - 0x4000 */
         "add   a2, a0, a1                  \n" /* byte index                */
         "lbu   a3, 0(a2)                   \n" /* PSRAM byte, bus tri-state */
         "lui   a4, 0x33333                 \n"
@@ -1260,44 +1336,76 @@ void Cart_EXTI0_ROM16k_Handler (void) {
               "a5", "a6", "a7", "memory");
 }
 
-/* ROM32k: 32 KiB image at 0x4000..0xBFFF. Same shape as ROM16k (the
- * mirror has no effect on the handler - 0x4000 <= addr < 0xC000 in
- * either case maps to img[0..0x7FFF]). */
+/* Mailbox window: cart address 0x7FF0..0x7FFF. Defined here so the
+ * FLASH handler at the bottom of this file can decode mailbox reads/
+ * writes for the loader protocol. The mailbox is ONLY intercepted by
+ * the FLASH handler - the ROM32k/ROM48k/ROM16k handlers serve the
+ * cart image verbatim from PSRAM, so a real game ROM's bytes at
+ * 0x7FF0 are not silently replaced by the loader's status byte (which
+ * would crash the game the moment it touches that address).
+ *
+ * The FLASH handler at the bottom of this file also has its own copy
+ * of the define so it compiles standalone. */
+#define LOADER_MBOX_ADDR   0x7FF0U
+
+/* Args-per-command table (MUST match romloader.c): only LOAD_ROM
+ * (12-byte SFN slot, see LOADER_NAME_LEN) and SET_MAPPER (1 byte)
+ * take args. The 12 bytes are the FAT short filename verbatim
+ * (e.g. "KNIGHT~1.ROM\0\0") so f_open accepts them directly without
+ * any 8.3 reconstruction - the loader can pass an 8-char-or-shorter
+ * SFN as well, the trailing zeros are ignored. */
+static const uint8_t s_loader_args_of[6] = { 0, 0, 0, 12, 1, 0 };
+
+/* ROM32k: 32 KiB cart image at 0x4000..0xBFFF, served from PSRAM
+ * verbatim. NO mailbox interception - the loader mailbox window
+ * 0x7FF0..0x7FFF lives ONLY inside the FLASH handler, not here.
+ * Real game ROMs can have any byte at 0x7FF0 (it's just an ordinary
+ * address inside their code/data window); the previous version of
+ * this handler returned g_loader_mbox.status (= 0xC0 after a successful
+ * LOAD_ROM) for every read at 0x7FF0 and 0xFF for everything else
+ * in the mailbox window, which silently corrupted game code that
+ * touched those addresses. The envelope test that needed the mailbox
+ * under ROM32k is now obsolete - the FLASH handler serves both the
+ * loader menu AND any future mailbox-based diagnostics. */
 void Cart_EXTI0_ROM32k_Handler (void) {
-    __asm__ volatile (
-        "lui   t0, 0x40011                 \n"
-        "lui   t1, 0x40012                 \n"
-        "lui   t2, 0x40010                 \n"
-        "lw    a6, -2040(t1)               \n"
-        "andi  a6, a6, 1                   \n"
-        "beqz  a6, 1f                      \n"
-        "lui   a7, 0x44444                 \n"
-        "addi  a7, a7, 0x444               \n"
-        "sw    a7, -1020(t0)               \n"
-        "sw    a6, 1044(t2)                \n"
-        "j     2f                          \n"
-        "1:                                \n"
-        "lw    a0, 1032(t0)                \n"
-        "lui   a1, 0x7FFFC                 \n"
-        "add   a2, a0, a1                  \n"
-        "lbu   a3, 0(a2)                   \n"
-        "lui   a4, 0x33333                 \n"
-        "addi  a4, a4, 0x333               \n"
-        "slli  a3, a3, 8                   \n"
-        "sw    a3, -1012(t0)               \n"
-        "sw    a4, -1020(t0)               \n"
-        "lui   a7, 0x44444                 \n"
-        "addi  a7, a7, 0x444               \n"
-        "addi  a5, zero, 1                 \n"
-        "sw    a5, 1044(t2)                \n"
-        "3:                                \n"
-        "lw    a6, -2040(t1)               \n"
-        "andi  a6, a6, 1                   \n"
-        "beqz  a6, 3b                      \n"
-        "sw    a7, -1020(t0)               \n"
-        "2:                                \n"
-        : : : "t0", "t1", "t2", "a0", "a1", "a2", "a3", "a4",
-              "a5", "a6", "a7", "memory");
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl = GPIOE->INDR;
+
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+
+    if ((ctrl & CART_RD_MASK) == 0U && address >= 0x4000U && address < 0xC000U) {
+        /* Serve from PSRAM with the bus still tri-stated - hides the
+         * ~30-cycle PSRAM read latency before the data-bus drivers
+         * come up. CART_GAME_BASE shifts the image within the window
+         * (the same constant every other read path adds). */
+        uint8_t v = *(const volatile uint8_t *)
+            (PSRAM_CART_BASE + CART_GAME_BASE + address - 0x4000U);
+        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8)) | ((uint32_t)v << 8);
+        GPIOB->CFGHR = CART_BUS_ON;
+    } else {
+        /* Write cycle, or read outside the cart window: release the
+         * bus so the MSX's own devices can respond. Writes to the
+         * cart image window go nowhere (the Z80 is reading-only here,
+         * but harmless to ignore). */
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
+
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    GPIOB->CFGHR = CART_BUS_OFF;
 }
 
 /* ROM48k: 48 KiB image at 0x4000..0xFFFF. Bias = img_base - 0x4000 (same
@@ -1324,7 +1432,7 @@ void Cart_EXTI0_ROM48k_Handler (void) {
         "j     2f                          \n"
         "1:                                \n"
         "lw    a0, 1032(t0)                \n"
-        "lui   a1, 0x7FFFC                 \n"
+        "lui   a1, " ASM_STR(ASM_ROM_BIAS_HI) "\n" /* PSRAM base + game base - 0x4000 */
         "add   a2, a0, a1                  \n"
         "lbu   a3, 0(a2)                   \n"
         "lui   a4, 0x33333                 \n"
@@ -1353,17 +1461,14 @@ void Cart_EXTI0_ROM48k_Handler (void) {
 /* deliberate mailbox accesses - C here is fast enough.               */
 /* ------------------------------------------------------------------ */
 
-/* Embedded temporary hello ROM image (flash-resident). */
-extern unsigned char hello_rom[];
+/* The mailbox defines and args table are now defined just before
+ * Cart_EXTI0_ROM32k_Handler above, so both handlers share them.
+ * The embedded ROM image is also declared there. */
 
-/* Mailbox window: cart address 0x7FF0..0x7FFF. */
-#define LOADER_MBOX_ADDR   0x7FF0U
+/* Embedded envelope-test ROM image (flash-resident). */
+extern const uint8_t maptest_rom[];
 
-/* Args-per-command table (MUST match romloader.c): only LOAD_ROM
- * (11-byte filename) and SET_MAPPER (1 byte) take args. */
-static const uint8_t s_loader_args_of[6] = { 0, 0, 0, 11, 1, 0 };
-
-void Cart_EXTI0_Loader_Handler (void) {
+void Cart_EXTI0_Flash_Handler (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
 
@@ -1412,9 +1517,9 @@ void Cart_EXTI0_Loader_Handler (void) {
                 break;
             }
         } else if (address >= 0x4000U && address < 0xC000U) {
-            /* Serve the embedded hello ROM (32 KiB image, mapped at
+            /* Serve the embedded selector ROM (32 KiB image, mapped at
              * 0x4000 like ROM32k). */
-            v = hello_rom[address - 0x4000U];
+            v = maptest_rom[address - 0x4000U];
         } else {
             /* Out of the loader's window: float. */
             EXTI->INTFR = EXTI_INTENR_MR0;
@@ -1436,7 +1541,14 @@ void Cart_EXTI0_Loader_Handler (void) {
     if ((ctrl & CART_WR_MASK) == 0U) {
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
         if (address == LOADER_MBOX_ADDR) {
-            /* Mailbox command byte stream. */
+            /* Mailbox command byte stream.
+             * Dedup: if the previous command has not been serviced yet,
+             * ignore this byte. EXTI0 can re-trigger when SLTSL bounces
+             * or the MSX back-to-backs cycles, and the same byte ends
+             * up in the mailbox repeatedly. */
+            if (g_loader_mbox.have_cmd != 0U) {
+                /* pending cmd; drop this byte to avoid re-firing */
+            } else
             if (g_loader_mbox.arg_n > 0U) {
                 /* collecting args for the current command */
                 g_loader_mbox.args[

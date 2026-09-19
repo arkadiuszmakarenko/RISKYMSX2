@@ -1,0 +1,75 @@
+ASxxxx Assembler V02.00 + NoICE + SDCC mods  (Zilog Z80 / Hitachi HD64180 / ZX-Next / eZ80), page 1.
+Hexadecimal [24-Bits]
+
+Symbol Table
+
+    .__.$$$.                                                    =  002710 L
+    .__.ABS.                                                    =  000000 G
+    .__.CPU.                                                    =  000000 L
+    .__.H$L.                                                    =  000000 L
+    ___sdcc_enter_ix                                               ****** GX
+  0 ___str_12                                                      000493 R
+  0 ___str_13                                                      0004A7 R
+  0 ___str_14                                                      0004B9 R
+  0 ___str_15                                                      0004C0 R
+  0 ___str_16                                                      0004D0 R
+  0 ___str_17                                                      0004E1 R
+  0 ___str_18                                                      0004E4 R
+  0 ___str_19                                                      0004E7 R
+  0 ___str_20                                                      0004F7 R
+  0 ___str_21                                                      000509 R
+  0 ___str_22                                                      00050E R
+  0 ___str_23                                                      00051E R
+  0 ___str_24                                                      000528 R
+  0 ___str_25                                                      00052F R
+  0 ___str_26                                                      000537 R
+  0 ___str_27                                                      00054D R
+  0 ___str_28                                                      000558 R
+  0 ___str_29                                                      00058B R
+  0 ___str_30                                                      0005A9 R
+  0 ___str_31                                                      0005CD R
+  0 ___str_32                                                      0005F2 R
+  0 ___str_33                                                      000605 R
+  0 ___str_34                                                      000611 R
+  0 ___str_35                                                      00061D R
+    __divuint                                                      ****** GX
+    __moduint                                                      ****** GX
+  0 __str_0                                                        00002D R
+  0 __str_1                                                        000034 R
+  0 __str_10                                                       00007B R
+  0 __str_2                                                        00003B R
+  0 __str_3                                                        000042 R
+  0 __str_4                                                        000049 R
+  0 __str_5                                                        000055 R
+  0 __str_6                                                        00005D R
+  0 __str_7                                                        000066 R
+  0 __str_8                                                        00006B R
+  0 __str_9                                                        000071 R
+  0 _main                                                          000263 GR
+  0 _mapper_names                                                  000017 R
+  0 _mbox_cmd_set_mapper                                           00017D R
+  0 _mbox_dir_list                                                 000187 R
+  0 _mbox_load_rom                                                 000117 R
+  0 _mbox_wait_done                                                00010F R
+  0 _print                                                         00008E R
+  0 _print_hex                                                     00009B R
+  0 _print_name                                                    00021D R
+  0 _putchar_msx                                                   000000 GR
+  0 _wait_key                                                      000081 GR
+
+
+ASxxxx Assembler V02.00 + NoICE + SDCC mods  (Zilog Z80 / Hitachi HD64180 / ZX-Next / eZ80), page 2.
+Hexadecimal [24-Bits]
+
+Area Table
+
+   0 _CODE                                      size    62A   flags    0
+   1 _DATA                                      size      0   flags    0
+   2 _INITIALIZED                               size      0   flags    0
+   3 _DABS                                      size      0   flags    8
+   4 _HOME                                      size      0   flags    0
+   5 _GSINIT                                    size      0   flags    0
+   6 _GSFINAL                                   size      0   flags    0
+   7 _INITIALIZER                               size      0   flags    0
+   8 _CABS                                      size      0   flags    8
+

@@ -4,74 +4,49 @@
 #
 # Targets:
 #   selector.bin  - 32 KiB loader ROM ("AB" header at 0x4000)
-#   embed         - regenerate firmware/User/selector_rom.c from
-#                   selector.bin (via tools/rom2c.py) so the firmware
-#                   boots straight into the selector
+#   embed         - regenerate firmware/User/maptest_rom.c (the file the
+#                   CART_MAP_FLASH mapper actually serves) and
+#                   firmware/User/selector_rom.c (legacy mirror) from
+#                   selector.bin via tools/rom2c.py
 #   all           - selector.bin
 #
-# IMAGE ASSEMBLY (two-stage, because the payload must be linked at its
-# RUN address but stored at a different ROM address):
-#
-#   Stage 1: link payload.ihx with --code-loc 0xC000 --data-loc 0xC800
-#            (MSX RAM page 3).  sdcc emits position-DEPENDENT absolute
-#            calls/jumps and merges zero-initialised globals into
-#            _DATA right after _CODE, so the payload is one contiguous
-#            copyable image.  The gap 0xC6F1..0xC800 between code end
-#            and data start is zero-filled by makebin - harmless.
-#
-#            IMPORTANT: data/bss must NOT land in 0x8000..0xBFFF (page
-#            2) - the cart claims that page, so Z80 variable accesses
-#            would hit the cartridge bus, not RAM.  Page 3 (0xC000+)
-#            is main RAM on every MSX.
-#
-#   Stage 2: makebin the payload into a 64 KiB image, extract the
-#            0xC000..0xC000+span bytes as payload.bin (trailing zero
-#            bytes trimmed).
-#
-#   Stage 3: assemble the ROM: header + stub at 0x4000 (crt0.rel linked
-#            at its ROM address), patch payload_len at 0x4010, place
-#            payload.bin at 0x4040, pad to 32 KiB with 0xFF.
-#
-# The loader talks to the firmware via the mailbox at cart window
-# 0x7FF0..0x7FFF (see romloader.c header comment) while the firmware's
-# LOADER mapper is installed.
+# The cartridge now boots like a normal MSX ROM cartridge (same shape
+# as the temporary hello.bin test image): the code is linked at 0x4020,
+# runs directly from ROM, and uses the mailbox window at 0x7FF0..0x7FFF
+# as the shared envelope for USB directory, file, and mapper data.
 
 CC      = sdcc
 AS      = sdasz80
 CFLAGS  = -mz80 --no-std-crt0 --opt-code-size
 ASFLAGS = -plosgff
 
-PAYLOAD_CODE_LOC = 0xC000   # MSX RAM run address (page 3)
-PAYLOAD_DATA_LOC = 0xC800   # data right after code (page 3, NOT page 2!)
+CODE_LOC = 0x4020   # standard ROM code entry after the 16-byte header
+DATA_LOC = 0xC000   # MSX RAM page 3
 
 # Repo-relative paths for the embed step (we sit in MSXSoftware/RomLoader).
 ROM2C   = ../../tools/rom2c.py
-FWM_ROM = ../../firmware/User/selector_rom.c
+# The cart's FLASH mapper serves `maptest_rom[]` from this C file
+# (see firmware/Makefile ROM_EMBED_SRC := User/maptest_rom.c, and
+# Cart_EXTI0_Flash_Handler in cart.c which reads maptest_rom[]). The
+# selector_rom.c copy is kept in sync for the legacy CLI / debug paths
+# that look it up by name. This target drives the file the boot mapper
+# actually uses.
+FWM_ROM = ../../firmware/User/maptest_rom.c
+FWM_ROM_SFX = ../../firmware/User/selector_rom.c  # mirror copy
 ROM_BIN = selector.bin
 
 all: $(ROM_BIN)
 
-# ---- Stage 1+2: the RAM-resident payload -------------------------------
-payload.ihx: romloader.c
-	$(CC) $(CFLAGS) --code-loc $(PAYLOAD_CODE_LOC) \
-	       --data-loc $(PAYLOAD_DATA_LOC) -o $@ romloader.c
+# ---- Direct ROM build --------------------------------------------------
+romloader.ihx: crt0.rel romloader.rel
+	$(CC) $(CFLAGS) --code-loc $(CODE_LOC) --data-loc $(DATA_LOC) \
+	       -o $@ crt0.rel romloader.rel
 
-payload.bin: payload.ihx payload.map
-	makebin -s 65536 < $< > payload.flat.bin
-	python3 extract_payload.py
-	rm -f payload.flat.bin
-
-# ---- Stage 3: header + stub + payload ---------------------------------
-stub.ihx: crt0.rel
-	-$(CC) $(CFLAGS) --code-loc 0x4000 -o $@ crt0.rel
-
-stub.flat.bin: stub.ihx
-	makebin -s 65536 < $< > $@
-
-# The final ROM image is now called selector.bin, but keep the legacy
-# romloader.bin name as an alias for older scripts.
-$(ROM_BIN): stub.flat.bin payload.bin assemble_rom.py
-	python3 assemble_rom.py "$@"
+$(ROM_BIN): romloader.ihx
+	makebin -s 65536 < $< > $(ROM_BIN).full.bin
+	dd if=$(ROM_BIN).full.bin of=$@ bs=16384 skip=1 count=2 status=none
+	rm -f $(ROM_BIN).full.bin
+	@echo "$@: $$(wc -c < $@) bytes (32 KiB ROM image)"
 
 romloader.bin: $(ROM_BIN)
 	@:
@@ -79,10 +54,16 @@ romloader.bin: $(ROM_BIN)
 # Regenerate the firmware's embedded ROM source from selector.bin.
 embed: $(ROM_BIN)
 	python3 $(ROM2C) $(ROM_BIN) $(FWM_ROM)
-	@echo "embedded $(ROM_BIN) -> $(FWM_ROM)"
+	# Mirror copy under the legacy name so the CLI / debug paths that
+	# reference selector_rom[] stay in sync with what the cart serves.
+	cp -f $(FWM_ROM) $(FWM_ROM_SFX)
+	@echo "embedded $(ROM_BIN) -> $(FWM_ROM) (and $(FWM_ROM_SFX))"
 
 %.rel: %.s
 	$(AS) $(ASFLAGS) $@ $<
+
+%.rel: %.c
+	$(CC) $(CFLAGS) -c $<
 
 clean:
 	rm -f *.rel *.ihx *.bin *.flat.bin *.lk *.map *.mem *.lst *.rst \

@@ -185,6 +185,8 @@ static void CLI_HandleLine(char *line)
         printf ("  PING                       - liveness check\r\n");
         printf ("  RST [ms]                   - pulse MSX reset (decimal, default 100)\r\n");
         printf ("  PE4                        - read current PE4 state (0=low, 1=high)\r\n");
+        printf ("  GBASE                      - show served-image base offset in PSRAM window\r\n");
+        printf ("  PTEST                      - full-window PSRAM pattern test (DESTRUCTIVE)\r\n");
         printf ("  MAP [name|none]            - show or switch the active cart mapper\r\n");
         printf ("  SCC                        - SCC emulator diagnostics (queue level, mapper)\r\n");
         printf ("  USB                        - enumerate/mount attached USB stick\r\n");
@@ -198,6 +200,30 @@ static void CLI_HandleLine(char *line)
         printf ("  LOAD <hexaddr> <bytes...>  - write hex bytes into PSRAM image window\r\n");
         printf ("  XLOAD <hexaddr> <len>      - raw binary upload (script-driven)\r\n");
         printf ("  DUMP <hexaddr> <len>       - read <len> bytes from PSRAM image window\r\n");
+    }
+    else if (CLI_Token(line, "GBASE")) {
+        /* Compile-time GAME_BASE knob (see cart.h). The knob is baked
+         * in at build time (make rebuild GAME_BASE_MB=N) - this only
+         * reports it, so a mismatch between the flashed build and the
+         * intended test point is visible on the UART. */
+        printf ("GBASE %u MiB (offset 0x%08x, %u bytes left)\r\n",
+                (unsigned)CART_GAME_BASE_MB,
+                (unsigned)Cart_GetGameBase(),
+                (unsigned)(PSRAM_CART_SIZE - Cart_GetGameBase()));
+    }
+    else if (CLI_Token(line, "PTEST")) {
+        /* Full-window PSRAM test - see psram.c PSRAM_FullTest. Warn:
+         * destroys the loaded cart image; re-load the game afterwards
+         * (loader menu or CAT). Refuses to run if PSRAM_Init never
+         * succeeded (no point writing to an unconfigured device). */
+        if (PSRAM_GetRomMirrorBase() == 0U) {
+            printf ("ERR PTEST: PSRAM not initialised\r\n");
+            return;
+        }
+        printf ("PTEST: overwriting the PSRAM window, a few seconds...\r\n");
+        uint8_t r = PSRAM_FullTest ();
+        printf ("PTEST: %s\r\n",
+                (r == PSRAM_OK) ? "OK" : "FAILED");
     }
     else if (CLI_Token(line, "MAP")) {
         /* Show or switch the active cart mapper. Mapper selection

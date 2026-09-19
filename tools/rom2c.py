@@ -8,8 +8,8 @@ Usage:
 Reads the 32 KiB ROM image (e.g. selector.bin), emits a C file whose
 symbol name is derived from the output filename and lives in the
 .cartrom section (flash-resident, 32 KiB), plus a matching _len symbol.
-It also pre-verifies the copy stub at 0x4020 so the firmware can't
-silently embed the wrong loader image.
+The ROM is embedded exactly as-is; the firmware's cart handler serves
+it directly from flash at 0x4000..0xBFFF.
 
 The firmware mirrors this array at boot into BOTH cart windows:
   - SRAM window: main() copies hello_rom[] -> s_cart_image_sram[]
@@ -45,15 +45,6 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    # Loader ROM sanity: the copy stub at 0x4020 (Z80) must be the
-    # LDIR payload stub (DI / LD HL,0x4040 / LD DE,0xC000 / ...).
-    stub = rom[0x20:0x30]
-    if stub[:6] != bytes([0xF3, 0x21, 0x40, 0x40, 0x11, 0x00]):
-        print(f"error: {rom_path} missing romloader copy stub at 0x4020 "
-              f"(expected F3 21 40 40 11 00, got {stub[:6].hex()})",
-              file=sys.stderr)
-        return 1
-
     sha = hashlib.sha256(rom).hexdigest()
     rom_name = os.path.splitext(os.path.basename(out_path))[0]
 
@@ -67,10 +58,8 @@ def main() -> int:
     lines.append(" *")
     lines.append(" * This is the 32 KiB ROM selector (MSXSoftware/RomLoader) "
                  "the MSX executes at boot.")
-    lines.append(" * crt0 copies the payload (at Z80 0x4040) to MSX RAM "
-                 "0xC000 and jumps there;")
-    lines.append(" * the RAM-resident loader then talks to the firmware "
-                 "over the cart")
+    lines.append(" * The loader runs directly from ROM and talks to the "
+                 "firmware over the cart")
     lines.append(" * mailbox (see loader.h) to list USB .ROM files, load "
                  "one into PSRAM,")
     lines.append(" * pick a mapper and reset the MSX.")
@@ -80,11 +69,8 @@ def main() -> int:
     lines.append(" * Section notes:")
     lines.append(" *   - .cartrom keeps the image in FLASH (VMA==LMA, "
                  "KEEP()'d)")
-    lines.append(" *     so no startup copy is needed; the loader handler "
-                 "serves it")
-    lines.append(" *     directly from flash for cart reads while the "
-                 "LOADER mapper is")
-    lines.append(" *     installed.")
+    lines.append(" *     so the loader can boot like a normal ROM cartridge")
+    lines.append(" *     while the LOADER mapper is installed.")
     lines.append(" */")
     lines.append("#include <stdint.h>")
     lines.append("")

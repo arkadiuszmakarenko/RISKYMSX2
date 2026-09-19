@@ -13,7 +13,7 @@
  *                        - Self-test runs a 1 KiB walking-byte pattern at
  *                          three different PSRAM offsets so multi-row
  *                          addressing gets exercised.
- *                        - After the test, hello_rom[32768] is mirrored to
+ *                        - After the test, selector_rom[32768] is mirrored to
  *                          PSRAM_BUS_BASE and byte-compared.
  *                        - On any failure, the cart handler keeps using the
  *                          flash image (g_psram_mirror_base stays 0).
@@ -31,14 +31,14 @@
 #include "debug.h"
 #include <string.h>
 
-/* Cart image from hello_rom.c. Declared with an INCOMPLETE array type
+/* Cart image from maptest_rom.c. Declared with an INCOMPLETE array type
  * and a separate length symbol: the definition is a 1-byte placeholder
  * (no embedded ROM), and taking sizeof() on a 32768-declared extern
  * would always report 32768 - the placeholder branch would be dead
  * code and the full-32K copy would read past the 1-byte object in
- * flash. Use selector_rom_len to decide which path to take. */
-extern unsigned char  hello_rom[];
-extern unsigned int    hello_rom_len;
+ * flash. Use maptest_rom_len to decide which path to take. */
+extern const uint8_t  maptest_rom[];
+extern const uint32_t maptest_rom_len;
 
 /* ---------- PSRAM device MR encodings (copied from PSRAM/PSRAM/User/PSRAM.h) */
 #define PSRAM_MR_ADDR_0          0x00U  /* read latency / operating range */
@@ -193,9 +193,15 @@ static void psram_set_rd_latency(uint32_t mr0_freq, uint32_t latency,
  * boot any more: with the mapper left at NONE the MSX drops to BASIC;
  * a cart image is expected via XLOAD. (The selector_rom[] mirror + verify
  * this replaces was the boot-time "initial tests" the diagnostic ROM
- * ran on every reset.) */
+ * ran on every reset.)
+ *
+ * Clear the CPU lockup watchdog so this 2M-word bulk write cannot
+ * hang the core if a transient PSRAM hiccup stalls the bus. The
+ * default WCH init leaves EXTEN_LKUPEN set on this chip. */
 static uint8_t psram_copy_rom(void)
 {
+    EXTEN->EXTEN_CTR &= ~EXTEN_LKUPEN;
+
     volatile uint32_t *dst32 = (volatile uint32_t *)PSRAM_BUS_BASE;
     uint32_t words = PSRAM_CART_SIZE / 4U;
     for (uint32_t i = 0; i < words; i++) dst32[i] = 0xFFFFFFFFU;
@@ -228,6 +234,78 @@ static uint8_t psram_test_at(uint32_t offset)
 }
 
 static uint32_t g_psram_mirror_base = 0U;
+
+/* ------------------------------------------------------------------ */
+/* Full-window PSRAM test (CLI `PTEST`). DESTRUCTIVE: overwrites the */
+/* entire cart image window - run it before loading a game, or       */
+/* re-load the ROM afterwards.                                        */
+/*                                                                    */
+/* The boot-time self-test only samples three 1 KiB spots             */
+/* (0x000000, 0x100000, 0x400000); a game that only fails when its    */
+/* image lands at a particular PSRAM offset needs broader coverage.    */
+/* This test writes a pattern that ENCODES THE BYTE ADDRESS into      */
+/* every sample, so any aliasing / row-alias / address-bit fault      */
+/* shows up as a wrong readback, and the printout names the exact     */
+/* offset. Every 64 bytes a 32-byte block is written, then a second   */
+/* pass verifies everything (write-then-verify separated so a        */
+/* controller read-FIFO can't mask a real miss - see the memory       */
+/* note about the PSRAM read FIFO serving recent writes). Dense        */
+/* enough to hit every 2 KiB page of the 8 MiB window; sparse enough  */
+/* to finish in a couple of seconds (~4 M sampled bytes, 2 passes).   */
+/* Returns PSRAM_OK on pass, else PSRAM_ERR_TEST_OFFSETS.             */
+/* ------------------------------------------------------------------ */
+#define PSRAM_FULL_STRIDE   64U     /* sample interval           */
+#define PSRAM_FULL_BLK      32U     /* verified bytes per sample */
+
+static uint8_t psram_full_pattern (uint32_t a)
+{
+    /* Mix the 23 address bits so the byte is unique per address and
+     * depends on both low and high address bits: rot(a,13) ^ (a>>7) ^ A5.
+     * (a<<19 on a 32-bit uint is a rotate by 13 in effect: bits that
+     * fall out the top come back at the bottom.) */
+    return (uint8_t)((((a >> 13) | (a << 19)) ^ (a >> 7)) ^ 0xA5U);
+}
+
+uint8_t PSRAM_FullTest (void)
+{
+    volatile uint8_t *base = (volatile uint8_t *)PSRAM_BUS_BASE;
+    uint32_t errors = 0U;
+    uint32_t off;
+
+    /* Clear the CPU lockup watchdog - a hard PSRAM bus stall must
+     * surface as a mismatch printout, not a silent core hang
+     * (same precaution as psram_copy_rom). */
+    EXTEN->EXTEN_CTR &= ~EXTEN_LKUPEN;
+
+    /* Pass 1: write the address-encoded pattern. */
+    for (off = 0U; off < PSRAM_CART_SIZE; off += PSRAM_FULL_STRIDE) {
+        for (uint32_t i = 0U; i < PSRAM_FULL_BLK; i++) {
+            base[off + i] = psram_full_pattern (off + i);
+        }
+    }
+
+    /* Pass 2: verify. */
+    for (off = 0U; off < PSRAM_CART_SIZE; off += PSRAM_FULL_STRIDE) {
+        for (uint32_t i = 0U; i < PSRAM_FULL_BLK; i++) {
+            uint32_t a = off + i;
+            uint8_t expect = psram_full_pattern (a);
+            uint8_t got   = base[a];
+            if (got != expect) {
+                if (errors < 16U) {
+                    printf ("PSRAM full: MISMATCH off=0x%06x expect=0x%02x read=0x%02x\r\n",
+                            (unsigned)a, (unsigned)expect, (unsigned)got);
+                }
+                errors++;
+            }
+        }
+    }
+
+    printf ("PSRAM full test: %s (%u samples, %u errors)\r\n",
+            (errors == 0U) ? "PASS" : "FAIL",
+            (unsigned)(PSRAM_CART_SIZE / PSRAM_FULL_STRIDE),
+            (unsigned)errors);
+    return (errors == 0U) ? PSRAM_OK : PSRAM_ERR_TEST_OFFSETS;
+}
 
 uint32_t PSRAM_GetRomMirrorBase(void)
 {

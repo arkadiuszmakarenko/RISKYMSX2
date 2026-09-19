@@ -22,11 +22,21 @@ static uint16_t s_dir_index;      /* next file DIR_READ will return */
  * the served ROM). */
 static Cart_Mapper s_pending_mapper = CART_MAP_NONE;
 
+/* Bytes successfully loaded into PSRAM by the most recent CMD_LOAD_ROM.
+ * CMD_SET_MAPPER / CMD_RESET are refused while this is zero, so a
+ * failed file open (e.g. SFN mismatch on the stick) can't trap the MSX
+ * by switching mappers with a 0xFF-filled PSRAM window. The MSX-side
+ * loader checks the 4-byte length returned by LOAD_ROM before going on
+ * to the mapper menu, but it doesn't gate the cart mapper on it - so
+ * the firmware MUST refuse here. */
+static uint32_t s_bytes_loaded = 0U;
+
 void Loader_Reset (void) {
     memset ((void *)&g_loader_mbox, 0, sizeof (g_loader_mbox));
     g_loader_mbox.status = LOADER_ST_READY | LOADER_ST_DONE;
     s_file_count = 0;
     s_dir_index  = 0;
+    s_bytes_loaded = 0U;
 }
 
 /* Push a result byte (main-loop context only). */
@@ -47,29 +57,18 @@ static void push_result (uint8_t b) {
 /* Directory scan: USB stick root, .ROM files only (8.3 names).        */
 /* ------------------------------------------------------------------ */
 
-/* Convert an LFN/8.3 name to the fixed 11-byte "NAME    ROM" form.
- * Takes the extension from the last dot; truncates name to 8 / ext to
- * 3; uppercase (the MSX UI prints it as-is). */
-static void make_83_name (const char *fname, uint8_t out[LOADER_NAME_LEN]) {
-    memset (out, ' ', LOADER_NAME_LEN);
-    const char *dot = strrchr (fname, '.');
-    size_t base_len = dot ? (size_t)(dot - fname) : strlen (fname);
-    if (base_len > 8) base_len = 8;
-    for (size_t i = 0; i < base_len; i++) {
-        char c = fname[i];
-        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
-        out[i] = (uint8_t)c;
-    }
-    if (dot) {
-        const char *ext = dot + 1;
-        size_t ext_len = strlen (ext);
-        if (ext_len > 3) ext_len = 3;
-        for (size_t i = 0; i < ext_len; i++) {
-            char c = ext[i];
-            if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
-            out[8 + i] = (uint8_t)c;
-        }
-    }
+/* Copy the on-disk SFN ("altname" from f_readdir) into the 12-byte
+ * wire slot the MSX receives. The SFN is what f_open() will accept -
+ * it is the FAT short filename, with a "~N" tilde-tail when the
+ * original LFN was longer than 8 chars (e.g. "Knightmare.rom" ->
+ * "KNIGHT~1.ROM", 12 chars). The slot is null-padded to LOADER_NAME_LEN
+ * so cmd_load_rom can use it as a C string without walking past the
+ * stored bytes. */
+static void copy_altname (const char *alt, uint8_t out[LOADER_NAME_LEN]) {
+    size_t n = strlen (alt);
+    if (n > LOADER_NAME_LEN) n = LOADER_NAME_LEN;
+    for (size_t i = 0; i < n; i++) out[i] = (uint8_t)alt[i];
+    for (size_t i = n; i < LOADER_NAME_LEN; i++) out[i] = 0U;
 }
 
 static uint8_t is_rom_ext (const char *fname) {
@@ -105,7 +104,7 @@ static void cmd_dir_open (void) {
         if (fr != FR_OK || fi.fname[0] == 0) break;
         if (fi.fattrib & AM_DIR) continue;
         if (!is_rom_ext (fi.fname)) continue;
-        make_83_name (fi.fname, s_names[s_file_count]);
+        copy_altname (fi.altname, s_names[s_file_count]);
         s_file_count++;
     }
     f_closedir (&dir);
@@ -136,33 +135,46 @@ static void cmd_dir_read (void) {
 /* CMD_LOAD_ROM: stream the named file into PSRAM at cart offset 0.   */
 /* ------------------------------------------------------------------ */
 
-static void cmd_load_rom (const uint8_t *name83) {
-    /* Rebuild "0:/NAME.EXT" from the 11-byte 8.3 form. */
+static void cmd_load_rom (const uint8_t *name12) {
+    /* The 12-byte slot holds the FAT short name as it lives on disk
+     * (verbatim from fi.altname at DIR_OPEN time) - already
+     * null-terminated by copy_altname(). f_open accepts the SFN
+     * directly, so we just wrap it with the volume prefix. */
     char path[32];
     uint8_t p = 0;
     path[p++] = '0'; path[p++] = ':'; path[p++] = '/';
-    for (uint8_t i = 0; i < 8; i++) {
-        if (name83[i] == ' ') break;
-        path[p++] = (char)name83[i];
-    }
-    path[p++] = '.';
-    for (uint8_t i = 8; i < 11; i++) {
-        if (name83[i] == ' ') break;
-        path[p++] = (char)name83[i];
+    for (uint8_t i = 0; i < LOADER_NAME_LEN && name12[i] != 0U; i++) {
+        path[p++] = (char)name12[i];
     }
     path[p] = '\0';
 
     printf ("LOADER: LOAD_ROM '%s'\r\n", path);
 
-    uint32_t got = USB_FileToPSRAM (path, PSRAM_CART_BASE,
-                                    PSRAM_CART_SIZE);
+    /* Reject obvious garbage: a path with no extension is almost
+     * certainly a desync (the MSX-side loader sends 12 fixed bytes;
+     * if the upper bytes are garbage the path looks like
+     * "0:/FOO.ROMJUNK" and f_open will find nothing). Bailing early
+     * avoids the misleading "f_open failed" print and keeps
+     * s_bytes_loaded at 0 so CMD_SET_MAPPER / CMD_RESET refuse the
+     * cart swap. */
+    if (strchr (path + 3, '.') == NULL) {
+        printf ("LOADER: LOAD_ROM refusing bad name '%s'\r\n", path);
+        push_result (0); push_result (0); push_result (0); push_result (0);
+        s_bytes_loaded = 0U;
+        return;
+    }
+
+    uint32_t got = USB_FileToPSRAM (path,
+                                    PSRAM_CART_BASE + CART_GAME_BASE,
+                                    PSRAM_CART_SIZE - CART_GAME_BASE);
     /* result: 4-byte length BE */
     push_result ((uint8_t)(got >> 24));
     push_result ((uint8_t)(got >> 16));
     push_result ((uint8_t)(got >> 8));
     push_result ((uint8_t)(got));
-    printf ("LOADER: LOAD_ROM copied %u bytes -> PSRAM\r\n",
-            (unsigned)got);
+    s_bytes_loaded = got;
+    printf ("LOADER: LOAD_ROM copied %u bytes -> PSRAM+0x%x\r\n",
+            (unsigned)got, (unsigned)CART_GAME_BASE);
 }
 
 /* ------------------------------------------------------------------ */
@@ -171,6 +183,23 @@ static void cmd_load_rom (const uint8_t *name83) {
 
 static void cmd_set_mapper (uint8_t m) {
     if (m == 0 || m >= CART_MAP_MAX) {
+        push_result (1);   /* refused */
+        return;
+    }
+    /* Refuse to latch a PSRAM-backed mapper until a ROM has actually
+     * been loaded. The MSX-side loader doesn't gate the menu on the
+     * LOAD_ROM length it read back, so a failed file open (or a stray
+     * reset) would otherwise trap the MSX in a cart window full of
+     * 0xFF (from psram_copy_rom's init fill) with a mapper installed:
+     * every read at 0x4000 returns 0xFF, no 'AB' header, the BIOS
+     * drops to BASIC (best case) or executes 0xFF (RST 38h) in a
+     * tight loop (worst case, with bank-switching mappers). Only the
+     * FLASH mapper is exempt - it serves the flash-resident
+     * maptest_rom[] image, NOT PSRAM, so an empty PSRAM window
+     * doesn't affect it. */
+    if (m != CART_MAP_FLASH && s_bytes_loaded == 0U) {
+        printf ("LOADER: SET_MAPPER %s refused (no ROM loaded)\r\n",
+                Cart_MapperNames[m]);
         push_result (1);   /* refused */
         return;
     }
@@ -187,6 +216,24 @@ static void cmd_set_mapper (uint8_t m) {
 static void cmd_reset (void) {
     printf ("LOADER: RESET -> mapper %s, pulsing MSX reset\r\n",
             Cart_MapperNames[(unsigned)s_pending_mapper]);
+    /* Final safety net: never install a PSRAM-backed mapper with no
+     * image. SetMapper would happily wire the VTF slot to e.g. KONAMI,
+     * the handler would then read bankOffsets[] (zeroed) and serve
+     * 0xFF at 0x4000 - the MSX would hang in the BIOS' "search for
+     * AB" loop. Falling back to the flash selector (which serves
+     * maptest_rom[] from internal flash, NOT PSRAM) keeps the MSX in
+     * the loader menu so the user can retry the LOAD_ROM. */
+    if (s_pending_mapper == CART_MAP_NONE
+        || (s_pending_mapper != CART_MAP_FLASH
+            && s_bytes_loaded == 0U)) {
+        printf ("LOADER: RESET aborting - no ROM loaded, "
+                "keeping FLASH mapper\r\n");
+        s_pending_mapper = CART_MAP_FLASH;
+        (void)Cart_SetMapper (CART_MAP_FLASH);
+        Delay_Ms (50);
+        Cart_AssertMSXReset (100);
+        return;
+    }
     if (s_pending_mapper != CART_MAP_NONE) {
         (void)Cart_SetMapper (s_pending_mapper);
     }

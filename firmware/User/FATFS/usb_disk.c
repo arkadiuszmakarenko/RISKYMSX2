@@ -885,9 +885,12 @@ uint8_t USB_TryEnsureMounted (void) {
 }
 
 /* Read `len` bytes of `path` (a FatFS path like "0:/GAMES/ROM1.ROM")
- * and write them into PSRAM at `psram_addr`.  If `len` is 0, the file
- * size is used.  Returns the number of bytes actually copied, or 0 on
- * error. */
+ * and write them into PSRAM at `psram_addr`.  `psram_addr` is the
+ * ABSOLUTE PSRAM bus address (e.g. PSRAM_CART_BASE 0x80000000, or
+ * PSRAM_CART_BASE+offset for a sub-region); the bounds check below
+ * subtracts the bus base to compare against the window-relative size.
+ * If `len` is 0, the file size is used.  Returns the number of bytes
+ * actually copied, or 0 on error. */
 uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
                           uint32_t len) {
     /* Lazy-mount: if the user skipped `USB` (or replugged after a
@@ -906,8 +909,14 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
         return 0U;
     }
 
-        if (psram_addr < PSRAM_CART_BASE
-            || psram_addr >= (PSRAM_CART_BASE + PSRAM_CART_SIZE)) {
+    /* Bounds check: psram_addr is the absolute PSRAM bus address
+     * (always >= PSRAM_CART_BASE 0x80000000). Compare the offset
+     * within the cart window against PSRAM_CART_SIZE. The previous
+     * version compared the absolute address against PSRAM_CART_SIZE
+     * directly, which always tripped (0x80000000 >= 0x00800000) and
+     * made the loader's "copy 0 bytes -> PSRAM" silent. */
+    if (psram_addr < PSRAM_CART_BASE
+        || psram_addr - PSRAM_CART_BASE >= PSRAM_CART_SIZE) {
         f_close (&fp);
         printf ("USB: PSRAM address 0x%08lx out of range\r\n",
                 (unsigned long)psram_addr);
@@ -918,7 +927,7 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
         len = (uint32_t)f_size (&fp);
     }
 
-    uint32_t remaining = (PSRAM_CART_BASE + PSRAM_CART_SIZE) - psram_addr;
+    uint32_t remaining = PSRAM_CART_SIZE - (psram_addr - PSRAM_CART_BASE);
     if (len > remaining) {
         len = remaining;
     }

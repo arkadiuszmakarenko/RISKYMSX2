@@ -50,6 +50,14 @@
 uint8_t PSRAM_Init(void);                /* Init + self-test. Returns PSRAM_OK on success. */
 uint32_t PSRAM_GetRomMirrorBase(void);   /* 0x80000000 once Init has succeeded. */
 
+/* Full-window address-encoded pattern test (CLI `PTEST`). DESTRUCTIVE:
+ * overwrites the whole 8 MiB cart image window, so re-load the game
+ * afterwards. Returns PSRAM_OK on pass, PSRAM_ERR_TEST_OFFSETS on any
+ * mismatch (first mismatches are printed to the UART). Use together
+ * with the GAME_BASE_MB build knob to decide whether a game failure
+ * is PSRAM-address-dependent. */
+uint8_t PSRAM_FullTest(void);
+
 #ifdef __cplusplus
 }
 #endif

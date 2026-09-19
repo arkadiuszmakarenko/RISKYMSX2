@@ -36,6 +36,39 @@
 #define PSRAM_CART_BASE   0x80000000UL
 #define PSRAM_CART_SIZE   (8U * 1024U * 1024U)   /* 8 MiB */
 
+/* ------------------------------------------------------------------ */
+/* GAME BASE (PSRAM placement diagnostic)                             */
+/* ------------------------------------------------------------------ */
+/* Where inside the PSRAM window the served cart image starts.
+ *
+ * Every mapper read path adds this constant to the computed PSRAM
+ * address (C handlers add CART_GAME_BASE; the asm handlers fold the
+ * same constant into their `lui` immediates - see ASM_PSRAM_GAME_HI /
+ * ASM_ROM_BIAS_HI in cart.c). The LOAD_ROM / CAT / XLOAD / DUMP paths
+ * write to the same offset, so the image moves as one block.
+ *
+ * Purpose: place the same game at several PSRAM regions in turn and
+ * compare behaviour - if a game works at 0 MB but hangs at 2 MB, the
+ * failure is address-dependent (a PSRAM row/bank addressing bug),
+ * not a mapper/bank-switching logic bug.
+ *
+ * Set it from the build:
+ *     make rebuild GAME_BASE_MB=4        # image at PSRAM + 4 MiB
+ *     make rebuild GAME_BASE_MB=0        # default: image at PSRAM + 0
+ * Valid: 0..7 (must leave room for the image, max 8 MiB window).
+ * CART_GAME_BASE is the byte offset (MiB * 1048576). */
+#ifndef CART_GAME_BASE_MB
+#define CART_GAME_BASE_MB   0
+#endif
+#define CART_GAME_BASE      ((uint32_t)(CART_GAME_BASE_MB) * 1024UL * 1024UL)
+
+#if (CART_GAME_BASE_MB) < 0
+#error "CART_GAME_BASE_MB must be >= 0"
+#endif
+#if (CART_GAME_BASE_MB) > 7
+#error "CART_GAME_BASE_MB must be <= 7 (8 MiB window)"
+#endif
+
 /* Mapper selection.
  *
  * The active mapper is held in g_mapper (in cart.c). The EXTI0 handler
@@ -75,10 +108,13 @@ typedef enum {
                                   * SCC emulator (see scc.c). Read path treats
                                   * the 0x9800..0x98FF register window as the
                                   * sound chip, like real hardware. */
-    CART_MAP_LOADER     = 11,  /* ROM-loader: serves the embedded loader ROM
-                                  * + the 0x7FF0..0x7FFF mailbox (see loader.h).
-                                  * Set at boot so the MSX comes up in the
-                                  * ROM selector. */
+    CART_MAP_FLASH      = 11,  /* Flash cart: serves the embedded ROM image
+                                  * (maptest/selector/etc) directly from
+                                  * flash for ordinary reads, and decodes the
+                                  * 0x7FF0..0x7FFF mailbox window for the
+                                  * MSX-side loader. The boot mapper - stays
+                                  * active across SET_MAPPER + RESET so the
+                                  * user can pick a new mapper from the menu. */
     CART_MAP_MAX        = 12,
 } Cart_Mapper;
 
@@ -96,6 +132,11 @@ Cart_Mapper Cart_GetMapper (void);
  * dual-window design. */
 uint32_t Cart_GetImageBase (void);
 
+/* Byte offset of the served game image within the PSRAM window
+ * (CART_GAME_BASE; see the GAME BASE comment block above). Print it
+ * in boot/CLI status lines. */
+uint32_t Cart_GetGameBase (void);
+
 /* Total cart-image window size (bytes). */
 uint32_t Cart_GetImageSize (void);
 
@@ -103,6 +144,20 @@ uint32_t Cart_GetImageSize (void);
  * mapper handler. PSRAM_Init() must have been called first (or the
  * handler reads from an unmapped address and hangs the MSX). */
 void Init_Cart (void);
+
+/* MSX reset (PE4) helpers. The MSX reset line is active LOW.
+ *
+ *   Cart_AssertMSXReset_Begin  - drive PE4 low immediately and return.
+ *                                Call this as the first thing in main()
+ *                                so the MSX BIOS waits while we boot.
+ *   Cart_AssertMSXReset_End    - release PE4 (drive high, then float)
+ *                                so the MSX leaves reset and runs.
+ *   Cart_AssertMSXReset(ms)    - legacy one-shot: low for `ms`, then
+ *                                release. Still used by the loader's
+ *                                CMD_RESET flow. */
+void Cart_AssertMSXReset_Begin (void);
+void Cart_AssertMSXReset_End (void);
+void Cart_AssertMSXReset (uint32_t ms);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that
