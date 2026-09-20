@@ -6,6 +6,7 @@
 #include "loader.h"
 #include "cart.h"
 #include "psram.h"
+#include "scc.h"
 #include "usb_disk.h"
 #include "ch32v4x7.h"
 #include "debug.h"
@@ -229,18 +230,43 @@ static void cmd_reset (void) {
         printf ("LOADER: RESET aborting - no ROM loaded, "
                 "keeping FLASH mapper\r\n");
         s_pending_mapper = CART_MAP_FLASH;
-        (void)Cart_SetMapper (CART_MAP_FLASH);
+        /* Even the FLASH mapper swap must go through the safe path -
+         * a sloppy swap while the Z80 is mid-cycle can leave a stale
+         * `~SLTSL` interrupt pending. */
+        (void)Cart_SetMapper_Safe (CART_MAP_FLASH, 1);
         Delay_Ms (50);
-        Cart_AssertMSXReset (100);
+        Cart_AssertMSXReset_End ();
         return;
     }
-    if (s_pending_mapper != CART_MAP_NONE) {
-        (void)Cart_SetMapper (s_pending_mapper);
+
+    /* If we're LEAVING KONAMISCC, drain any cart writes that are still
+     * in the SCC queue. We want them to apply to the emulator's
+     * register state BEFORE the TIM4 IRQ runs another batch with the
+     * new (non-SCC) mapper as `g_mapper`. Without the flush, the TIM4
+     * IRQ might still apply writes from addresses that are now out of
+     * the cart's range - harmless to bank state but a leftover write
+     * to the SCC that the next game never wanted. */
+    if (Cart_GetMapper () == CART_MAP_KONAMISCC
+        && s_pending_mapper != CART_MAP_KONAMISCC) {
+        const uint32_t drained = SCC_FlushQueue ();
+        if (drained) {
+            printf ("LOADER: RESET flushed %u queued SCC writes\r\n",
+                    (unsigned)drained);
+        }
     }
-    /* Give the print time to drain, then hold the MSX in reset long
-     * enough for a clean power-on-style boot. */
+
+    /* Swap under MSX-reset-hold + IRQ-disabled + bus-quiet + DSB/ISB
+     * fence (see Cart_SetMapper_Safe body for the full list of
+     * hazards this closes). The Z80 never observes a half-applied
+     * mapper swap. */
+    (void)Cart_SetMapper_Safe (s_pending_mapper, 1);
+
+    /* Give the print time to drain, then release the MSX reset line
+     * for a clean power-on-style boot. Using Cart_AssertMSXReset_End
+     * (drive-high then float) instead of a timed pulse, because
+     * Cart_SetMapper_Safe above ALREADY drove PE4 low for us. */
     Delay_Ms (50);
-    Cart_AssertMSXReset (100);
+    Cart_AssertMSXReset_End ();
 }
 
 /* ------------------------------------------------------------------ */

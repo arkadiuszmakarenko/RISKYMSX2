@@ -127,6 +127,26 @@ extern const char *const Cart_MapperNames[CART_MAP_MAX];
 int  Cart_SetMapper (Cart_Mapper m);
 Cart_Mapper Cart_GetMapper (void);
 
+/* Hardened mapper-swap primitive (see Cart_SetMapper_Safe() body in
+ * cart.c for the full list of hazards it closes).
+ *
+ * If hold_msx_reset != 0, the function asserts MSX ~RESET low for the
+ * duration of the swap (Z80 is stopped, no in-flight cart cycle), so
+ * the new VTF entry + new bankOffsets[] are visible BEFORE the first
+ * Z80 bus cycle. The caller MUST release the reset afterwards via
+ * Cart_AssertMSXReset_End() (or wait for Cart_AssertMSXReset(ms) to
+ * time out). This is the right primitive for the loader's CMD_RESET
+ * path and for any boot-time swap.
+ *
+ * If hold_msx_reset == 0, the function still disables EXTI0 + global
+ * IRQ, waits for ~SLTSL to go high (no in-flight cycle), drives the
+ * bus off, clears any phantom EXTI0 edge latched during the wait,
+ * issues a DSB/ISB fence, and re-enables IRQ. Use this for swap-in-
+ * place scenarios where holding the MSX in reset is undesirable.
+ *
+ * Returns the same value as Cart_SetMapper(). */
+int  Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset);
+
 /* Get the base address of the cart image window in PSRAM. Always
  * PSRAM_CART_BASE. Kept for API symmetry with the previous SRAM/PSRAM
  * dual-window design. */

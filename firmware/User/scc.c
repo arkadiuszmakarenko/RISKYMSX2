@@ -30,7 +30,29 @@
 #include "ch32v4x7.h"
 #include "core_riscv.h"
 #include "system_ch32v4x7.h"
+#include "tone.h"
+#include "debug.h"
 #include <string.h>
+
+/* SCC debug verbosity. 1 prints init breadcrumbs + rate-limited
+ * IRQ-side stats + a TIM4_IRQHandler sample stat. Flip to 0 (or
+ * override with `make rebuild SCC_DEBUG=0` once the regression is
+ * diagnosed) for clean production builds. */
+#ifndef SCC_DEBUG
+#define SCC_DEBUG 1
+#endif
+
+#if SCC_DEBUG
+/* Counters for the TIM4_IRQHandler breadcrumb log. Live in .bss
+ * (reset to 0 at boot); not volatile because the IRQ writes them
+ * and the log is read from the same IRQ context (no main-loop
+ * race). The SCC_QueueWrite-side counters were removed when the
+ * IRQ-side `#if SCC_DEBUG` block was stripped from that function -
+ * see the build of 2026-09-19. */
+static uint32_t s_tim4_ticks    = 0;     /* TIM4_IRQHandler entry count */
+static uint32_t s_tim4_drained  = 0;     /* total writes drained */
+static uint32_t s_tim4_samples  = 0;     /* SCC_calc samples produced */
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Emulator core (verbatim emu2212) instance.                          */
@@ -79,6 +101,35 @@ uint32_t SCC_GetLevel (void) {
     return (s_q_head - s_q_tail) & SCC_QUEUE_MASK;
 }
 
+/* (Diagnostics accessor for the DMA-target RAM word lives further
+ * down, AFTER the static volatile Dual_DAC_Value definition so the
+ * extern machinery isn't needed.) */
+
+/* Drain the queue (main-loop / Cart_SetMapper_Safe context ONLY).
+ * See scc.h. */
+uint32_t SCC_FlushQueue (void) {
+    uint32_t drained = 0;
+    /* Snapshot under IRQ-off discipline; the caller (Cart_SetMapper_
+     * Safe / cmd_reset) runs with global IRQ disabled around this
+     * call so the TIM4 IRQ can't sneak in mid-drain. */
+    while (s_q_head != s_q_tail) {
+        const uint32_t word = s_scc_queue[s_q_tail];
+        const uint16_t addr = (uint16_t)(word >> 16);
+        const uint8_t  data = (uint8_t)word;
+        SCC_write (s_scc, addr, data);
+        s_q_tail = (s_q_tail + 1U) & SCC_QUEUE_MASK;
+        drained++;
+        /* Paranoia: 256 entries is more than the queue can hold; bail
+         * if the index got out of sync (corrupted head/tail). The
+         * caller would otherwise spin forever. */
+        if (drained > SCC_QUEUE_SIZE) {
+            s_q_tail = s_q_head;
+            break;
+        }
+    }
+    return drained;
+}
+
 /* ------------------------------------------------------------------ */
 /* DAC output latch, DMAed to DAC->RD12BDHR on every timer trigger.    */
 /* ------------------------------------------------------------------ */
@@ -123,10 +174,20 @@ void TIM4_IRQHandler (void) __attribute__((interrupt("WCH-Interrupt-fast")));
 
 /* Drain the queue into the emulator, render the next sample. Same
  * structure as v303's DMA2_Channel3_IRQHandler (TC-driven there,
- * update-driven here) minus the DMA-flag bookkeeping. */
+ * update-driven here) minus the DMA-flag bookkeeping. Tone driver
+ * also uses TIM4 - if a tone is active we delegate to its
+ * TIM4Tick hook instead of running the SCC sample pump. */
 void TIM4_IRQHandler (void) {
     if (TIM_GetITStatus (TIM4, TIM_IT_Update) != RESET) {
         TIM_ClearITPendingBit (TIM4, TIM_IT_Update);
+        if (Tone_IsActive ()) { Tone_TIM4Tick (); return; }
+#if SCC_DEBUG
+        ++s_tim4_ticks;
+        /* Count of writes drained THIS tick - printed only every 1024
+         * ticks (~23 Hz at 44.1 kHz). Use the running sum for
+         * productivity check, the per-tick counter for backlog check. */
+        uint32_t drained_this_tick = 0;
+#endif
 
         /* Apply all pending Z80-side writes so SCC_calc() sees the
          * emulator state as of now. */
@@ -136,11 +197,39 @@ void TIM4_IRQHandler (void) {
             uint32_t address = (address_data >> 16) & 0xFFFFU;
             uint32_t data    = address_data & 0xFFFFU;
             SCC_write (s_scc, address, data);
+#if SCC_DEBUG
+            ++drained_this_tick;
+#endif
         }
+
+#if SCC_DEBUG
+        s_tim4_drained += drained_this_tick;
+#endif
 
         /* int16 -> 12-bit unsigned for the DAC: round-and-shift, the
          * identical arithmetic the legacy firmware used. */
         Dual_DAC_Value = ((uint32_t)(SCC_calc (s_scc) + 0x8000 + 8)) >> 4;
+
+#if SCC_DEBUG
+        ++s_tim4_samples;
+        /* Throttled TIM4-side log: every 4096 ticks (~93 ms at
+         * 44.1 kHz) print a one-line state snapshot. Lets us
+         * confirm the SCC chip is alive AND that the queue is
+         * draining. The TIM4 IRQ runs at ~44.1 kHz so 4096
+         * throttle = ~93 Hz log rate which is harmless to the
+         * USART. */
+        if ((s_tim4_samples & 0x0FFFU) == 0U) {
+            printf ("SCC.TIM4: ticks=%u drained=%u samples=%u "
+                    "active=%u mode=%u DAC=0x%03x q=%u/64\r\n",
+                    (unsigned)s_tim4_ticks,
+                    (unsigned)s_tim4_drained,
+                    (unsigned)s_tim4_samples,
+                    (unsigned)s_scc->active,
+                    (unsigned)s_scc->mode,
+                    (unsigned)Dual_DAC_Value,
+                    (unsigned)SCC_GetLevel ());
+        }
+#endif
     }
 }
 
@@ -159,23 +248,153 @@ static void SCC_core_Create (void) {
     s_scc = &s_scc_core;
 }
 
+/* Konami-with-SCC slot mapping (openMSX::RomKonamiSCC::writeMem):
+ *   - SCC enable / SCC+ activation byte at 0x9000..0x97FF
+ *     (cart writes 0x3F for SCC-I, 0x80 for SCC+)
+ *   - SCC control registers at 0x9800..0x9FFE (offset 0x800..0x8FE)
+ *     - 0x9800..0x987F (off 0x800..0x87F): wave table
+ *     - 0x9880..0x9889 (off 0x880..0x889): freq
+ *     - 0x988A..0x988E (off 0x88A..0x88E): volume
+ *     - 0x988F           (off 0x88F)         : ch-enable
+ *     - 0x98C0..0x98DF (off 0x8C0..0x8DF): mode/flags
+ *
+ * emu2212's SCC_reset() already defaults base_adr to 0x9000 - the
+ * correct Konami-SCC base. An earlier version of this file
+ * re-rebased to 0x9800 (a misread of the slot mapping as
+ * "0x9800-based"), which made the activation byte at 0x9000 fall
+ * outside the base_adr window (`adr < base_adr` early-out in
+ * emu2212::SCC_write line 393), `active` stayed 0, and the SCC
+ * stayed silent despite 11000+ writes queued. The fix is to leave
+ * base_adr at the emu2212 default of 0x9000 - this function is
+ * therefore just a sanity clamp. SCC_SetBase(SCC_I_WINDOW_BASE) keeps
+ * the intent explicit at every call site. */
+static void SCC_SetBase (uint32_t base_adr) {
+    if (s_scc != 0) {
+        s_scc->base_adr = base_adr;
+    }
+}
+
+/* True when SCC_HwInit() has already configured TIM4 / DMA2 / DAC1.
+ * SCC_Init() is the public entry point and consults this flag: on the
+ * FIRST call it runs the full hardware config; on every subsequent
+ * call it skips the hardware touch (which would reconfigure TIM4 /
+ * DMA while they're live and is what caused the KONAMISCC cart
+ * freeze after switching from the boot-time FLASH mapper) and only
+ * resets the emulator + clears the SPSC queue. This makes SCC_Init
+ * truly idempotent and safe to call from both main() and
+ * Cart_SetMapper(KONAMISCC). */
+static uint8_t s_scc_hw_up = 0U;
+
+/* Forward decl - the full hardware init is split out so
+ * SCC_Init() can call it only the first time. */
+static void SCC_HwInit (void);
+
 int SCC_Init (void) {
-    /* Emulator core: create once, reset + re-refresh on every init. */
+#if SCC_DEBUG
+    static uint8_t inited = 0;
+    if (!inited) {
+        inited = 1;
+        printf ("SCC: SCC_Init() entry\r\n");
+    }
+#endif
+    /* Emulator core: create once, reset on every init. */
     if (s_scc == 0) {
         SCC_core_Create();
+#if SCC_DEBUG
+        printf ("SCC: SCC_core_Create done (first call)\r\n");
+#endif
     }
     SCC_reset (s_scc);
     SCC_set_quality (s_scc, 0);
-    SCC_set_type (s_scc, SCC_STANDARD);
+    /* SCC+ (val=0x80 at base_adr) is required for Konami-SCC carts
+     * (Nemesis, Space Manbow, Metal Gear 2, Gradius 2, ...). See the
+     * `active` gate in emu2212.c::SCC_write lines 384-389 - the SCC+
+     * activation branch is guarded by `scc->type == SCC_ENHANCED`.
+     * Setting SCC_STANDARD here silently dropped the activation byte
+     * on Konami-SCC carts and `SCC_calc` returned silence forever
+     * (`active=0` -> all channels muted -> 0x800 every sample, the
+     * exact symptom we just saw with last_sample=0x800 frozen for
+     * 900k+ ticks). SCC_reset() already sets type=SCC_ENHANCED (the
+     * SCC_new default) so the SCC_set_type() call is redundant with
+     * the right default - kept explicit so the intent is obvious. */
+    SCC_set_type (s_scc, SCC_ENHANCED);
 
-    /* Legacy scc.c called initBuffer(&cb) here; the SPSC queue is
-     * reset the same way. */
+    /* Rebase the SCC window to 0x9800 so KONAMI-SCC cart writes hit
+     * the activation byte + register file. emu2212 leaves base_adr at
+     * 0x9000 after SCC_reset, which is wrong for the KONAMI-SCC slot
+     * mapping. Safe to call on every init - SCC_HwInit() guards the
+     * rest of the HW so this never runs while DMA / TIM / DAC are
+     * live. */
+    SCC_SetBase (SCC_I_WINDOW_BASE);
+
+    /* SPSC queue reset (matches legacy initBuffer(&cb)). Safe under
+     * the IRQ-off discipline of the swap path. */
     s_q_head = 0U;
     s_q_tail = 0U;
+#if SCC_DEBUG
+    printf ("SCC: emulator reset (type=ENHANCED, base=0x%04x, "
+            "queue cleared, active=%u mode=%u)\r\n",
+            SCC_I_WINDOW_BASE,
+            (unsigned)s_scc->active,
+            (unsigned)s_scc->mode);
+#endif
 
+    /* Hardware init runs only the first time. Re-running it on every
+     * mapper swap would reconfigure DMA2_Channel3 + TIM4 + DAC1 while
+     * they're live (TIM4_IRQHandler can be in the middle of servicing
+     * a DMA-driven sample when Cart_SetMapper runs because the loader
+     * service loop has global IRQs enabled). The CH32V407's DMA
+     * controller does NOT have a "pause + reconfigure" - touching
+     * DMA_CFGR while the channel is enabled takes the channel out of
+     * service for the duration of the reconfigure, which drops the
+     * in-flight sample and (worse) can latch the DMA state machine if
+     * the reconfigure crosses an AHB-to-APB1 bridge cycle. */
+    if (!s_scc_hw_up) {
+#if SCC_DEBUG
+        printf ("SCC: SCC_HwInit() entering (first time)\r\n");
+#endif
+        SCC_HwInit ();
+        s_scc_hw_up = 1U;
+#if SCC_DEBUG
+        printf ("SCC: SCC_HwInit() complete - TIM4=%u Hz, DMA=RD12BDHR, "
+                "DAC=Ch1 PA4, IRQ=TIM4@0xC0\r\n",
+                (unsigned)SCC_SAMPLE_RATE);
+#endif
+    } else {
+#if SCC_DEBUG
+        printf ("SCC: SCC_Init() idempotent path (HW already up)\r\n");
+#endif
+    }
+
+    /* Re-arm the sample pump IRQ in case SCC_DeInit() left it
+     * disabled (we enter here on mapper return from non-SCC map).
+     * EnableIRQ is idempotent at the NVIC level. */
+    NVIC_SetPriority (TIM4_IRQn, 0xC0);
+    NVIC_EnableIRQ (TIM4_IRQn);
+    TIM_ITConfig (TIM4, TIM_IT_Update, ENABLE);
+
+    return 0;
+}
+
+/* One-shot hardware bring-up. Called only by SCC_Init() the first
+ * time it runs - NEVER while DMA2 / TIM4 / DAC1 are live. The
+ * mirror image, SCC_DeInit(), pairs with this for clean shutdown on
+ * mapper leave. */
+static void SCC_HwInit (void) {
     /* Clocks: DMA2 lives on the HB bus, DAC/TIM4 on PB1. */
     RCC_HBPeriphClockCmd (RCC_HBPeriph_DMA2, ENABLE);
     RCC_PB1PeriphClockCmd (RCC_PB1Periph_DAC | RCC_PB1Periph_TIM4, ENABLE);
+
+    /* Tear down any leftover state from a previous driver pass (e.g.
+     * Tone_Stop -> SCC_Init re-enters this path). Without the
+     * disable/clear sequence below, the DMA controller can latch a
+     * stale source address (s_table[] instead of Dual_DAC_Value) or
+     * a half-configured TIM4 period. */
+    DMA_Cmd (DMA2_Channel3, DISABLE);
+    DAC_DMACmd (DAC_Channel_1, DISABLE);
+    DAC_Cmd (DAC_Channel_1, DISABLE);
+    TIM_Cmd (TIM4, DISABLE);
+    TIM_ITConfig (TIM4, TIM_IT_Update, DISABLE);
 
     /* DAC1 output pin: PA4 (SCC_OUT on this board). Analog in - no
      * driver, no pull. (v303 wired SCC_OUT to a different pin; this is
@@ -183,7 +402,12 @@ int SCC_Init (void) {
     GPIOA->CFGLR = (GPIOA->CFGLR & ~(0xFU << 16)) | (0x0U << 16);
 
     /* DAC channel 1: triggered by TIM4 TRGO (update), no wave gen,
-     * output buffer on - identical to the legacy gpio.c setup. */
+     * output buffer on - identical to the legacy gpio.c setup. CRITICAL:
+     * DAC_Cmd AND DAC_DMACmd are both required. DAC_Cmd enables the
+     * analog channel; DAC_DMACmd lets the DMA controller's writes to
+     * DAC->RD12BDHR actually reach the channel's holding register.
+     * Without DAC_DMACmd the DMA transfers complete silently and the
+     * analog output sits at whatever the last CPU-write set it to. */
     DAC_InitTypeDef dac_init = {0};
     dac_init.DAC_Trigger         = DAC_Trigger_T4_TRGO;
     dac_init.DAC_WaveGeneration  = DAC_WaveGeneration_None;
@@ -233,20 +457,33 @@ int SCC_Init (void) {
     TIM_ITConfig (TIM4, TIM_IT_Update, ENABLE);
     NVIC_SetPriority (TIM4_IRQn, 0xC0);
     NVIC_EnableIRQ (TIM4_IRQn);
-
-    return 0;
 }
 
 void SCC_DeInit (void) {
+    /* Symmetric teardown - turn off everything SCC_HwInit enabled so
+     * a subsequent driver (e.g. Tone_Init) can reconfigure from a
+     * known-clean state. Each step is its own /CRIT: DMA first (so
+     * the DMA controller stops fetching from Dual_DAC_Value), then
+     * DAC DMA path, then DAC channel itself, then TIM4 IRQ + clock. */
+    DMA_Cmd (DMA2_Channel3, DISABLE);
+    DAC_DMACmd (DAC_Channel_1, DISABLE);
+    DAC_Cmd (DAC_Channel_1, DISABLE);
+
     TIM_Cmd (TIM4, DISABLE);
     TIM_ITConfig (TIM4, TIM_IT_Update, DISABLE);
     NVIC_DisableIRQ (TIM4_IRQn);
 
-    DMA_Cmd (DMA2_Channel3, DISABLE);
-    DAC_DMACmd (DAC_Channel_1, DISABLE);
-
     /* Park the DAC at mid-scale so the pin does not sit at 0 V. */
     DAC_SetChannel1Data (DAC_Align_12b_R, 0x800U);
+
+    /* CRITICAL: clear the HW-up flag so the next SCC_Init() forces a
+     * full SCC_HwInit() pass. Without this, Tone_Stop() ->
+     * SCC_Init() skips the HW init (the "idempotent fast path") and
+     * leaves the DMA controller still pointing at the now-stale
+     * s_table[] source address instead of Dual_DAC_Value. The SCC
+     * sample pump would then loop old waveform-table bytes through
+     * the DAC instead of freshly-computed SCC_calc() values. */
+    s_scc_hw_up = 0U;
 }
 
 /* ------------------------------------------------------------------ */

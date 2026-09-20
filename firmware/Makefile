@@ -109,6 +109,26 @@ CFLAGS_COMMON  = $(ARCH_FLAGS) \
 GAME_BASE_MB ?= 0
 CFLAGS_COMMON += -DCART_GAME_BASE_MB=$(GAME_BASE_MB)
 
+# KONAMISCC SCC write-queue toggle (2026-09-19 isolation test).
+#
+# Compile-time switch for cart.c's RunKonamiSCC. Default 1 (queue
+# enabled, normal SCC audio operation). Set to 0 to compile
+# RunKonamiSCC as a byte-for-byte clone of RunKonamiNOSCC with the
+# SCC_QueueWrite call stubbed out - the only diff between it and
+# NOSCC is then the SCC_Init() called by Cart_SetMapper(). Use this
+# to test whether a KONAMISCC freeze is in the cart-read handler
+# (which would also affect NOSCC) or in the SCC queue / TIM4 path
+# (which would NOT affect NOSCC).
+#
+#     make rebuild                   # default, SCC queue enabled
+#     make rebuild KONAMISCC_SCC_QUEUE=0   # queue stubbed (isolation build)
+#
+# NOTE: changing this only forces a recompile of User/cart.c -
+# `make` after the rebuild will pick it up (User/cart.o is the
+# only file that uses the macro).
+KONAMISCC_SCC_QUEUE ?= 1
+CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
+
 # --- Flash tool --------------------------------------------------------------
 # CH32V4x7 (chip id 0xa6) is NOT supported by upstream `wlink` or `minichlink`
 # (they report "Chip Type unknown [a6]" and refuse to program). The WCH-LinkE

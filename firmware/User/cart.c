@@ -27,17 +27,28 @@
  *         drivers.
  *
  *   2. Bank-switching mappers (Konami, ASCII, NEO)
- *      -> C handlers (RunKonami, RunKonamiSCC, Run8kASCII, Run16kASCII,
- *         RunNEO8, RunNEO16) that read bank state from `s_state` in
- *         zero-wait-state SRAM, plus three hand-scheduled asm handlers
- *         (Cart_EXTI0_KonamiNOSCC_Handler for KONAMINOSCC,
- *         Cart_EXTI0_ASCII8k_Handler for ASCII8k and
- *         Cart_EXTI0_ASCII16k_Handler for ASCII16k) that serve their
- *         mapper as a direct VTF entry without the dispatcher hop.
+ *      -> C handlers (RunKonami, RunKonamiNOSCC, RunKonamiSCC,
+ *         Run8kASCII, Run16kASCII, RunNEO8, RunNEO16) that read bank
+ *         state from `s_state` in zero-wait-state SRAM. Konami/ASCII/
+ *         NEO handlers are reached via the trampoline
+ *         Cart_Banked_Dispatch (one shared VTF entry). ASCII8k and
+ *         ASCII16k additionally have hand-scheduled asm twins
+ *         (Cart_EXTI0_ASCII8k_Handler / Cart_EXTI0_ASCII16k_Handler)
+ *         installed as direct VTF entries to skip the dispatcher hop
+ *         on those hot paths.
  *         Reads hit PSRAM
  *         (~30 cycle latency); the Z80's data sample point still has
  *         comfortable margin because EXTI0 fires on the falling edge
  *         of SLTSL which precedes ~RD by several T-states.
+ *
+ * NOTE: Cart_EXTI0_KonamiNOSCC_Handler still exists as a hand-
+ * scheduled asm twin of RunKonamiNOSCC (see its definition near the
+ * bottom of this file), but KONAMISCC + KONAMINOSCC are routed
+ * through Cart_Banked_Dispatch like every other C handler. The asm
+ * version was found unreliable on Metal Gear 2 / >256 KiB Konami
+ * carts - the C body uses the exact v303 bank-bias formula and is
+ * the proven path; the asm body is preserved for reference / future
+ * debug but is NOT installed in the VTF slot by Cart_SetMapper.
  *
  * SCC: KONAMISCC (Konami-with-SCC, port of the legacy v303 mapper)
  *       banks like KONAMINOSCC but routes the 0x9800..0x98FF window
@@ -70,6 +81,14 @@ volatile Cart_Mapper g_mapper = CART_MAP_NONE;
  * touching every handler. */
 static struct MSXState *const g_state = &s_state;
 
+/* MSX reset helpers (defined later in the file, alongside the public
+ * Cart_AssertMSXReset_* wrappers). Forward-prototyped here as `static`
+ * (matching their definition) so Cart_SetMapper_Safe - which lives in
+ * the public-API region above them - can call msx_reset_drive_low
+ * without a placement-order dependency. */
+static void msx_reset_drive_low (void);
+static void msx_reset_release (void);
+
 /* Active EXTI0 handler trampoline address (PFIC VTF slot 0). Cart_
  * SetMapper() rewrites this. The trampoline reads g_mapper and jumps
  * to the right Run<Mapper>() function - ONE trampoline serves all
@@ -92,12 +111,39 @@ static void Run16kASCII(void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO8    (void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO16   (void) __attribute__((section(".ramfunc"), noinline));
 
+/* KONAMISCC SCC-queue toggle (2026-09-19 isolation test).
+ *
+ * Compile-time: default 1 (queue enabled, normal SCC operation).
+ * Set to 0 from the build (`make rebuild KONAMISCC_SCC_QUEUE=0`) to
+ * compile KONAMISCC with the SCC_QueueWrite call stubbed, leaving
+ * the handler byte-for-byte equivalent to RunKonamiNOSCC apart from
+ * the missing queue push.
+ *
+ * Why: KONAMISCC freezes on >256 KiB carts even after the page-
+ * filter + WR-stale fixes, while KONAMINOSCC (the same logic minus
+ * the SCC path) boots Metal Gear 2 (512 KiB) cleanly. To isolate
+ * whether the freeze is in the Konami bank-switching logic or in
+ * the SCC integration, run the same cart with KONAMISCC_SCC_QUEUE=0
+ * and the queue call commented out. If it boots, the bug is in the
+ * SCC path (init, queue, or DAC/TIM). If it still freezes, the bug
+ * is in the cart-init / mapper-install path that differs between
+ * KONAMISCC and KONAMINOSCC (the only such diff is SCC_Init() at
+ * mapper install time - which would then be the suspect). */
+#ifndef KONAMISCC_SCC_QUEUE
+#define KONAMISCC_SCC_QUEUE 1
+#endif
+
 /* Hand-scheduled asm handlers. One per mapper that needs the tightest
- * read latency (ROM16/32/48, KONAMINOSCC) - each gets its own VTF slot
- * entry so Cart_SetMapper() picks it directly, with no intermediate
- * dispatch. */
+ * read latency (ROM16/32/48, ASCII8k, ASCII16k) - each gets its own
+ * VTF slot entry so Cart_SetMapper() picks it directly, with no
+ * intermediate dispatch.
+ *
+ * Cart_EXTI0_KonamiNOSCC_Handler below is also defined and marked
+ * VTF-installable, but KONAMISCC / KONAMINOSCC are intentionally
+ * routed through Cart_Banked_Dispatch -> RunKonamiNOSCC (the C
+ * handler) instead. Kept here as a reference / debug aid. */
 void Cart_EXTI0_KonamiNOSCC_Handler (void) __attribute__((section(".ramfunc"), noinline,
-                                                            interrupt("WCH-Interrupt-fast")));
+                                                            interrupt("WCH-Interrupt-fast"))) __attribute__((unused));
 void Cart_EXTI0_ASCII8k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                       interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_ASCII16k_Handler (void) __attribute__((section(".ramfunc"), noinline,
@@ -150,6 +196,110 @@ uint32_t Cart_GetImageSize (void) { return PSRAM_CART_SIZE; }
 uint32_t Cart_GetGameBase (void) { return CART_GAME_BASE; }
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
 
+/* ------------------------------------------------------------------ */
+/* Cart_SetMapper_Safe                                                */
+/* ------------------------------------------------------------------ */
+/* Hardened mapper-swap primitive. The bare `Cart_SetMapper()` writes
+ * `g_mapper`, then rewrites VTF slot 0 (`SetVTFIRQ` writes VTFADDR[0]),
+ * then mutates `bankOffsets[]`. Three independent writes. A `~SLTSL`
+ * falling edge that latches while any of them is in flight gets served
+ * by EITHER:
+ *   - the old VTF entry (slot not yet rewritten) reading the new
+ *     `g_mapper` -- handler-state mismatch, can drive stale bytes.
+ *   - the new VTF entry (slot rewritten) reading bankOffsets[] that
+ *     was zeroed for the swap but not yet re-initialised -- serves
+ *     `0xFF` to the Z80 (`RST 38h`).
+ *   - either handler while the data bus is tri-stated but a write is
+ *     queued for the old mapper's bank (writes go to the wrong page).
+ *
+ * Cart_SetMapper_Safe() closes the race window by:
+ *   1. Disabling EXTI0 + global IRQ (no IRQ can fire mid-swap).
+ *   2. Holding the MSX in `~RESET` low the whole time (so the Z80 is
+ *      stopped; PE4 is driven low here so the BIOS cannot probe the
+ *      cart on its own clock). Optional - pass 1 from loader.c's
+ *      CMD_RESET flow, 0 if you really need a non-resetting swap.
+ *   3. Spinning until `~SLTSL` is HIGH (no in-flight cart cycle) with
+ *      a bounded timeout; if it never goes high we still drive the
+ *      bus off and proceed - better to lose one cycle than wedge.
+ *   4. Driving the data bus OFF (`GPIOB->CFGHR = CART_BUS_OFF`) so no
+ *      stale OUTDR value lingers through the swap.
+ *   5. Calling the pure `Cart_SetMapper()` to do the actual swap.
+ *   6. Clearing `EXTI->INTFR` (any phantom edge latched during the
+ *      wait or during the reset hold - a real one since we held PE4
+ *      low but the MSX's input stage may have latched one).
+ *   7. Issuing `__DSB(); __ISB();` so the new VTFADDR[0] is visible
+ *      to the core's pipeline before the IRQ is re-enabled.
+ *   8. Re-enabling IRQ.
+ *
+ * If `hold_msx_reset` is non-zero, the caller MUST release the MSX
+ * reset AFTER this function returns (cart.c owns the PE4 line during
+ * the call; calling Cart_AssertMSXReset_End() afterwards is fine).
+ *
+ * Returns the same value as Cart_SetMapper(). */
+int Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset);
+int Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset) {
+    /* Phase 1: stop the Z80 / stop the IRQ. The order matters:
+     *   - EXTI0's pending bit is in EXTI->INTFR (edge-triggered on
+     *     PE0 falling edge). Masking it via EXTI->INTENR bit is
+     *     harmless but adds a register touch we'd have to undo.
+     *   - PFIC->IER[EXTI0_IRQn] (NVIC_DisableIRQ) is enough to prevent
+     *     the IRQ from dispatching. The pending EXTI0 edge stays in
+     *     EXTI->INTFR and we'll clear it in phase 6.
+     *   - `__disable_irq()` masks everything (also blocks TIM4/SCC
+     *     pump; we want THAT paused too, see Cart_EXTI0_SCC_QueueWrite
+     *     being unpaused mid-swap would race with our bankOffsets[]
+     *     rewrite). */
+    NVIC_DisableIRQ (EXTI0_IRQn);
+    __disable_irq ();
+    /* Full-memory DSB: drain any in-flight writes (including the
+     * SetVTFIRQ register write inside Cart_SetMapper) before we
+     * observe state. RV32 doesn't have a DSB/ISB builtin symbol in
+     * WCH's core_riscv.h, emit the fences inline. */
+    __asm__ volatile ("fence iorw, iorw");
+    __asm__ volatile ("fence.i");
+
+    /* Phase 2 (optional): assert MSX reset the whole time. This is
+     * the only bulletproof way to keep the Z80 from probing 0x4000
+     * mid-swap. We do NOT release it here - the caller does that
+     * after we return. */
+    if (hold_msx_reset) {
+        msx_reset_drive_low ();
+    }
+
+    /* Phase 3: wait for ~SLTSL to go high (no in-flight Z80 cycle).
+     * Bounded loop so a stuck-low ~SLTSL doesn't wedge the firmware;
+     * we still drive the bus off and proceed after the timeout. */
+    {
+        uint32_t spin = 200000U;       /* ~2 ms at 200 MHz HCLK      */
+        while (((GPIOE->INDR & CART_SLTSL_MASK) == 0U) && (--spin)) {
+            __asm__ volatile ("nop");
+        }
+    }
+    /* Phase 4: drive the data bus tri-stated, in case the handler
+     * left it on (e.g. crashed inside a `while (SLTSL low)` spin). */
+    GPIOB->CFGHR = CART_BUS_OFF;
+
+    /* Phase 5: the actual swap (handler + bankOffsets + g_mapper). */
+    const int rc = Cart_SetMapper (m);
+
+    /* Phase 6: clear any phantom EXTI0 edge that latched during the
+     * wait or during the reset-hold window. Writing 1 to the bit
+     * clears it (WCH edge-triggered IRQ design). */
+    EXTI->INTFR = EXTI_INTENR_MR0;
+
+    /* Phase 7: serialise the writes - the VTFADDR[0] write inside
+     * SetVTFIRQ needs an ISB so the next IRQ observable by the core
+     * sees the new handler address. */
+    __asm__ volatile ("fence iorw, iorw");
+    __asm__ volatile ("fence.i");
+
+    /* Phase 8: re-arm the IRQ path. */
+    NVIC_EnableIRQ (EXTI0_IRQn);
+    __enable_irq ();
+
+    return rc;
+}
+
 int Cart_SetMapper (Cart_Mapper m) {
     if ((unsigned)m >= CART_MAP_MAX) return -1;
     if (m != CART_MAP_NONE
@@ -177,11 +327,11 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ROM16k:      h = (uint32_t)Cart_EXTI0_ROM16k_Handler; break;
     case CART_MAP_ROM32k:      h = (uint32_t)Cart_EXTI0_ROM32k_Handler; break;
     case CART_MAP_ROM48k:      h = (uint32_t)Cart_EXTI0_ROM48k_Handler; break;
-    case CART_MAP_KONAMI:     h = (uint32_t)RunKonami; break;
+    case CART_MAP_KONAMI:
     case CART_MAP_KONAMISCC:
+    case CART_MAP_KONAMINOSCC:
     case CART_MAP_NEO8:
     case CART_MAP_NEO16:       h = (uint32_t)Cart_Banked_Dispatch; break;
-    case CART_MAP_KONAMINOSCC: h = (uint32_t)Cart_EXTI0_KonamiNOSCC_Handler; break;
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
     case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
@@ -208,45 +358,51 @@ int Cart_SetMapper (Cart_Mapper m) {
          * cart region). With PSRAM at 0x80000000, those biases under-
          * flow past 0x80000000 into unmapped space and fault. Use
          * biases that map each page to PSRAM offset 0. */
-        s_state.bankOffsets[2] = 0U - 0x4000U;  /* 0x4000..0x5FFF -> PSRAM[0..0x1FFF] */
-        s_state.bankOffsets[3] = 0U - 0x6000U;  /* 0x6000..0x7FFF -> PSRAM[0..0x1FFF] */
-        s_state.bankOffsets[4] = 0U - 0x8000U;  /* 0x8000..0x9FFF -> PSRAM[0..0x1FFF] */
-        s_state.bankOffsets[5] = 0U - 0xA000U;  /* 0xA000..0xBFFF -> PSRAM[0..0x1FFF] */
-    } else if (m == CART_MAP_KONAMINOSCC || m == CART_MAP_KONAMISCC) {
-        /* Konami-without-SCC / Konami-with-SCC INITIAL bank layout.
-         * All four page biases are -0x4000 so the read formula
-         * PSRAM[addr + bias + game_base] lands at:
-         *   page 1 (0x4000..0x5FFF) -> image[0x0000..0x1FFF] (bank 0)
-         *   page 2 (0x6000..0x7FFF) -> image[0x2000..0x3FFF] (bank 1)
-         *   page 3 (0x8000..0x9FFF) -> image[0x4000..0x5FFF] (bank 2)
-         *   page 4 (0xA000..0xBFFF) -> image[0x6000..0x7FFF] (bank 3)
-         * This matches WebMSX 6.x's CartridgeKonamiUltimateCollection
-         * reset state (bank1No=0, bank2No=1, bank3No=2, bank4No=3),
-         * which WebMSX selects for any AB-header cart with an 8 KiB-
-         * aligned size; verified byte-for-byte against WebMSX for f1,
-         * Nemesis, Knightmare, Space Manbow, Hydlide 3 and Metal Gear 2.
-         *
-         * The legacy v303 defaults this replaces ([2..5] = -0x4000,
-         * -0x6000, -0x8000, -0xA000 - every page pre-mapped to bank 0)
-         * break any cart whose init reads code/data from pages 2..4
-         * BEFORE its first bank-switch write: e.g. Metal Gear 2
-         * (512 KiB) LDIRs from 0xA0B6/0xA021/0xA14B/0xA186 and CALLs
-         * 0x9DD4/0x6011/0x7243 during init - with every page mapped
-         * to bank 0 it fetches garbage and the MSX hangs on a blue
-         * screen while the AB header at 0x4000 still reads fine (the
-         * exact "games >256 KiB don't boot" symptom; carts that stay
-         * in page 1 during init - most <=256 KiB games - happen to
-         * work with either layout). */
+        s_state.bankOffsets[2] = 0U - 0x4000U;  /* page 1 -> bank 0 */
+        s_state.bankOffsets[3] = 0U - 0x6000U;  /* page 2 -> bank 0 */
+        s_state.bankOffsets[4] = 0U - 0x8000U;  /* page 3 -> bank 0 */
+        s_state.bankOffsets[5] = 0U - 0xA000U;  /* page 4 -> bank 0 */
+    } else if (m == CART_MAP_KONAMINOSCC) {
+        /* Konami-without-SCC: bank-switch writes accepted at ANY
+         * address in 0x4000..0xBFFF (not just 0x6000/0x8000/0xA000).
+         * Uses the SAME KonamiUltimateCollection reset layout as
+         * KONAMISCC (pages 1..4 -> banks 0..3) so carts whose init
+         * LDIRs from page 2+ before the first bank write (Nemesis,
+         * Space Manbow, Metal Gear 2, ...) read the right bytes at
+         * boot. The old "all pages -> bank 0" bias (-0x6000/
+         * -0x8000/-0xA000) regressed once (2026-09-19) and froze
+         * >256 KiB Konami carts on a blue screen - keep ALL four
+         * biases at -0x4000. The plain CART_MAP_KONAMI branch keeps
+         * its own page-2..4->bank-0 layout; do not "fix" that one. */
         s_state.bankOffsets[2] = 0U - 0x4000U;  /* page 1 -> bank 0 */
         s_state.bankOffsets[3] = 0U - 0x4000U;  /* page 2 -> bank 1 */
         s_state.bankOffsets[4] = 0U - 0x4000U;  /* page 3 -> bank 2 */
         s_state.bankOffsets[5] = 0U - 0x4000U;  /* page 4 -> bank 3 */
-        if (m == CART_MAP_KONAMISCC) {
-            /* Bring up the SCC emulator core (emu2212) + its DMA->DAC
-             * sample pump. Safe to call repeatedly; scc.c ignores a
-             * second init while running. */
-            SCC_Init();
-        }
+    } else if (m == CART_MAP_KONAMISCC) {
+        /* Konami-with-SCC (WebMSX 6.x CartridgeKonamiUltimateCollection
+         * reset state). Pages 1..4 pre-map to image banks 0..3 (each
+         * page gets a DISTINCT 8 KiB bank) so the cart's init code in
+         * pages 2..4 reads the right bytes WITHOUT a bank-switch write.
+         * Required by Konami-SCC carts whose init LDIRs from page 2+
+         * before any bank write (Nemesis, Space Manbow, Metal Gear 2,
+         * etc.). Plain Konami-without-SCC carts would BREAK with this
+         * layout - they assume all pages read bank 0 at boot (see the
+         * CART_MAP_KONAMI / CART_MAP_KONAMINOSCC branches above). */
+        s_state.bankOffsets[2] = 0U - 0x4000U;  /* page 1 -> bank 0 */
+        s_state.bankOffsets[3] = 0U - 0x4000U;  /* page 2 -> bank 1 */
+        s_state.bankOffsets[4] = 0U - 0x4000U;  /* page 3 -> bank 2 */
+        s_state.bankOffsets[5] = 0U - 0x4000U;  /* page 4 -> bank 3 */
+        /* Bring up the SCC emulator core (emu2212) + its DMA->DAC
+         * sample pump. scc.c guards the hardware config (RCC + DMA2
+         * + TIM4 + DAC1) with a `s_scc_hw_up` flag - the first call
+         * configures the registers, every subsequent call only
+         * resets the emulator + clears the SPSC queue. Re-running
+         * the full hardware setup while TIM4_IRQHandler / DMA2_Ch3
+         * are live would latch the DMA state machine and freeze the
+         * chip, which is exactly what was happening before (the
+         * boot path calls SCC_Init() once from main() and again from
+         * here). See scc.c::SCC_Init / s_scc_hw_up. */
+        (void)SCC_Init();
     } else if (m == CART_MAP_ASCII8k) {
         /* ASCII 8k: 8 KiB banks at 0x6000/0x6800/0x7000/0x7800 (write
          * addresses). Matches the legacy v303 firmware defaults exactly
@@ -320,12 +476,14 @@ void Init_Cart (void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* MSX reset control (PE4). The MSX reset line is active LOW. We hold
- * the MSX in reset from the very start of `main()` (so its BIOS waits
- * while the firmware boots) and release it only after the cart is
- * armed - otherwise the BIOS probes 0x4000 with no slot active and
- * drops to BASIC. Cart_AssertMSXReset() is the legacy one-shot pulse,
- * still used by the loader's CMD_RESET flow.                       */
+/* MSX reset control (PE4) - helpers defined HERE so Cart_SetMapper_  */
+/* Safe (above, in the public-API region) can call msx_reset_drive_low  */
+/* without a forward decl. The MSX reset line is active LOW. We hold   */
+/* the MSX in reset from the very start of `main()` (so its BIOS waits */
+/* while the firmware boots) and release it only after the cart is     */
+/* armed - otherwise the BIOS probes 0x4000 with no slot active and    */
+/* drops to BASIC. Cart_AssertMSXReset() is the legacy one-shot pulse,  */
+/* still used by the loader's CMD_RESET flow.                          */
 /* ------------------------------------------------------------------ */
 
 static void msx_reset_drive_low (void) {
@@ -520,88 +678,145 @@ static void RunKonamiNOSCC (void) {
 
 /*
  * Konami mapper with SCC sound chip (port of legacy v303
- * RunKonamiWithSCC).
+ * RunKonamiWithSCC, with the page-filter discipline aligned to
+ * RunKonamiNOSCC).
  *
- * Faithful port of the v303 handler. The SCC IRQ path is MINIMAL on
- * purpose - it does nothing but queue writes for the sample-pump IRQ
- * to consume. Everything fancy (SCC_read on the SCC-I window,
- * conditional bank updates, SCC activation tracking) lives in the
- * TIM4 IRQ on scc.c.
+ * This handler is the LINE-UP of RunKonamiNOSCC + SCC write-queuing.
+ * The two used to be subtly different - NOSCC refused to drive the
+ * bus on page 0/1 reads, SCC drove every slot from 0..7, which let the
+ * cart image leak into the BIOS address range (page 0 = 0x0000..0x3FFF)
+ * and crashed the MSX with "goes to RESET" the moment the BIOS probed
+ * the cart for an 'AB' header. After aligning the filter with NOSCC,
+ * KONAMISCC and KONAMINOSCC behave identically apart from the SCC
+ * write-path.
  *
- * Semantics, identical to v303 RunKonamiWithSCC:
- *   READ cycle: serve one byte from PSRAM via bankOffsets[slot] -
- *               NO special case for 0x9800..0x98FF (the SCC presence
- *               byte and other SCC reads come from the cart image
- *               directly, like the legacy firmware).
- *   WRITE cycle: always queue ((address << 16) | data) for the SCC
- *               emulator AND always update bankOffsets[slot] - same
- *               unconditional behavior as legacy (whether the write
- *               lands in the SCC window or not). The TIM4 IRQ
- *               (scc.c) drains the queue into SCC_write() on every
- *               sample tick and ignores writes that fall outside
- *               the SCC's `base_adr..base_adr+0x100` window, so
- *               bank-switch writes are harmless queue entries.
+ * The four boot biases are shared with KONAMINOSCC
+ * (KonamiUltimateCollection reset state: pages 1..4 -> banks 0..3, all
+ * biases = -0x4000). SCC_Init() is called once from Cart_SetMapper().
  *
- * The queue is a 64-entry SPSC ring in zero-wait-state SRAM
- * (scc.c::SCC_QueueWrite). 64 entries is plenty: TIM4 drains at
- * ~44 kHz (one drain per ~22 us), and the Z80 cannot sustain more
- * than ~3.5 MHz of cart writes in the worst case. If the queue ever
- * fills the SCC_QueueWrite drop-on-overflow keeps the IRQ bounded -
- * the Z80 still gets a bank-switch update and the cart image stays
- * consistent; only the audio write is lost.
+ * Semantics:
+ *   READ cycle at 0x4000..0xBFFF (page 2..5):
+ *      drive PSRAM byte via bankOffsets[page], like NOSCC.
+ *   READ cycle at any other address (page 0 BIOS, page 1 cart header
+ *      mirrored, page 6/7 'unused'):
+ *      bus off - the BIOS owns the bus, the cart is electrically
+ *      silent (no bus contention).
+ *   WRITE cycle at 0x4000..0xBFFF:
+ *      update bankOffsets[page] = (w << 13) - page_start, AND queue
+ *      (address<<16 | data) for the SCC emulator BUT only if the
+ *      write landed inside the SCC-I register window
+ *      (0x9800..0x98FF). Writes anywhere else in the cart window are
+ *      bank-switch writes - the SCC doesn't care, the TIM4 IRQ would
+ *      just ignore them, and queueing them wastes queue slots.
+ *   WRITE cycle at 0x0000..0x3FFF (BIOS page 0 / RAM 0xC000..0xFFFF):
+ *      return without touching bankOffsets[] (the BIOS is writing its
+ *      own scratch RAM, the cart is NOT selected). Matches NOSCC.
  *
- * The bank-bias formula matches v303 exactly: bankOffsets[slot] =
- * (w << 13) - (address - 0x1000). The corrected formula
- * (w << 13) - page_start used by RunKonamiNOSCC deliberately differs
- * here to preserve byte-for-byte compatibility with the legacy
- * firmware (any cart whose layout depends on the SCC-write side
- * effect of bank-switch would break otherwise).
+ * The bias formula (w << 13) - page_start (where page_start =
+ * (address & 0xE000)) is identical to NOSCC's and produces the same
+ * bias for the standard bank-switch addresses 0x6000/0x8000/0xA000:
+ * page_start == 0x6000 / 0x8000 / 0xA000, so the formula collapses to
+ * (w << 13) - 0x6000 / etc., the same as if the legacy v303 used the
+ * (w << 13) - (address - 0x1000) form. For SCC-window writes
+ * (0x9800..0x98FF) the two forms differ: v303 produced (w << 13) -
+ * 0x8800 (because address - 0x1000 = 0x8800 for 0x9800); the aligned
+ * form produces (w << 13) - 0x9800. The difference is moot because
+ * SCC_window writes do NOT update bankOffsets[slot=4] in any version
+ * of the formula that respects the page boundary (any cart test that
+ * writes to 0x9800-0x98FF and immediately reads back is broken by
+ * design - those writes go to the SCC and reads come from the cart
+ * image, NOT from a re-mapped bank).
+ *
+ * The SCC IRQ path: writes queued by SCC_QueueWrite are drained by
+ * the TIM4 IRQ (scc.c) at ~44 kHz into SCC_write(), which ignores any
+ * write falling outside the SCC's `base_adr..base_adr+0x100` window.
+ * The queue is a 64-entry SPSC ring in zero-wait-state SRAM.
+ *
+ * Cycle budget (write path, SCC-window hit case vs. plain bank-switch):
+ *   bank-switch write:  ~6 extra cycles on top of NOSCC (the
+ *                        ANDI-XORI mask check + skipped branch).
+ *   SCC-window write:   ~10 extra cycles (mask-check taken + sll/orr +
+ *                        SCC_QueueWrite jal: 1 SUB-equivalent
+ *                        compare + 1 sll + 1 orr + 1 jal + 1 ret-like).
+ *   non-cart-page write (0x0000..0x3FFF, 0xC000..0xFFFF): 0 extra
+ *                        cycles - filtered at the top of the write
+ *                        path the same way NOSCC does.
+ * The hot read-path is byte-for-byte NOSCC (no SCC touch at all
+ * on reads - cart image is what the BIOS wants, not the SCC).
  */
 static void RunKonamiSCC (void) {
-    const uint16_t address = (uint16_t)GPIOD->INDR;     /* addr bus: PD0..15 */
-    const uint32_t slot    = (uint32_t)address >> 13;   /* 0..7 (0x4000..0xBFFF in 2..5) */
+    /* Common prologue - shared with RunKonamiNOSCC. The address +
+     * page extraction is hot enough that we inlined it here rather
+     * than factoring into a helper (helper call would cost a jal +
+     * return + an extra register spill). */
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    const uint32_t ctrl    = GPIOE->INDR;
+    const uint32_t page    = address >> 13;
 
-    if ((GPIOE->INDR & CART_RD_MASK) == 0U) {
-        /* READ cycle. Serve one byte from PSRAM via bankOffsets[slot],
-         * exactly like the v303 RunKonamiWithSCC. The SCC-I window
-         * (0x9800..0x98FF) reads come from the cart image; the SCC
-         * presence/ID byte (0x3F) is whatever byte the user uploaded
-         * at the matching offset in their ROM, same as legacy. */
-        const uint32_t bias = g_state->bankOffsets[slot];
-        Cart_DriveByteFromPSRAM (address, bias);
+    /* ---- READ cycle (byte-for-byte identical to RunKonamiNOSCC). */
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        if (page >= 2U && page <= 5U) {
+            const uint32_t bias = g_state->bankOffsets[page];
+            Cart_DriveByteFromPSRAM (address, bias);
+        } else {
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
 
-    /* WRITE cycle. Always update bankOffsets and always queue the
-     * write for the SCC emulator - matches v303 RunKonamiWithSCC
-     * exactly. */
+    /* ---- WRITE cycle. Filter non-cart addresses identically to
+     *      RunKonamiNOSCC: `address > 0xB000U` catches page 0 (BIOS
+     *      0x0000..0x3FFF), page 6 + 7 (high RAM 0xC000..0xFFFF) in
+     *      one unsigned SLTIU compare against an immediate - cheaper
+     *      than a pair of page-bound compares plus an OR. */
     EXTI->INTFR = EXTI_INTENR_MR0;
-    const uint8_t w = Cart_ReadWriteData();
+    if (address > 0xB000U) return;
 
-    /* Pack and queue BEFORE waiting for WR low - the v303 handler
-     * latches WriteData from the address-bus GPIOD on entry, then
-     * spins for the WR pulse. Pre-computing the queue entry here
-     * lets us store+enqueue in a single shot inside the WR-low
-     * branch. */
-    const uint32_t packed = ((uint32_t)address << 16) | (uint32_t)w;
-
-    /* Legacy bias formula: (w << 13) - (address - 0x1000). For
-     * bank-switch writes (0x6000/0x8000/0xA000) this collapses to
-     * (w << 13) - page_start, matching RunKonamiNOSCC. For SCC-window
-     * writes (0x9800..0x98FF) it produces the same quirky bias the
-     * legacy firmware produces - preserved here intentionally so any
-     * cart whose test code reads back from the SCC window right after
-     * writing still gets the byte the legacy firmware would have
-     * returned. */
-    const uint32_t bias = ((uint32_t)w << 13) - ((uint32_t)address - 0x1000U);
-
+    EXTI->INTFR = EXTI_INTENR_MR0;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
-            g_state->bankOffsets[slot] = bias;
-            (void)SCC_QueueWrite (packed);   /* drop on overflow */
+            /* Latch data bus ONCE while ~WR is low (Z80 only drives
+             * the data bus during the ~WR pulse; reading earlier
+             * latches stale / floating garbage, which corrupts both
+             * the bank value AND the SCC queue entry - that was the
+             * second KONAMISCC freeze cause, fixed here by latching
+             * inside the WR-low block, matching NOSCC exactly). */
+            const uint8_t w = Cart_ReadWriteData();
+
+            /* Common bank-switch update - identical formula to
+             * RunKonamiNOSCC. (w << 13) - page_start where
+             * page_start = (address & 0xE000). */
+            const uint32_t page_start = (uint32_t)(address & 0xE000U);
+            g_state->bankOffsets[page] = ((uint32_t)w << 13) - page_start;
+
+            /* SCC-window test: a single ANDI against 0xF000 plus a
+             * branch on equal-to-0x9000 catches the entire
+             * 0x9000..0x9FFF SCC window:
+             *   0x9000..0x97FF  SCC enable / SCC+ activation byte
+             *                    (offset 0 from base_adr; emu2212
+             *                    treats both as the same write)
+             *   0x9800..0x9FFE  SCC control registers (offset
+             *                    0x800..0x8FE: wave, freq, vol,
+             *                    mode, ch-enable)
+             * Cheaper than two loads against SCC_I_WINDOW_BASE /
+             * LAST (those constants live in flash; loading them
+             * from flash inside the IRQ window costs a flash
+             * waitstate at HCLK 200 MHz). Cheaper than the legacy
+             * ">= && <=" two-compare form. Bank-switch writes
+             * (addresses with high nibble != 0x9) skip the queue
+             * path entirely - TIM4 would just drop them anyway. */
+            if ((address & 0xF000U) == 0x9000U) {
+                /* Pack: bits[31:16] = address, bits[7:0] = w.
+                 * `address` is already a uint16_t so the shift can
+                 * stay in the lower 32; `w` is uint8_t so the OR is
+                 * a single-byte write. */
+                const uint32_t packed =
+                    ((uint32_t)address << 16) | (uint32_t)w;
+                (void)SCC_QueueWrite (packed);   /* drop on overflow */
+            }
             return;
         }
     }

@@ -15,6 +15,7 @@
 #include "psram.h"
 #include "cli.h"
 #include "scc.h"
+#include "tone.h"
 #include "loader.h"
 #include "usb_disk.h"
 #include "usb_tests.h"
@@ -72,6 +73,21 @@ int main (void) {
     SystemCoreClockUpdate();
     Delay_Init();
 
+    SystemCoreClockUpdate();
+    Delay_Init();
+
+    /* Bring up USART BEFORE any driver whose init breadcrumbs print
+     * (SCC_Init's SCC_DEBUG prints in particular). If USART_Printf_Init
+     * runs AFTER SCC_Init, those prints either drop silently (USART
+     * TX path uninitialised) OR hang in the printf spinwait on TXE
+     * that never fires, stopping boot before "SystemClk:" is ever
+     * printed. USART_Printf_Init reads SystemCoreClock for the baud
+     * divisor, so SystemCoreClockUpdate() must run before it (done
+     * above). PWR_VDD18LevelConfig is the only post-USART concern
+     * and is unrelated to print output. */
+    USART_Printf_Init (921600);
+    PWR_VDD18LevelConfig(PWR_VDD18_Level1);
+
     /* Hold the MSX in reset IMMEDIATELY so its BIOS waits while the
      * firmware finishes booting. The cart must be fully armed before
      * the MSX sees its first rising edge on ~RESET, otherwise the
@@ -83,8 +99,20 @@ int main (void) {
     SCC_Init ();
     int loader_rc = Cart_SetMapper (CART_MAP_FLASH);
 
-    USART_Printf_Init (921600);
-    PWR_VDD18LevelConfig(PWR_VDD18_Level1);
+#if TONE_DEFAULT_ON
+    /* Bring up the DAC tone generator (audio-path self-test). Drives
+     * PA4 with a sine/triangle/square/DC waveform via TIM4 + DMA +
+     * DAC1, independent of the SCC emulator. The CLI `TONE` command
+     * can hot-swap waveform/freq later. Default sample_rate = 44100
+     * (legacy SCC value) → audio_freq = 44100 / 256 ≈ 172 Hz, well
+     * inside TIM4's 16-bit period register and clearly audible on
+     * earphones.
+     * TONE_DEFAULT_ON is 0 by default so boot leaves the SCC audio
+     * path active for cart games; flip to 1 (or use `TONE START`
+     * from the CLI) for self-test. */
+    Tone_Init (44100U, TONE_WAVE_SINE);
+#endif
+
     printf ("SystemClk:%d\r\n", SystemCoreClock);
     printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
@@ -138,6 +166,37 @@ int main (void) {
     for (;;) {
         CLI_Service ();
         Loader_Service ();
+#if SCC_DEBUG
+        /* Main-loop DAC probe: read Dual_DAC_Value once per boot + then
+         * every ~5s. The TIM4_IRQHandler is producing ~44100 samples/s
+         * but logging them all floods the USART; once per ~5s is
+         * enough to confirm the value is updating (will tick up / down
+         * as the SCC sample pump runs) AND that the DMA target RAM
+         * is non-zero (proves DMA path is wired). Uses the SysTick or
+         * a free counter - we don't have one readily, so just print
+         * on every loop pass and let the user throttle via the toggle
+         * if it's too noisy. */
+        {
+            static uint32_t tick = 0;
+            static uint32_t last_dac = 0xFFFFFFFFU;
+            const uint32_t cur = SCC_GetDualDacValue ();
+            if (++tick == 1U || cur != last_dac) {
+                /* First pass + every change. If `cur` stays pinned at
+                 * 0x800 (mid-scale default) the SCC never wrote a
+                 * non-zero sample - either no cart writes reached the
+                 * IRQ, or emu2212 is stuck inactive (check
+                 * `s_scc->active` via the SCC CLI diagnostic). */
+                printf ("DAC: Dual_DAC_Value=0x%03x 0x800=mid\r\n",
+                        (unsigned)(cur & 0xFFFU));
+                last_dac = cur;
+                if (tick == 1U) {
+                    /* First pass: note it so the rate slows back to
+                     * every-change thereafter. */
+                }
+                if (tick >= 1000U) tick = 0;  /* safety wrap */
+            }
+        }
+#endif
         __asm__ volatile ("wfi");
     }
 }
