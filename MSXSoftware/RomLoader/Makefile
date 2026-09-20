@@ -4,9 +4,8 @@
 #
 # Targets:
 #   selector.bin  - 32 KiB loader ROM ("AB" header at 0x4000)
-#   embed         - regenerate firmware/User/maptest_rom.c (the file the
-#                   CART_MAP_FLASH mapper actually serves) and
-#                   firmware/User/selector_rom.c (legacy mirror) from
+#   embed         - regenerate firmware/User/selector_rom.c (the file the
+#                   CART_MAP_FLASH mapper actually serves) from
 #                   selector.bin via tools/rom2c.py
 #   all           - selector.bin
 #
@@ -25,14 +24,10 @@ DATA_LOC = 0xC000   # MSX RAM page 3
 
 # Repo-relative paths for the embed step (we sit in MSXSoftware/RomLoader).
 ROM2C   = ../../tools/rom2c.py
-# The cart's FLASH mapper serves `maptest_rom[]` from this C file
-# (see firmware/Makefile ROM_EMBED_SRC := User/maptest_rom.c, and
-# Cart_EXTI0_Flash_Handler in cart.c which reads maptest_rom[]). The
-# selector_rom.c copy is kept in sync for the legacy CLI / debug paths
-# that look it up by name. This target drives the file the boot mapper
-# actually uses.
-FWM_ROM = ../../firmware/User/maptest_rom.c
-FWM_ROM_SFX = ../../firmware/User/selector_rom.c  # mirror copy
+# The cart's FLASH mapper serves `selector_rom[]` from this C file
+# (see firmware/Makefile ROM_EMBED_SRC := User/selector_rom.c, and
+# Cart_EXTI0_Flash_Handler in cart.c which reads selector_rom[]).
+FWM_ROM = ../../firmware/User/selector_rom.c
 ROM_BIN = selector.bin
 
 all: $(ROM_BIN)
@@ -54,10 +49,7 @@ romloader.bin: $(ROM_BIN)
 # Regenerate the firmware's embedded ROM source from selector.bin.
 embed: $(ROM_BIN)
 	python3 $(ROM2C) $(ROM_BIN) $(FWM_ROM)
-	# Mirror copy under the legacy name so the CLI / debug paths that
-	# reference selector_rom[] stay in sync with what the cart serves.
-	cp -f $(FWM_ROM) $(FWM_ROM_SFX)
-	@echo "embedded $(ROM_BIN) -> $(FWM_ROM) (and $(FWM_ROM_SFX))"
+	@echo "embedded $(ROM_BIN) -> $(FWM_ROM)"
 
 %.rel: %.s
 	$(AS) $(ASFLAGS) $@ $<

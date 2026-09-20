@@ -165,10 +165,10 @@ INCDIRS        := -IDebug -ICore \
                   -IPeripheral/inc -IStartup
 MSX_SOFTWARE_DIR := $(CURDIR)/../MSXSoftware
 ROM_LOADER_DIR   := $(MSX_SOFTWARE_DIR)/RomLoader
-ROM_EMBED_SRC    := User/maptest_rom.c
-ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/MapperTest/Makefile \
-					$(MSX_SOFTWARE_DIR)/MapperTest/crt0.s \
-					$(MSX_SOFTWARE_DIR)/MapperTest/maptest.c \
+ROM_EMBED_SRC    := User/selector_rom.c
+ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/RomLoader/Makefile \
+					$(MSX_SOFTWARE_DIR)/RomLoader/crt0.s \
+					$(MSX_SOFTWARE_DIR)/RomLoader/romloader.c \
 					$(CURDIR)/../tools/rom2c.py
 OBJDIR         := obj
 
@@ -182,10 +182,6 @@ SRC_C          := $(wildcard Startup/*.c  Startup/*.S \
                     User/FATFS/*.c \
 					User/USB_Host/*.c) $(ROM_EMBED_SRC)
 SRC_C          := $(filter-out User/envtest_rom.c,$(SRC_C))
-# selector_rom.c is a legacy mirror of maptest_rom.c kept only so debug
-# paths that grep for the name still find it - it defines the SAME
-# symbols (maptest_rom, maptest_rom_len), so it can't be linked twice.
-SRC_C          := $(filter-out User/selector_rom.c,$(SRC_C))
 SRC_C          := $(sort $(SRC_C))
 
 # Objects mirror source tree under $(OBJDIR)/<subdir>/<name>.o.

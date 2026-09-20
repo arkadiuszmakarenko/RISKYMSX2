@@ -155,15 +155,17 @@ void Cart_EXTI0_ROM32k_Handler (void) __attribute__((section(".ramfunc"), noinli
 void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                        interrupt("WCH-Interrupt-fast")));
 
-/* Embedded envelope-test ROM image (flash-resident). */
-extern const uint8_t maptest_rom[];
+/* Embedded ROM-selector image (flash-resident, generated from
+ * MSXSoftware/RomLoader/selector.bin). */
+extern const uint8_t selector_rom[];
 
-/* Flash-selector mapper: serves the embedded test ROM (maptest_rom[])
- * for ordinary cart reads, and decodes the mailbox window 0x7FF0..0x7FFF
- * that the RAM-resident loader uses to talk to the firmware (see
- * loader.h / MSXSoftware/RomLoader). Keep this handler in flash: the
- * cart flash path is zero-wait, so there is no reason to delay boot on
- * PSRAM configuration just to reach the selector. */
+/* Flash-selector mapper: serves the embedded ROM-selector image
+ * (selector_rom[]) for ordinary cart reads, and decodes the mailbox
+ * window 0x7FF0..0x7FFF that the RAM-resident loader uses to talk to
+ * the firmware (see loader.h / MSXSoftware/RomLoader). Keep this
+ * handler in flash: the cart flash path is zero-wait, so there is no
+ * reason to delay boot on PSRAM configuration just to reach the
+ * selector. */
 void Cart_EXTI0_Flash_Handler (void) __attribute__((noinline,
                                                      interrupt("WCH-Interrupt-fast")));
 
@@ -1680,9 +1682,6 @@ void Cart_EXTI0_ROM48k_Handler (void) {
  * Cart_EXTI0_ROM32k_Handler above, so both handlers share them.
  * The embedded ROM image is also declared there. */
 
-/* Embedded envelope-test ROM image (flash-resident). */
-extern const uint8_t maptest_rom[];
-
 void Cart_EXTI0_Flash_Handler (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
@@ -1734,7 +1733,7 @@ void Cart_EXTI0_Flash_Handler (void) {
         } else if (address >= 0x4000U && address < 0xC000U) {
             /* Serve the embedded selector ROM (32 KiB image, mapped at
              * 0x4000 like ROM32k). */
-            v = maptest_rom[address - 0x4000U];
+            v = selector_rom[address - 0x4000U];
         } else {
             /* Out of the loader's window: float. */
             EXTI->INTFR = EXTI_INTENR_MR0;

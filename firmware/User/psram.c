@@ -31,15 +31,6 @@
 #include "debug.h"
 #include <string.h>
 
-/* Cart image from maptest_rom.c. Declared with an INCOMPLETE array type
- * and a separate length symbol: the definition is a 1-byte placeholder
- * (no embedded ROM), and taking sizeof() on a 32768-declared extern
- * would always report 32768 - the placeholder branch would be dead
- * code and the full-32K copy would read past the 1-byte object in
- * flash. Use maptest_rom_len to decide which path to take. */
-extern const uint8_t  maptest_rom[];
-extern const uint32_t maptest_rom_len;
-
 /* ---------- PSRAM device MR encodings (copied from PSRAM/PSRAM/User/PSRAM.h) */
 #define PSRAM_MR_ADDR_0          0x00U  /* read latency / operating range */
 #define PSRAM_MR_ADDR_4          0x04U  /* write latency / operating range */

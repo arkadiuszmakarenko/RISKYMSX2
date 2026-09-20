@@ -30,29 +30,9 @@
 #include "ch32v4x7.h"
 #include "core_riscv.h"
 #include "system_ch32v4x7.h"
-#include "tone.h"
 #include "debug.h"
 #include <string.h>
 
-/* SCC debug verbosity. 1 prints init breadcrumbs + rate-limited
- * IRQ-side stats + a TIM4_IRQHandler sample stat. Flip to 0 (or
- * override with `make rebuild SCC_DEBUG=0` once the regression is
- * diagnosed) for clean production builds. */
-#ifndef SCC_DEBUG
-#define SCC_DEBUG 1
-#endif
-
-#if SCC_DEBUG
-/* Counters for the TIM4_IRQHandler breadcrumb log. Live in .bss
- * (reset to 0 at boot); not volatile because the IRQ writes them
- * and the log is read from the same IRQ context (no main-loop
- * race). The SCC_QueueWrite-side counters were removed when the
- * IRQ-side `#if SCC_DEBUG` block was stripped from that function -
- * see the build of 2026-09-19. */
-static uint32_t s_tim4_ticks    = 0;     /* TIM4_IRQHandler entry count */
-static uint32_t s_tim4_drained  = 0;     /* total writes drained */
-static uint32_t s_tim4_samples  = 0;     /* SCC_calc samples produced */
-#endif
 
 /* ------------------------------------------------------------------ */
 /* Emulator core (verbatim emu2212) instance.                          */
@@ -180,14 +160,6 @@ void TIM4_IRQHandler (void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void TIM4_IRQHandler (void) {
     if (TIM_GetITStatus (TIM4, TIM_IT_Update) != RESET) {
         TIM_ClearITPendingBit (TIM4, TIM_IT_Update);
-        if (Tone_IsActive ()) { Tone_TIM4Tick (); return; }
-#if SCC_DEBUG
-        ++s_tim4_ticks;
-        /* Count of writes drained THIS tick - printed only every 1024
-         * ticks (~23 Hz at 44.1 kHz). Use the running sum for
-         * productivity check, the per-tick counter for backlog check. */
-        uint32_t drained_this_tick = 0;
-#endif
 
         /* Apply all pending Z80-side writes so SCC_calc() sees the
          * emulator state as of now. */
@@ -197,39 +169,14 @@ void TIM4_IRQHandler (void) {
             uint32_t address = (address_data >> 16) & 0xFFFFU;
             uint32_t data    = address_data & 0xFFFFU;
             SCC_write (s_scc, address, data);
-#if SCC_DEBUG
-            ++drained_this_tick;
-#endif
         }
 
-#if SCC_DEBUG
-        s_tim4_drained += drained_this_tick;
-#endif
+
 
         /* int16 -> 12-bit unsigned for the DAC: round-and-shift, the
          * identical arithmetic the legacy firmware used. */
         Dual_DAC_Value = ((uint32_t)(SCC_calc (s_scc) + 0x8000 + 8)) >> 4;
 
-#if SCC_DEBUG
-        ++s_tim4_samples;
-        /* Throttled TIM4-side log: every 4096 ticks (~93 ms at
-         * 44.1 kHz) print a one-line state snapshot. Lets us
-         * confirm the SCC chip is alive AND that the queue is
-         * draining. The TIM4 IRQ runs at ~44.1 kHz so 4096
-         * throttle = ~93 Hz log rate which is harmless to the
-         * USART. */
-        if ((s_tim4_samples & 0x0FFFU) == 0U) {
-            printf ("SCC.TIM4: ticks=%u drained=%u samples=%u "
-                    "active=%u mode=%u DAC=0x%03x q=%u/64\r\n",
-                    (unsigned)s_tim4_ticks,
-                    (unsigned)s_tim4_drained,
-                    (unsigned)s_tim4_samples,
-                    (unsigned)s_scc->active,
-                    (unsigned)s_scc->mode,
-                    (unsigned)Dual_DAC_Value,
-                    (unsigned)SCC_GetLevel ());
-        }
-#endif
     }
 }
 

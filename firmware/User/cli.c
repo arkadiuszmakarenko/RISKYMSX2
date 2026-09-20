@@ -28,7 +28,6 @@
 #include "usb_tests.h"
 #include "ff.h"
 #include "scc.h"
-#include "tone.h"
 #include "debug.h"
 #include <string.h>
 
@@ -359,92 +358,6 @@ static void CLI_HandleLine(char *line)
         printf ("SCC q=%u/64 mapper=%s\r\n",
                 (unsigned)SCC_GetLevel(),
                 Cart_MapperNames[(unsigned)Cart_GetMapper()]);
-    }
-    else if (CLI_Token(line, "TONE")) {
-        /* Raw-DAC1 tone generator for audio-path self-test. The tone
-         * takes over TIM4 + DMA + DAC1 from the SCC sample pump; call
-         * `TONE STOP` to give the path back to the SCC. Audio
-         * frequency = sample_rate / 256.
-         *
-         * Subcommand syntax (whitespace-separated, case-sensitive):
-         *   TONE                    → STATUS print
-         *   TONE STATUS             → STATUS print
-         *   TONE STOP               → stop tone, hand path back to SCC
-         *   TONE START              → start at default rate (172 Hz)
-         *   TONE START <hz>         → start at audio_freq = hz
-         *   TONE WAVEFORM SINE      → switch waveform hot
-         *   TONE WAVEFORM TRIANGLE
-         *   TONE WAVEFORM SQUARE
-         *   TONE WAVEFORM DC
-         *   TONE FREQ <hz>          → 1..6000 Hz, takes effect NOW */
-        const char *p = line + 4;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p == '\0' || CLI_Token(p, "STATUS")) {
-            printf ("TONE: %s waveform=%s freq=%u Hz "
-                    "(sample_rate=%u Hz, audio_table=%u)\r\n",
-                    Tone_IsActive () ? "active" : "idle",
-                    Tone_WaveName (Tone_GetWaveform ()),
-                    (unsigned)Tone_GetFreq (),
-                    (unsigned)Tone_GetSampleRate (),
-                    (unsigned)TONE_TABLE_SIZE);
-            return;
-        }
-        if (CLI_Token(p, "STOP")) {
-            Tone_Stop ();
-        } else if (CLI_Token(p, "START")) {
-            /* `TONE START <hz>` - optional frequency follows START.
-             * If a numeric arg follows, parse it; otherwise use the
-             * default 44100 Hz sample rate (~172 Hz audio). */
-            const char *f = p + 5;
-            while (*f == ' ' || *f == '\t') f++;
-            if (*f >= '0' && *f <= '9') {
-                /* TONE START <hz> form: parse audio frequency */
-                uint32_t freq = 0U;
-                while (*f >= '0' && *f <= '9') {
-                    freq = freq * 10U + (uint32_t)(*f - '0');
-                    f++;
-                }
-                if (freq < 1U || freq > 6000U) {
-                    printf ("ERR TONE START <hz>: 1..6000 Hz\r\n");
-                    return;
-                }
-                Tone_Init (freq * 256U, Tone_GetWaveform ());
-            } else {
-                /* Plain TONE START - default 172 Hz. */
-                Tone_Init (44100U, Tone_GetWaveform ());
-            }
-        } else if (CLI_Token(p, "WAVEFORM")) {
-            /* WAVEFORM token is 8 chars; skip past it. */
-            const char *w = p + 8;
-            while (*w == ' ' || *w == '\t') w++;
-            ToneWaveform wf;
-            if      (CLI_Token(w, "SINE"))     wf = TONE_WAVE_SINE;
-            else if (CLI_Token(w, "TRIANGLE")) wf = TONE_WAVE_TRIANGLE;
-            else if (CLI_Token(w, "SQUARE"))   wf = TONE_WAVE_SQUARE;
-            else if (CLI_Token(w, "DC"))       wf = TONE_WAVE_DC;
-            else {
-                printf ("ERR TONE WAVEFORM: use SINE|TRIANGLE|SQUARE|DC\r\n");
-                return;
-            }
-            Tone_SetWaveform (wf);
-        } else if (CLI_Token(p, "FREQ")) {
-            /* FREQ token is 4 chars; skip past it. */
-            const char *f = p + 4;
-            while (*f == ' ' || *f == '\t') f++;
-            uint32_t freq = 0U;
-            while (*f >= '0' && *f <= '9') {
-                freq = freq * 10U + (uint32_t)(*f - '0');
-                f++;
-            }
-            if (freq < 1U || freq > 6000U) {
-                printf ("ERR TONE FREQ: 1..6000 Hz\r\n");
-                return;
-            }
-            /* Audio frequency = sample_rate / 256 → sample_rate = freq * 256. */
-            Tone_SetFreq (freq * 256U);
-        } else {
-            printf ("ERR TONE: use START|STOP|STATUS|WAVEFORM SINE|TRIANGLE|SQUARE|DC|FREQ hz\r\n");
-        }
     }
     else if (CLI_Token(line, "RST")) {
         /* RST takes a DECIMAL millisecond count (most users expect this),

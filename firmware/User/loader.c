@@ -196,7 +196,7 @@ static void cmd_set_mapper (uint8_t m) {
      * drops to BASIC (best case) or executes 0xFF (RST 38h) in a
      * tight loop (worst case, with bank-switching mappers). Only the
      * FLASH mapper is exempt - it serves the flash-resident
-     * maptest_rom[] image, NOT PSRAM, so an empty PSRAM window
+     * selector_rom[] image, NOT PSRAM, so an empty PSRAM window
      * doesn't affect it. */
     if (m != CART_MAP_FLASH && s_bytes_loaded == 0U) {
         printf ("LOADER: SET_MAPPER %s refused (no ROM loaded)\r\n",
@@ -222,7 +222,7 @@ static void cmd_reset (void) {
      * the handler would then read bankOffsets[] (zeroed) and serve
      * 0xFF at 0x4000 - the MSX would hang in the BIOS' "search for
      * AB" loop. Falling back to the flash selector (which serves
-     * maptest_rom[] from internal flash, NOT PSRAM) keeps the MSX in
+     * selector_rom[] from internal flash, NOT PSRAM) keeps the MSX in
      * the loader menu so the user can retry the LOAD_ROM. */
     if (s_pending_mapper == CART_MAP_NONE
         || (s_pending_mapper != CART_MAP_FLASH

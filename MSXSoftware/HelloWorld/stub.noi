@@ -1,9 +1,0 @@
-DEF .__.ABS. 0x0
-DEF _main 0x0
-DEF l__CODE 0x0
-DEF l__HEADER 0x0
-DEF s__HEADER 0x0
-DEF s__HEADER0 0x0
-DEF l__HEADER0 0x16
-DEF s__CODE 0x4020
-LOAD stub.ihx
