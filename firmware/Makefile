@@ -9,7 +9,8 @@
 #   make -B         # force rebuild (all sources)
 #   make clean      # rm -rf obj/   (nukes intermediates and outputs)
 #   make rebuild    # clean + all
-#   make size       # print Berkeley-style size summary
+#   make size       # print RAM/Flash usage vs capacity (also auto-printed
+#                     after every successful build)
 #   make list       # show which CC/wlink/chip are in use
 #   make flash      # program the chip with OpenOCD (WCH-Link E)
 #   make prog       # alias for flash
@@ -42,6 +43,13 @@
 
 PROJECT       := RISKYMSX2
 LINKER        := Ld/Link.ld
+
+# --- Memory capacity (mirrors Ld/Link.ld) -----------------------------------
+# FLASH 576K; RAM region is 136K-1K = 135K (the linker script places RAM at
+# 0x20000000+1024 and keeps the first 1 KiB out of the region). Used to turn
+# the binutils size output into "bytes used / bytes free" in `showsize`.
+FLASH_SIZE    := 589824      # 576 * 1024
+RAM_SIZE      := 138240      # 135 * 1024
 
 # --- Parallel builds --------------------------------------------------------
 # Default to -j8 unless the user passes -jN (including -j1) on the command
@@ -246,9 +254,9 @@ endif
 # =============================================================================
 # Rules
 # =============================================================================
-.PHONY: all clean rebuild flash prog size list read erase
+.PHONY: all clean rebuild flash prog size list read erase showsize
 
-all: $(ELF) $(HEX) $(LST)
+all: $(ELF) $(HEX) $(LST) showsize
 	@echo "*** $(PROJECT) build complete ***"
 
 # --- Link --------------------------------------------------------------------
@@ -309,11 +317,23 @@ rebuild: clean
 	@$(MAKE) -j1 all
 
 # --- Convenience targets -----------------------------------------------------
-# MRS's $(SIZ) target printed the size to stdout (no redirect), so $(SIZ)
-# was never created on disk. Match that: use -C $(OBJDIR) so the gcc binutils
-# finds the ELF, and just print.
-size: $(ELF)
-	@"$(SIZE)" --format=berkeley "$(ELF)"
+# Memory report: binutils `size` gives text/data/bss; for this single-region
+# map, FLASH usage = text + data (initialized bytes living in flash) and RAM
+# usage = data + bss. Note: the 2 KiB stack (Ld/Link.ld __stack_size) sits at
+# the top of RAM and is NOT counted in bss.
+showsize: $(ELF)
+	@"$(SIZE)" --format=berkeley "$<"
+	@"$(SIZE)" --format=berkeley "$<" | tail -n 1 | awk \
+		-v FSZ=$(FLASH_SIZE) -v RSZ=$(RAM_SIZE) '{ \
+			flash = $$1 + $$2; \
+			ram   = $$2 + $$3; \
+			printf "  FLASH: %8d / %8d bytes  (%5.1f%% used, %8d left)\n", \
+			       flash, FSZ, 100 * flash / FSZ, FSZ - flash; \
+			printf "  RAM  : %8d / %8d bytes  (%5.1f%% used, %8d left)\n", \
+			       ram, RSZ, 100 * ram / RSZ, RSZ - ram; \
+		}'
+
+size: showsize
 
 list:
 	@echo "CC       = $(CC)"
