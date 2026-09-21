@@ -24,7 +24,7 @@ Area                                    Addr        Size        Decimal Bytes (A
      00000007  l__HEADER1                      
      00000010  l__HEADER0                      
      00000782  l__DATA                         
-     000007DC  l__CODE                         
+     00000883  l__CODE                         
      00004020  s__CODE                         
      0000C000  s__DATA                         
      0000C782  s__GSFINAL                      
@@ -38,18 +38,18 @@ Hexadecimal  [32-Bits]
 
 Area                                    Addr        Size        Decimal Bytes (Attributes)
 --------------------------------        ----        ----        ------- ----- ------------
-_CODE                               00004020    000007DC =        2012. bytes (REL,CON)
+_CODE                               00004020    00000883 =        2179. bytes (REL,CON)
 
       Value  Global                              Global Defined In Module
       -----  --------------------------------   ------------------------
-     00004441  _main                              romloader
-     000047B2  __divuchar                         
-     000047B4  __divu8                            
-     000047B7  __divu16                           
-     000047B7  __divuint                          
-     000047E6  ___sdcc_enter_ix                   
-     000047F0  __moduchar                         
-     000047F7  __moduint                          
+     00004455  _main                              romloader
+     00004859  __divuchar                         
+     0000485B  __divu8                            
+     0000485E  __divu16                           
+     0000485E  __divuint                          
+     0000488D  ___sdcc_enter_ix                   
+     00004897  __moduchar                         
+     0000489E  __moduint                          
 
 ASxxxx Linker V03.00 + NoICE + sdld,  page 3.
 Hexadecimal  [32-Bits]

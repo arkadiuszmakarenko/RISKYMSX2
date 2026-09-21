@@ -90,7 +90,7 @@ uint32_t SCC_GetLevel (void) {
 uint32_t SCC_FlushQueue (void) {
     uint32_t drained = 0;
     /* Snapshot under IRQ-off discipline; the caller (Cart_SetMapper_
-     * Safe / cmd_reset) runs with global IRQ disabled around this
+     * Safe / cmd_softreset) runs with global IRQ disabled around this
      * call so the TIM4 IRQ can't sneak in mid-drain. */
     while (s_q_head != s_q_tail) {
         const uint32_t word = s_scc_queue[s_q_tail];

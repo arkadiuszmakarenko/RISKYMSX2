@@ -81,14 +81,6 @@ volatile Cart_Mapper g_mapper = CART_MAP_NONE;
  * touching every handler. */
 static struct MSXState *const g_state = &s_state;
 
-/* MSX reset helpers (defined later in the file, alongside the public
- * Cart_AssertMSXReset_* wrappers). Forward-prototyped here as `static`
- * (matching their definition) so Cart_SetMapper_Safe - which lives in
- * the public-API region above them - can call msx_reset_drive_low
- * without a placement-order dependency. */
-static void msx_reset_drive_low (void);
-static void msx_reset_release (void);
-
 /* Active EXTI0 handler trampoline address (PFIC VTF slot 0). Cart_
  * SetMapper() rewrites this. The trampoline reads g_mapper and jumps
  * to the right Run<Mapper>() function - ONE trampoline serves all
@@ -216,37 +208,36 @@ Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
  *
  * Cart_SetMapper_Safe() closes the race window by:
  *   1. Disabling EXTI0 + global IRQ (no IRQ can fire mid-swap).
- *   2. Holding the MSX in `~RESET` low the whole time (so the Z80 is
- *      stopped; PE4 is driven low here so the BIOS cannot probe the
- *      cart on its own clock). Optional - pass 1 from loader.c's
- *      CMD_RESET flow, 0 if you really need a non-resetting swap.
- *   3. Spinning until `~SLTSL` is HIGH (no in-flight cart cycle) with
+ *   2. Spinning until `~SLTSL` is HIGH (no in-flight cart cycle) with
  *      a bounded timeout; if it never goes high we still drive the
  *      bus off and proceed - better to lose one cycle than wedge.
- *   4. Driving the data bus OFF (`GPIOB->CFGHR = CART_BUS_OFF`) so no
+ *   3. Driving the data bus OFF (`GPIOB->CFGHR = CART_BUS_OFF`) so no
  *      stale OUTDR value lingers through the swap.
- *   5. Calling the pure `Cart_SetMapper()` to do the actual swap.
- *   6. Clearing `EXTI->INTFR` (any phantom edge latched during the
- *      wait or during the reset hold - a real one since we held PE4
- *      low but the MSX's input stage may have latched one).
- *   7. Issuing `__DSB(); __ISB();` so the new VTFADDR[0] is visible
+ *   4. Calling the pure `Cart_SetMapper()` to do the actual swap.
+ *   5. Clearing `EXTI->INTFR` (any phantom edge latched during the
+ *      wait).
+ *   6. Issuing `__DSB(); __ISB();` so the new VTFADDR[0] is visible
  *      to the core's pipeline before the IRQ is re-enabled.
- *   8. Re-enabling IRQ.
+ *   7. Re-enabling IRQ.
  *
- * If `hold_msx_reset` is non-zero, the caller MUST release the MSX
- * reset AFTER this function returns (cart.c owns the PE4 line during
- * the call; calling Cart_AssertMSXReset_End() afterwards is fine).
+ * NOTE: an earlier version of this function also drove MSX ~RESET low
+ * for the duration of the swap (hold_msx_reset=1 from the loader's
+ * CMD_RESET flow). That path is REMOVED: most MSX2+ machines expose
+ * the cart-edge ~RESET as read-only and driving it externally can
+ * damage the reset circuit. The CMD_SOFTRESET slingshot (running
+ * from MSX RAM) provides the equivalent atomicity without touching
+ * PE4 - see cmd_softreset in loader.c.
  *
  * Returns the same value as Cart_SetMapper(). */
-int Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset);
-int Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset) {
-    /* Phase 1: stop the Z80 / stop the IRQ. The order matters:
+int Cart_SetMapper_Safe (Cart_Mapper m);
+int Cart_SetMapper_Safe (Cart_Mapper m) {
+    /* Phase 1: stop the IRQ. The order matters:
      *   - EXTI0's pending bit is in EXTI->INTFR (edge-triggered on
      *     PE0 falling edge). Masking it via EXTI->INTENR bit is
      *     harmless but adds a register touch we'd have to undo.
      *   - PFIC->IER[EXTI0_IRQn] (NVIC_DisableIRQ) is enough to prevent
      *     the IRQ from dispatching. The pending EXTI0 edge stays in
-     *     EXTI->INTFR and we'll clear it in phase 6.
+     *     EXTI->INTFR and we'll clear it in phase 5.
      *   - `__disable_irq()` masks everything (also blocks TIM4/SCC
      *     pump; we want THAT paused too, see Cart_EXTI0_SCC_QueueWrite
      *     being unpaused mid-swap would race with our bankOffsets[]
@@ -260,15 +251,7 @@ int Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset) {
     __asm__ volatile ("fence iorw, iorw");
     __asm__ volatile ("fence.i");
 
-    /* Phase 2 (optional): assert MSX reset the whole time. This is
-     * the only bulletproof way to keep the Z80 from probing 0x4000
-     * mid-swap. We do NOT release it here - the caller does that
-     * after we return. */
-    if (hold_msx_reset) {
-        msx_reset_drive_low ();
-    }
-
-    /* Phase 3: wait for ~SLTSL to go high (no in-flight Z80 cycle).
+    /* Phase 2: wait for ~SLTSL to go high (no in-flight Z80 cycle).
      * Bounded loop so a stuck-low ~SLTSL doesn't wedge the firmware;
      * we still drive the bus off and proceed after the timeout. */
     {
@@ -277,25 +260,25 @@ int Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset) {
             __asm__ volatile ("nop");
         }
     }
-    /* Phase 4: drive the data bus tri-stated, in case the handler
+    /* Phase 3: drive the data bus tri-stated, in case the handler
      * left it on (e.g. crashed inside a `while (SLTSL low)` spin). */
     GPIOB->CFGHR = CART_BUS_OFF;
 
-    /* Phase 5: the actual swap (handler + bankOffsets + g_mapper). */
+    /* Phase 4: the actual swap (handler + bankOffsets + g_mapper). */
     const int rc = Cart_SetMapper (m);
 
-    /* Phase 6: clear any phantom EXTI0 edge that latched during the
-     * wait or during the reset-hold window. Writing 1 to the bit
-     * clears it (WCH edge-triggered IRQ design). */
+    /* Phase 5: clear any phantom EXTI0 edge that latched during the
+     * wait. Writing 1 to the bit clears it (WCH edge-triggered IRQ
+     * design). */
     EXTI->INTFR = EXTI_INTENR_MR0;
 
-    /* Phase 7: serialise the writes - the VTFADDR[0] write inside
+    /* Phase 6: serialise the writes - the VTFADDR[0] write inside
      * SetVTFIRQ needs an ISB so the next IRQ observable by the core
      * sees the new handler address. */
     __asm__ volatile ("fence iorw, iorw");
     __asm__ volatile ("fence.i");
 
-    /* Phase 8: re-arm the IRQ path. */
+    /* Phase 7: re-arm the IRQ path. */
     NVIC_EnableIRQ (EXTI0_IRQn);
     __enable_irq ();
 
@@ -443,9 +426,9 @@ void Init_Cart (void) {
     GPIOD->CFGHR = 0x44444444U;
 
     /* Control bus PE0(SLTSL) PE1(RD) PE2(WR) PE5(MREQ) as floating
-     * inputs. PE3 = WAIT (left floating - see Cart_AssertMSXReset if
-     * we ever want to drive it). PE4 = MSX ~RESET (floating - the MSX
-     * reset circuit controls it). */
+     * inputs. PE3 = WAIT (left floating). PE4 = MSX ~RESET (floating
+     * - the firmware never drives it; see the cart.h note near
+     * Init_Cart). */
     GPIOE->CFGLR = 0x44444444U;
 
     /* Data bus PB8..PB15 tri-stated (bus off) */
@@ -478,53 +461,19 @@ void Init_Cart (void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* MSX reset control (PE4) - helpers defined HERE so Cart_SetMapper_  */
-/* Safe (above, in the public-API region) can call msx_reset_drive_low  */
-/* without a forward decl. The MSX reset line is active LOW. We hold   */
-/* the MSX in reset from the very start of `main()` (so its BIOS waits */
-/* while the firmware boots) and release it only after the cart is     */
-/* armed - otherwise the BIOS probes 0x4000 with no slot active and    */
-/* drops to BASIC. Cart_AssertMSXReset() is the legacy one-shot pulse,  */
-/* still used by the loader's CMD_RESET flow.                          */
+/* MSX ~RESET line (PE4) - NOT driven by this firmware.                */
 /* ------------------------------------------------------------------ */
-
-static void msx_reset_drive_low (void) {
-    GPIO_InitTypeDef io = {0};
-    io.GPIO_Pin   = GPIO_Pin_4;
-    io.GPIO_Mode  = GPIO_Mode_Out_PP;
-    io.GPIO_Speed = GPIO_Speed_High;
-    GPIO_Init (GPIOE, &io);
-    GPIO_ResetBits (GPIOE, GPIO_Pin_4);
-}
-
-static void msx_reset_release (void) {
-    GPIO_InitTypeDef io = {0};
-    io.GPIO_Pin   = GPIO_Pin_4;
-    io.GPIO_Mode  = GPIO_Mode_Out_PP;
-    io.GPIO_Speed = GPIO_Speed_High;
-    GPIO_Init (GPIOE, &io);
-    GPIO_SetBits (GPIOE, GPIO_Pin_4);
-    /* Small RC settle on PE4 (the MSX has its own pull-up), then
-     * return the pin to floating input so we don't fight the MSX
-     * reset circuit during normal operation. */
-    for (volatile int i = 0; i < 64; i++) { __asm__ volatile ("nop"); }
-    io.GPIO_Mode = GPIO_Mode_IN_FLOATING;
-    GPIO_Init (GPIOE, &io);
-}
-
-void Cart_AssertMSXReset_Begin (void) {
-    msx_reset_drive_low ();
-}
-
-void Cart_AssertMSXReset_End (void) {
-    msx_reset_release ();
-}
-
-void Cart_AssertMSXReset (uint32_t ms) {
-    msx_reset_drive_low ();
-    Delay_Ms (ms);
-    msx_reset_release ();
-}
+/* The cart edge on most MSX2+ machines exposes ~RESET as a read-only
+ * signal (the reset circuit lives inside the mainboard; the cart
+ * edge is either unconnected or input-only). Driving PE4 low here
+ * would not reboot those MSXs anyway, and on some designs it can
+ * damage the mainboard's reset driver.
+ *
+ * PE4 is therefore left as a floating input at boot (Init_Cart below)
+ * and is NEVER driven by Cart_SetMapper_Safe or any other firmware
+ * path. The MSX-side loader's CMD_SOFTRESET slingshot
+ * (loader.c / romloader.c) provides the reboot without touching
+ * PE4. */
 
 /* ------------------------------------------------------------------ */
 /* Shared C-side helpers used by the bank-switching mappers.           */

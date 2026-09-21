@@ -11,13 +11,18 @@
  * (lower than EXTI0 at 0x00, so the cart IRQ always preempts us).
  *
  * Dispatched commands:
- *   PING / HELP / RST [ms] / SRC [SRAM|PSRAM]
+ *   PING / HELP / SRC [SRAM|PSRAM]
  *   LOAD <hexaddr> <hexbytes> / XLOAD <hexaddr> <len> / DUMP <hexaddr> <len>
  *   CAT <path> <addr> [len]
  *
  * LOAD / XLOAD / DUMP target the PSRAM cart image window (8 MiB at
  * 0x80000000). The active mapper (see Cart_SetMapper) interprets reads
  * from this same window.
+ *
+ * No RST command: the firmware never drives MSX ~RESET (PE4 is
+ * read-only on most MSX2+ machines; driving it externally can damage
+ * the mainboard). Reboot is via the MSX-side loader's CMD_SOFTRESET
+ * slingshot (loader.c). PE4 is exposed as a read-only diagnostic.
  */
 
 #include "cli.h"
@@ -183,7 +188,6 @@ static void CLI_HandleLine(char *line)
     else if (CLI_Token(line, "HELP")) {
         printf ("Commands:\r\n");
         printf ("  PING                       - liveness check\r\n");
-        printf ("  RST [ms]                   - pulse MSX reset (decimal, default 100)\r\n");
         printf ("  PE4                        - read current PE4 state (0=low, 1=high)\r\n");
         printf ("  GBASE                      - show served-image base offset in PSRAM window\r\n");
         printf ("  PTEST                      - full-window PSRAM pattern test (DESTRUCTIVE)\r\n");
@@ -359,24 +363,10 @@ static void CLI_HandleLine(char *line)
                 (unsigned)SCC_GetLevel(),
                 Cart_MapperNames[(unsigned)Cart_GetMapper()]);
     }
-    else if (CLI_Token(line, "RST")) {
-        /* RST takes a DECIMAL millisecond count (most users expect this),
-         * unlike LOAD/DUMP which take hex addresses and byte values. */
-        const char *p = line + 3;
-        while (*p == ' ' || *p == '\t') p++;
-        uint32_t ms = 100U;
-        if (*p >= '0' && *p <= '9') {
-            ms = 0U;
-            while (*p >= '0' && *p <= '9') {
-                ms = ms * 10U + (uint32_t)(*p - '0');
-                p++;
-            }
-        }
-        if (ms == 0U) ms = 100U;
-        if (ms > 10000U) ms = 10000U;   /* sanity cap */
-        Cart_AssertMSXReset(ms);
-        printf ("OK %ums\r\n", (unsigned)ms);
-    }
+    /* NOTE: there is intentionally no CLI RST command. Driving MSX
+     * ~RESET externally can damage the mainboard on MSX2+ machines
+     * whose cart-edge ~RESET is read-only; the only reboot path is
+     * the MSX-side loader's CMD_SOFTRESET slingshot (loader.c). */
     else if (CLI_Token(line, "CAT")) {
         /* CAT <path> <psram_hexaddr> [hex_len_bytes] -- copy file into PSRAM.
          * Uses FATFS reads into a small SRAM scratch buffer (512 B) and

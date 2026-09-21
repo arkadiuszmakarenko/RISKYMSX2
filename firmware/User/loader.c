@@ -19,12 +19,14 @@ static uint8_t  s_names[LOADER_MAX_FILES][LOADER_NAME_LEN];
 static uint16_t s_file_count;
 static uint16_t s_dir_index;      /* next file DIR_READ will return */
 
-/* Pending mapper (applied by CMD_RESET so the reset atomically swaps
- * the served ROM). */
+/* Pending mapper (applied by CMD_SOFTRESET so the RAM-resident Z80
+ * slingshot delays before jp 0x0000; the swap happens
+ * pre-jump-from-RAM so BIOS INIT re-probes slots after the new mapper
+ * is live). */
 static Cart_Mapper s_pending_mapper = CART_MAP_NONE;
 
 /* Bytes successfully loaded into PSRAM by the most recent CMD_LOAD_ROM.
- * CMD_SET_MAPPER / CMD_RESET are refused while this is zero, so a
+ * CMD_SET_MAPPER / CMD_SOFTRESET are refused while this is zero, so a
  * failed file open (e.g. SFN mismatch on the stick) can't trap the MSX
  * by switching mappers with a 0xFF-filled PSRAM window. The MSX-side
  * loader checks the 4-byte length returned by LOAD_ROM before going on
@@ -156,8 +158,8 @@ static void cmd_load_rom (const uint8_t *name12) {
      * if the upper bytes are garbage the path looks like
      * "0:/FOO.ROMJUNK" and f_open will find nothing). Bailing early
      * avoids the misleading "f_open failed" print and keeps
-     * s_bytes_loaded at 0 so CMD_SET_MAPPER / CMD_RESET refuse the
-     * cart swap. */
+     * s_bytes_loaded at 0 so CMD_SET_MAPPER / CMD_SOFTRESET refuse
+     * the cart swap. */
     if (strchr (path + 3, '.') == NULL) {
         printf ("LOADER: LOAD_ROM refusing bad name '%s'\r\n", path);
         push_result (0); push_result (0); push_result (0); push_result (0);
@@ -179,7 +181,7 @@ static void cmd_load_rom (const uint8_t *name12) {
 }
 
 /* ------------------------------------------------------------------ */
-/* CMD_SET_MAPPER: remember the mapper for CMD_RESET.                 */
+/* CMD_SET_MAPPER: remember the mapper for CMD_SOFTRESET.             */
 /* ------------------------------------------------------------------ */
 
 static void cmd_set_mapper (uint8_t m) {
@@ -189,12 +191,12 @@ static void cmd_set_mapper (uint8_t m) {
     }
     /* Refuse to latch a PSRAM-backed mapper until a ROM has actually
      * been loaded. The MSX-side loader doesn't gate the menu on the
-     * LOAD_ROM length it read back, so a failed file open (or a stray
-     * reset) would otherwise trap the MSX in a cart window full of
-     * 0xFF (from psram_copy_rom's init fill) with a mapper installed:
-     * every read at 0x4000 returns 0xFF, no 'AB' header, the BIOS
-     * drops to BASIC (best case) or executes 0xFF (RST 38h) in a
-     * tight loop (worst case, with bank-switching mappers). Only the
+     * LOAD_ROM length it read back, so a failed file open would
+     * otherwise trap the MSX in a cart window full of 0xFF (from
+     * psram_copy_rom's init fill) with a mapper installed: every
+     * read at 0x4000 returns 0xFF, no 'AB' header, the BIOS drops
+     * to BASIC (best case) or executes 0xFF (RST 38h) in a tight
+     * loop (worst case, with bank-switching mappers). Only the
      * FLASH mapper is exempt - it serves the flash-resident
      * selector_rom[] image, NOT PSRAM, so an empty PSRAM window
      * doesn't affect it. */
@@ -211,62 +213,72 @@ static void cmd_set_mapper (uint8_t m) {
 }
 
 /* ------------------------------------------------------------------ */
-/* CMD_RESET: apply mapper + pulse the MSX reset line.               */
+/* CMD_SOFTRESET: apply mapper without driving ~RESET.               */
 /* ------------------------------------------------------------------ */
+/* The MSX cart edge has no ~RESET driver on most MSX2+ machines:
+ * the reset circuit lives inside the mainboard and the cart edge is
+ * either unconnected or input-only. Driving PE4 low would damage
+ * some designs and would not reboot the MSX anyway. CMD_SOFTRESET
+ * is therefore the ONLY reboot path.
+ *
+ * Sequence: the MSX-side loader copies a small Z80 slingshot to MSX
+ * RAM at 0xF000 (first thing in main()), then `jp 0xF000`s into it.
+ * The slingshot di's, resets SP/I, runs a bounded delay loop
+ * (~120 ms at 3.58 MHz - plenty for our ~2 ms Cart_SetMapper_Safe +
+ * a generous margin), then `jp 0x0000`. BIOS INIT runs AFTER the
+ * firmware has finished swapping the mapper, so the BIOS re-probes
+ * 0x4000 and finds the new mapper live on the cart bus.
+ *
+ * The firmware never drives ~RESET: same safety gate as the legacy
+ * CMD_RESET (fall back to FLASH if no ROM was loaded, so we never
+ * serve 0xFF from PSRAM with a mapper installed), same SCC-queue
+ * drain on the way out of KONAMISCC, same Cart_SetMapper_Safe() to
+ * close the VTF/g_mapper/bankOffsets race window - just with
+ * hold_msx_reset=0. The Z80 keeps running, fetches the jp 0xF000
+ * from MSX RAM, and stays in RAM for the entire delay (so the cart
+ * swap can't yank executing code out from under the Z80). */
 
-static void cmd_reset (void) {
-    printf ("LOADER: RESET -> mapper %s, pulsing MSX reset\r\n",
+static void cmd_softreset (void) {
+    printf ("LOADER: SOFTRESET -> mapper %s, no ~RESET drive\r\n",
             Cart_MapperNames[(unsigned)s_pending_mapper]);
-    /* Final safety net: never install a PSRAM-backed mapper with no
-     * image. SetMapper would happily wire the VTF slot to e.g. KONAMI,
-     * the handler would then read bankOffsets[] (zeroed) and serve
-     * 0xFF at 0x4000 - the MSX would hang in the BIOS' "search for
-     * AB" loop. Falling back to the flash selector (which serves
-     * selector_rom[] from internal flash, NOT PSRAM) keeps the MSX in
-     * the loader menu so the user can retry the LOAD_ROM. */
+    /* Same safety gate as the (now-removed) CMD_RESET: never install a
+     * PSRAM-backed mapper with no image. Falling back to CART_MAP_FLASH
+     * keeps the MSX in the loader menu so the user can retry the
+     * LOAD_ROM. */
     if (s_pending_mapper == CART_MAP_NONE
         || (s_pending_mapper != CART_MAP_FLASH
             && s_bytes_loaded == 0U)) {
-        printf ("LOADER: RESET aborting - no ROM loaded, "
+        printf ("LOADER: SOFTRESET aborting - no ROM loaded, "
                 "keeping FLASH mapper\r\n");
         s_pending_mapper = CART_MAP_FLASH;
-        /* Even the FLASH mapper swap must go through the safe path -
-         * a sloppy swap while the Z80 is mid-cycle can leave a stale
-         * `~SLTSL` interrupt pending. */
-        (void)Cart_SetMapper_Safe (CART_MAP_FLASH, 1);
-        Delay_Ms (50);
-        Cart_AssertMSXReset_End ();
+        /* The Z80 slingshot will see FLASH install in place; no
+         * ~RESET drive (we never touch PE4). */
+        (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
         return;
     }
 
-    /* If we're LEAVING KONAMISCC, drain any cart writes that are still
-     * in the SCC queue. We want them to apply to the emulator's
-     * register state BEFORE the TIM4 IRQ runs another batch with the
-     * new (non-SCC) mapper as `g_mapper`. Without the flush, the TIM4
-     * IRQ might still apply writes from addresses that are now out of
-     * the cart's range - harmless to bank state but a leftover write
-     * to the SCC that the next game never wanted. */
+    /* Drain SCC queue on the way out of KONAMISCC (prevents a leftover
+     * write from being applied with the new non-SCC mapper as
+     * g_mapper). */
     if (Cart_GetMapper () == CART_MAP_KONAMISCC
         && s_pending_mapper != CART_MAP_KONAMISCC) {
         const uint32_t drained = SCC_FlushQueue ();
         if (drained) {
-            printf ("LOADER: RESET flushed %u queued SCC writes\r\n",
+            printf ("LOADER: SOFTRESET flushed %u queued SCC writes\r\n",
                     (unsigned)drained);
         }
     }
 
-    /* Swap under MSX-reset-hold + IRQ-disabled + bus-quiet + DSB/ISB
-     * fence (see Cart_SetMapper_Safe body for the full list of
-     * hazards this closes). The Z80 never observes a half-applied
-     * mapper swap. */
-    (void)Cart_SetMapper_Safe (s_pending_mapper, 1);
-
-    /* Give the print time to drain, then release the MSX reset line
-     * for a clean power-on-style boot. Using Cart_AssertMSXReset_End
-     * (drive-high then float) instead of a timed pulse, because
-     * Cart_SetMapper_Safe above ALREADY drove PE4 low for us. */
-    Delay_Ms (50);
-    Cart_AssertMSXReset_End ();
+    /* Cart_SetMapper_Safe closes the VTF/g_mapper/bankOffsets race
+     * window (disables EXTI0 + global IRQ, waits for ~SLTSL high,
+     * drives bus off, clears phantom EXTI0 edge, DSB/ISB fence,
+     * re-enables IRQ). The Z80 slingshot in MSX RAM is what actually
+     * reboots - it runs the PSRAM-settling delay itself so the
+     * firmware's idle loop stays free to service CLI + USB while the
+     * MSX waits. The MSX-side `soft_reset()` delay is in
+     * MSXSoftware/RomLoader/romloader.c, between the mbox_cmd ack
+     * and the jp 0xE000. */
+    (void)Cart_SetMapper_Safe (s_pending_mapper);
 }
 
 /* ------------------------------------------------------------------ */
@@ -295,8 +307,8 @@ void Loader_Service (void) {
     case LOADER_CMD_SET_MAPPER:
         cmd_set_mapper (g_loader_mbox.args[0]);
         break;
-    case LOADER_CMD_RESET:
-        cmd_reset ();
+    case LOADER_CMD_SOFTRESET:
+        cmd_softreset ();
         break;
     default:
         break;

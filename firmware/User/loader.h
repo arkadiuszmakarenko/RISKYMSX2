@@ -28,7 +28,16 @@ extern "C" {
 #define LOADER_CMD_DIR_CLOSE  0x02U
 #define LOADER_CMD_LOAD_ROM   0x03U
 #define LOADER_CMD_SET_MAPPER 0x04U
-#define LOADER_CMD_RESET      0x05U
+/* 0x05 was LOADER_CMD_RESET (cart-driven ~RESET pulse). Removed:
+ * driving ~RESET can damage MSXs whose cart-edge reset line is not
+ * designed to be sinked by an external device. Boot path now uses
+ * LOADER_CMD_SOFTRESET exclusively. The slot is intentionally left
+ * empty rather than reused, so old firmware images on a stick don't
+ * silently invoke a half-defined command. */
+#define LOADER_CMD_BOOT_NEXTOR 0x06U  /* reserved (NEXTOR_PLAN §D2b) */
+#define LOADER_CMD_SOFTRESET  0x07U  /* RAM-resident slingshot reboot (no
+                                      * ~RESET drive; safe on MSXs whose
+                                      * reset line is read-only). */
 
 /* Mailbox status bits (MUST match romloader.c). */
 #define LOADER_ST_READY       0x80U

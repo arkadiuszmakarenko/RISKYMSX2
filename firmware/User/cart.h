@@ -130,22 +130,20 @@ Cart_Mapper Cart_GetMapper (void);
 /* Hardened mapper-swap primitive (see Cart_SetMapper_Safe() body in
  * cart.c for the full list of hazards it closes).
  *
- * If hold_msx_reset != 0, the function asserts MSX ~RESET low for the
- * duration of the swap (Z80 is stopped, no in-flight cart cycle), so
- * the new VTF entry + new bankOffsets[] are visible BEFORE the first
- * Z80 bus cycle. The caller MUST release the reset afterwards via
- * Cart_AssertMSXReset_End() (or wait for Cart_AssertMSXReset(ms) to
- * time out). This is the right primitive for the loader's CMD_RESET
- * path and for any boot-time swap.
+ * Disables EXTI0 + global IRQ, waits for ~SLTSL to go high (no
+ * in-flight cart cycle), drives the data bus off, performs the
+ * swap (handler + bankOffsets + g_mapper), clears any phantom
+ * EXTI0 edge latched during the wait, issues a DSB/ISB fence, and
+ * re-enables IRQ.
  *
- * If hold_msx_reset == 0, the function still disables EXTI0 + global
- * IRQ, waits for ~SLTSL to go high (no in-flight cycle), drives the
- * bus off, clears any phantom EXTI0 edge latched during the wait,
- * issues a DSB/ISB fence, and re-enables IRQ. Use this for swap-in-
- * place scenarios where holding the MSX in reset is undesirable.
+ * An earlier version also asserted MSX ~RESET low for the duration
+ * of the swap. That path is REMOVED: most MSX2+ machines expose the
+ * cart-edge ~RESET as read-only and driving it externally can
+ * damage the mainboard. The CMD_SOFTRESET slingshot (running from
+ * MSX RAM) provides the equivalent atomicity without touching PE4.
  *
  * Returns the same value as Cart_SetMapper(). */
-int  Cart_SetMapper_Safe (Cart_Mapper m, uint8_t hold_msx_reset);
+int  Cart_SetMapper_Safe (Cart_Mapper m);
 
 /* Get the base address of the cart image window in PSRAM. Always
  * PSRAM_CART_BASE. Kept for API symmetry with the previous SRAM/PSRAM
@@ -162,22 +160,15 @@ uint32_t Cart_GetImageSize (void);
 
 /* Initialise GPIO + EXTI for the cartridge bus and install a default
  * mapper handler. PSRAM_Init() must have been called first (or the
- * handler reads from an unmapped address and hangs the MSX). */
-void Init_Cart (void);
-
-/* MSX reset (PE4) helpers. The MSX reset line is active LOW.
+ * handler reads from an unmapped address and hangs the MSX).
  *
- *   Cart_AssertMSXReset_Begin  - drive PE4 low immediately and return.
- *                                Call this as the first thing in main()
- *                                so the MSX BIOS waits while we boot.
- *   Cart_AssertMSXReset_End    - release PE4 (drive high, then float)
- *                                so the MSX leaves reset and runs.
- *   Cart_AssertMSXReset(ms)    - legacy one-shot: low for `ms`, then
- *                                release. Still used by the loader's
- *                                CMD_RESET flow. */
-void Cart_AssertMSXReset_Begin (void);
-void Cart_AssertMSXReset_End (void);
-void Cart_AssertMSXReset (uint32_t ms);
+ * NOTE: PE4 (MSX ~RESET) is configured here as a floating input only.
+ * The firmware never drives it (read-only on most MSX2+ machines;
+ * driving it externally can damage the mainboard). See
+ * Cart_SetMapper_Safe for the cart-swap primitive that closes the
+ * race window without touching PE4, and loader.c::cmd_softreset for
+ * the CMD_SOFTRESET reboot path. */
+void Init_Cart (void);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that
@@ -203,8 +194,10 @@ void Cart_EXTI0_Dispatch (void) __attribute__((section(".ramfunc"), noinline,
  * disabled. */
 void CartServiceLoop(void) __attribute__((section(".ramfunc"), noinline));
 
-/* Pulse the MSX ~RESET line (PE4) low for `ms` milliseconds, then release.
- * Used by the CLI's RST command. */
-void Cart_AssertMSXReset(uint32_t ms);
+/* NOTE: there is intentionally no Cart_AssertMSXReset* API in this
+ * header. The firmware never drives MSX ~RESET (PE4 is read-only on
+ * most MSX2+ machines; driving it externally can damage the
+ * mainboard). Reboot is via the MSX-side loader's CMD_SOFTRESET
+ * slingshot (loader.c). */
 
 #endif

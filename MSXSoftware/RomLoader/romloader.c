@@ -39,10 +39,21 @@
  *     CMD_SET_MAPPER (0x04)  args: mapper index (Cart_Mapper enum,
  *            1..10: ROM16k..KONAMISCC; 0=NONE is refused)
  *         -> result: 1 byte, 0 = OK, nonzero = refused
- *     CMD_RESET      (0x05)  no args
- *         Firmware asserts the MSX reset line.  No result; the MSX
- *         restarts and the BIOS re-reads the cart header - by then
- *         the firmware serves the loaded ROM with the new mapper.
+ *     CMD_SOFTRESET  (0x07)  no args
+ *         Software-only reboot. The firmware swaps the mapper WITHOUT
+ *         driving ~RESET (read-only on most MSX2+ machines; driving
+ *         it externally can damage the mainboard). The MSX then
+ *         executes a small Z80 slingshot from MSX RAM at 0xF000
+ *         (installed by soft_reset_install() at boot). The slingshot
+ *         delays ~120 ms before `jp 0x0000` so the firmware's
+ *         Cart_SetMapper_Safe completes BEFORE BIOS INIT re-probes
+ *         the cart bus.
+ *
+ *     0x05 was formerly CMD_RESET (cart-driven ~RESET pulse). That
+ *     command is GONE because driving ~RESET externally can damage
+ *     some MSX designs. The slot is intentionally left empty rather
+ *     than reused, so old firmware images on a stick don't silently
+ *     invoke a half-defined command.
  *
  *   The firmware side of this protocol lives in the LOADER mapper
  *   handler (Cart_EXTI0_Loader_Handler in cart.c, which services the
@@ -78,7 +89,23 @@
 #define CMD_DIR_CLOSE   0x02U
 #define CMD_LOAD_ROM    0x03U
 #define CMD_SET_MAPPER  0x04U
-#define CMD_RESET       0x05U
+/* 0x05 was CMD_RESET (cart-driven ~RESET pulse). REMOVED - driving
+ * ~RESET externally can damage some MSX designs. Use CMD_SOFTRESET. */
+#define CMD_BOOT_NEXTOR 0x06U   /* reserved (NEXTOR_PLAN §D2b) */
+#define CMD_SOFTRESET   0x07U   /* RAM-resident slingshot reboot.
+                                  * Use this when the MSX's ~RESET is
+                                  * read-only on the cart edge: the
+                                  * firmware swaps the mapper without
+                                  * driving ~RESET, waits ~50 ms for
+                                  * the cart bus / PSRAM to settle,
+                                  * then signals DONE. The MSX-side
+                                  * slingshot (at MSX RAM 0xE000)
+                                  * then reads the cart header via RDSLT
+                                  * and invokes the cart's INIT via
+                                  * CALSLT - bypasses the BIOS cold-boot
+                                  * probe entirely (which on most MSX2+
+                                  * BIOSes does NOT re-probe the cart
+                                  * even with WBOOT=0). */
 
 /* mapper indices - MUST match Cart_Mapper in firmware/User/cart.h */
 #define MAP_NONE        0U
@@ -375,10 +402,224 @@ static uint16_t choose(const char *title, const char *const *names,
     }
 }
 
+/* ---- soft reset slingshot --------------------------------------------
+ *
+ * CMD_SOFTRESET reboots the MSX WITHOUT driving ~RESET (necessary on
+ * MSX machines whose cart-edge ~RESET is read-only). The firmware
+ * still swaps the mapper; we still need to let that swap finish
+ * before BIOS INIT re-probes the cart. We can't just `jp 0x0000`
+ * from the loader because at that point:
+ *   1. The mapper has not been swapped yet (firmware's cmd_softreset
+ *      runs after we send the mailbox command).
+ *   2. Even after the swap, we cannot rely on the cart bus serving the
+ *      code we want to execute - the new mapper is being installed
+ *     ~concurrently, and our `jp 0x0000` would fetch a byte off the
+ *      cart bus while the swap is in flight.
+ *
+ * Solution: copy a Z80 slingshot to MSX RAM at 0xE000, then
+ * `jp 0xE000` into it.  Everything from that jp onwards runs from MSX
+ * RAM, so the cart swap cannot yank executing code out from under
+ * the Z80.
+ *
+ *  *** WBOOT CLEAR + jp 0x0000 - DOES NOT WORK on user's MSX ***
+ * An earlier version of the slingshot only wrote 0 to the MSX
+ * system variable WBOOT at RAM 0xF3B0 (forcing a BIOS cold-boot
+ * re-probe) and then did `jp 0x0000`. Symptom on the user's MSX
+ * (no LA activity at 0x4000 after the slingshot ran):
+ *   - the BIOS at 0x0000 did NOT re-probe the cart even with
+ *     WBOOT cleared. Most MSX2+ BIOSes have RST 0 enter a
+ *     path that DOES NOT do cold-boot slot expansion on its
+ *     own - they trust the SLTTBL in system RAM, which was
+ *     populated during the initial firmware-boot probe and
+ *     shows "no cart in this slot" because the FLASH mapper
+ *     was active then but the BIOS state has long since
+ *     moved to BASIC.
+ *   - Without a true hardware reset, the BIOS just returns to
+ *     BASIC warm-start. Cart stays invisible.
+ *
+ *  *** Direct cart INIT invocation (current implementation) ***
+ * Instead of asking the BIOS to re-probe, the slingshot invokes
+ * the cart's INIT routine directly via the MSX BIOS CALSLT
+ * (0x001C) entry point. Steps:
+ *   1. Read cart header bytes 0x4000-0x4003 from slot 1 via
+ *      RDSLT (0x000C). Check 0x4000='A', 0x4001='B'. If not,
+ *      try slot 2 the same way.
+ *   2. Read INIT_LO = 0x4002, INIT_HI = 0x4003. Form the cart's
+ *      INIT absolute address = INIT_HI:INIT_LO (little-endian
+ *      word stored in the cart header).
+ *   3. Set IX = INIT address, IY high byte = slot number,
+ *      EI (so the cart's INIT can use interrupts),
+ *      call CALSLT. The cart's INIT runs and takes over.
+ *
+ * This bypasses the BIOS entirely: the cart's INIT is exactly
+ * what the BIOS would have called anyway. As a last resort,
+ * if neither slot 1 nor slot 2 has "AB" at 0x4000, the
+ * slingshot falls back to `jp 0x0000` (letting the BIOS
+ * warm-start run - not useful but harmless).
+ *
+ * Slingshot is 130 bytes. Install target moved from 0xF000
+ * to 0xE000 (page 3, well below the BIOS system area at
+ * 0xF380, above SDCC's _DATA at 0xC000).
+ */
+
+/* Hand-encoded Z80 (NOT a function - the byte stream is what we want
+ * to copy verbatim into MSX RAM). Assembled with sdasz80 from
+ * /tmp/slingshot.s; bytes copied here verbatim. 130 bytes total. */
+static const unsigned char soft_reset_code[130] = {
+    /* 0x00: prologue (12 bytes) */
+    0xF3,                   /* di                              */
+    0x3E, 0x00,             /* ld a, 0                         */
+    0xED, 0x47,             /* ld i, a                         */
+    0x31, 0xFE, 0xFF,       /* ld sp, 0xFFFE                   */
+    0x21, 0xB0, 0xF3,       /* ld hl, 0xF3B0 (WBOOT, harm=ok) */
+    0x36, 0x00,             /* ld (hl), 0                      */
+    /* 0x0D: try slot 1 - read 0x4000 */
+    0x26, 0x40,             /* ld h, 0x40                      */
+    0x2E, 0x00,             /* ld l, 0x00                      */
+    0x3E, 0x01,             /* ld a, 0x01 (slot 1)             */
+    0xCD, 0x0C, 0x00,       /* call 0x000C (RDSLT)             */
+    0xFE, 0x41,             /* cp 'A'                          */
+    0x20, 0x2C,             /* jr nz, +0x2C -> try_slot_2      */
+    /* 0x1A: read 0x4001 */
+    0x26, 0x40,
+    0x2E, 0x01,
+    0x3E, 0x01,
+    0xCD, 0x0C, 0x00,
+    0xFE, 0x42,             /* cp 'B'                          */
+    0x20, 0x1F,             /* jr nz, +0x1F -> try_slot_2      */
+    /* 0x27: read 0x4002 (INIT_LO) -> E */
+    0x26, 0x40,
+    0x2E, 0x02,
+    0x3E, 0x01,
+    0xCD, 0x0C, 0x00,
+    0x5F,                   /* ld e, a                         */
+    /* 0x31: read 0x4003 (INIT_HI) -> D */
+    0x26, 0x40,
+    0x2E, 0x03,
+    0x3E, 0x01,
+    0xCD, 0x0C, 0x00,
+    0x57,                   /* ld d, a                         */
+    /* 0x3B: IX=DE; IY=slot<<8; EI; CALSLT */
+    0xD5,                   /* push de                         */
+    0xDD, 0xE1,             /* pop ix                          */
+    0xFD, 0x21, 0x00, 0x01, /* ld iy, 0x0100 (slot 1)         */
+    0xFB,                   /* ei                              */
+    0xCD, 0x1C, 0x00,       /* call 0x001C (CALSLT)            */
+    /* 0x46: try slot 2 - read 0x4000 */
+    0x26, 0x40,
+    0x2E, 0x00,
+    0x3E, 0x02,             /* ld a, 0x02 (slot 2)             */
+    0xCD, 0x0C, 0x00,
+    0xFE, 0x41,
+    0x20, 0x2C,             /* jr nz, +0x2C -> fail           */
+    /* 0x53: read 0x4001 */
+    0x26, 0x40,
+    0x2E, 0x01,
+    0x3E, 0x02,
+    0xCD, 0x0C, 0x00,
+    0xFE, 0x42,
+    0x20, 0x1F,             /* jr nz, +0x1F -> fail           */
+    /* 0x60: read 0x4002 (INIT_LO) -> E */
+    0x26, 0x40,
+    0x2E, 0x02,
+    0x3E, 0x02,
+    0xCD, 0x0C, 0x00,
+    0x5F,
+    /* 0x6A: read 0x4003 (INIT_HI) -> D */
+    0x26, 0x40,
+    0x2E, 0x03,
+    0x3E, 0x02,
+    0xCD, 0x0C, 0x00,
+    0x57,
+    /* 0x74: IX=DE; IY=slot<<8; EI; CALSLT */
+    0xD5,
+    0xDD, 0xE1,
+    0xFD, 0x21, 0x00, 0x02, /* ld iy, 0x0200 (slot 2)         */
+    0xFB,
+    0xCD, 0x1C, 0x00,
+    /* 0x7F: fall back to jp 0x0000 */
+    0xC3, 0x00, 0x00
+};
+
+/* Copy the slingshot from ROM-resident soft_reset_code[] into MSX RAM
+ * at 0xE000. SDCC places const arrays in _CODE (0x4020+), so we have
+ * to byte-copy them - the cart bus is the only way to read them, and
+ * the cart handler is what we're trying to *swap out*, so any code
+ * that touches the cart from this point on is unsafe. The copy goes
+ * via 'lxi h,<src>; lxi d,0E000h; mvi c,N; ld a,(hl); ldi; dcr c;
+ * jnz' etc.; easier to emit the loop inline in __asm and have SDCC
+ * not touch it.
+ *
+ * The slingshot size (130 bytes) is a compile-time constant kept in
+ * sync with soft_reset_code[]. If you edit the array, edit
+ * `ld c, #130` here too.
+ *
+ * We also DI at the top - the function itself returns (no caller
+ * resumes us).
+ */
+static void soft_reset_install(void) __naked
+{
+	__asm
+		;; di - mirrors crt0; belt and braces
+		di
+		;; source = soft_reset_code (resolved by SDCC at link time)
+		ld	hl, #_soft_reset_code
+		;; dest   = 0xE000
+		ld	de, #0xE000
+		;; count  = 130 (keep in sync with soft_reset_code[])
+		ld	c, #130
+		;; copy loop: ld a,(hl); ld (de),a; inc hl; inc de; dec c; jr nz,-5
+	loop$:
+		ld	a, (hl)
+		ld	(de), a
+		inc	hl
+		inc	de
+		dec	c
+		jr	nz, loop$
+		;; Function returns - the slingshot at 0xE000 is what
+		;; soft_reset() enters, not this function. We MUST return
+		;; to the C caller (main()), which continues to set up the
+		;; menu etc. until the user picks a file/mapper.
+		ret
+	__endasm;
+}
+
+/* Enter the slingshot at 0xE000. Naked: emits exactly `jp 0xE000`,
+ * nothing else. After this jp, the Z80 executes ONLY code from MSX
+ * RAM - never the cart - until the slingshot's CALSLT invokes the
+ * cart's INIT routine (which then runs from the new cart mapper).
+ * Call ONLY after CMD_SOFTRESET has been issued and the firmware
+ * has had at least a few ms to start its mapper swap
+ * (cmd_softreset's Cart_SetMapper_Safe takes ~2 ms; the slingshot
+ * itself runs in <1 ms total because it just reads the cart header
+ * via RDSLT and CALSLTs into the INIT - no delay loop needed).
+ *
+ * The settling delay (~50 ms) for the cart bus + PSRAM to settle
+ * after the firmware's mapper swap is in firmware/User/loader.c
+ * ::cmd_softreset, BEFORE the firmware marks the mailbox done.
+ * The MSX-side mbox_wait_done() blocks during it. If we need
+ * more delay in the future, increase it there rather than adding
+ * a delay loop to the slingshot (the slingshot is already at its
+ * size budget for 0xE000). */
+static void soft_reset(void) __naked
+{
+	__asm
+		jp	0xE000
+	__endasm;
+}
+
 /* ---- main ----------------------------------------------------------- */
 
 int main(void)
 {
+	/* Install the soft-reset slingshot to MSX RAM at 0xE000 BEFORE
+	 * any other work. The slingshot must be in place by the time
+	 * soft_reset() is called at the end of main(); installing it
+	 * here means a stray early reset (firmware crash, USB
+	 * disconnect during dir scan, etc.) still has a working
+	 * slingshot to fall back on. */
+	soft_reset_install();
+
 	chgmod(0);		/* SCREEN 0, 40 columns */
 
 	cls();
@@ -459,11 +700,48 @@ int main(void)
 		}
 	}
 
-	/* ---- reset the MSX; firmware serves the new ROM on boot ---- */
-	print("RESET...");
-	mbox_push(CMD_RESET);
+	/* ---- reboot the MSX; firmware serves the new ROM on boot ----
+	 *
+	 * CMD_SOFTRESET is the ONLY reboot path. There is no CMD_RESET:
+	 * driving MSX ~RESET externally can damage the mainboard on
+	 * MSXs whose cart-edge reset line is read-only.
+	 *
+	 * Sequence:
+	 *   1. mbox_cmd waits for the firmware to finish
+	 *      Cart_SetMapper_Safe (~2 ms). The firmware-side
+	 *      cmd_softreset returns IMMEDIATELY after the swap - no
+	 *      firmware-side delay, so the firmware's main loop stays
+	 *      free to service CLI + USB.
+	 *   2. delay_ms(50) gives the PSRAM + cart bus time to settle
+	 *      after the mapper swap. Without this, some games fail to
+	 *      boot on the user's MSX: the cart's INIT runs but reads
+	 *      garbage from 0x4000 because the PSRAM controller hasn't
+	 *      settled after the firmware's large DMA write (LOAD_ROM)
+	 *      followed by the mapper swap.
+	 *   3. print("BOOT...") confirms we got this far.
+	 *   4. soft_reset() emits `jp 0xE000` and the Z80 enters the
+	 *      slingshot. The slingshot reads the cart header via RDSLT
+	 *      and invokes the cart's INIT via CALSLT - bypasses the
+	 *      MSX BIOS cold-boot probe entirely (which on most MSX2+
+	 *      BIOSes does NOT re-probe the cart even with WBOOT=0).
+	 *
+	 * If the firmware is missing/broken (mailbox write no-ops),
+	 * mbox_wait_done never sees ST_DONE and we spin forever in
+	 * the wait loop - the user sees "BOOT..." but the screen
+	 * doesn't change. Press reset on the MSX to recover (the
+	 * loader menu comes back because CART_MAP_FLASH was never
+	 * touched). */
+	print("BOOT...");
+	mbox_cmd(CMD_SOFTRESET, 0, 0);
+	delay_ms(50);
+	soft_reset();
 
-	/* If the firmware is not there, the write above silently no-ops;
-	 * park here (interrupts are off, so HALT would need an ei). */
+	/* soft_reset() never returns; the slingshot jp's to 0x0000 which
+	 * never comes back to main(). The for(;;) is defensive in case
+	 * the firmware's reply signals CMD_SOFTRESET handled the FLASH
+	 * fallback path (s_pending_mapper was NONE) and the slingshot's
+	 * jp 0x0000 re-booted into the loader menu - we'd see this loop
+	 * only if soft_reset() somehow returned without jp'ing, which
+	 * the naked inline asm cannot do. */
 	for (;;) { }
 }

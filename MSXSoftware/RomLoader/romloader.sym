@@ -10,34 +10,34 @@ Symbol Table
     ___sdcc_enter_ix                                               ****** GX
   0 ___str_0                                                       0003F0 R
   0 ___str_1                                                       0003F5 R
-  0 ___str_10                                                      000674 R
-  0 ___str_11                                                      000680 R
-  0 ___str_12                                                      000688 R
-  0 ___str_13                                                      000691 R
-  0 ___str_14                                                      000696 R
-  0 ___str_15                                                      00069C R
-  0 ___str_16                                                      0006A6 R
-  0 ___str_17                                                      0006B5 R
-  0 ___str_18                                                      0006CE R
-  0 ___str_19                                                      0006E9 R
+  0 ___str_10                                                      00071C R
+  0 ___str_11                                                      000728 R
+  0 ___str_12                                                      000730 R
+  0 ___str_13                                                      000739 R
+  0 ___str_14                                                      00073E R
+  0 ___str_15                                                      000744 R
+  0 ___str_16                                                      00074E R
+  0 ___str_17                                                      00075D R
+  0 ___str_18                                                      000776 R
+  0 ___str_19                                                      000791 R
   0 ___str_2                                                       0003F8 R
-  0 ___str_20                                                      000708 R
-  0 ___str_21                                                      000728 R
-  0 ___str_22                                                      00073F R
-  0 ___str_23                                                      000748 R
-  0 ___str_24                                                      00074E R
-  0 ___str_25                                                      000756 R
-  0 ___str_26                                                      00075F R
-  0 ___str_27                                                      000768 R
-  0 ___str_28                                                      00076B R
-  0 ___str_29                                                      000789 R
+  0 ___str_20                                                      0007B0 R
+  0 ___str_21                                                      0007D0 R
+  0 ___str_22                                                      0007E7 R
+  0 ___str_23                                                      0007F0 R
+  0 ___str_24                                                      0007F6 R
+  0 ___str_25                                                      0007FE R
+  0 ___str_26                                                      000807 R
+  0 ___str_27                                                      000810 R
+  0 ___str_28                                                      000813 R
+  0 ___str_29                                                      000831 R
   0 ___str_3                                                       0003FB R
   0 ___str_4                                                       0003FE R
-  0 ___str_5                                                       000633 R
-  0 ___str_6                                                       000658 R
-  0 ___str_7                                                       00065F R
-  0 ___str_8                                                       000666 R
-  0 ___str_9                                                       00066D R
+  0 ___str_5                                                       0006DB R
+  0 ___str_6                                                       000700 R
+  0 ___str_7                                                       000707 R
+  0 ___str_8                                                       00070E R
+  0 ___str_9                                                       000715 R
     __divuint                                                      ****** GX
     __moduint                                                      ****** GX
   0 _chgmod                                                        00002D R
@@ -46,9 +46,9 @@ Symbol Table
   0 _cls                                                           0000FD R
   0 _delay_ms                                                      000102 R
   0 _fetch_file_list                                               0001A6 R
-  0 _main                                                          000421 GR
-  1 _main_file_ptrs_65537_68                                       000682 R
-  0 _main_mapper_names_65539_76                                    000644 R
+  0 _main                                                          000435 GR
+  1 _main_file_ptrs_65537_72                                       000682 R
+  0 _main_mapper_names_65539_80                                    0006EC R
   0 _mbox                                                          000049 R
   0 _mbox_cmd                                                      00005F R
   0 _mbox_pop                                                      00004B R
@@ -65,16 +65,19 @@ Symbol Table
 
   1 _s_files                                                       000000 R
   0 _snsmat                                                        000000 R
+  0 _soft_reset                                                    000432 R
+  0 _soft_reset_code                                               000659 R
+  0 _soft_reset_install                                            000421 R
   0 _wait_any_key                                                  000194 R
   0 _wait_arrow                                                    000110 R
-
+  0 loop$                                                          00042A R
 
 ASxxxx Assembler V02.00 + NoICE + SDCC mods  (Zilog Z80 / Hitachi HD64180 / ZX-Next / eZ80), page 3.
 Hexadecimal [24-Bits]
 
 Area Table
 
-   0 _CODE                                      size    792   flags    0
+   0 _CODE                                      size    839   flags    0
    1 _DATA                                      size    782   flags    0
    2 _INITIALIZED                               size      0   flags    0
    3 _DABS                                      size      0   flags    8

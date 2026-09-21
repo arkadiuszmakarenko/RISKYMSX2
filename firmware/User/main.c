@@ -45,13 +45,14 @@ int main (void) {
     USART_Printf_Init (921600);
     PWR_VDD18LevelConfig(PWR_VDD18_Level1);
 
-    /* Hold the MSX in reset IMMEDIATELY so its BIOS waits while the
-     * firmware finishes booting. The cart must be fully armed before
-     * the MSX sees its first rising edge on ~RESET, otherwise the
-     * BIOS probes 0x4000 with no slot active and falls through to
-     * BASIC. Cart_AssertMSXReset_Begin drives PE4 low; we keep it low
-     * through the rest of boot and only release at the end. */
-   // Cart_AssertMSXReset_Begin ();
+    /* Init_Cart configures PE4 as a floating input - the firmware
+     * never drives MSX ~RESET (read-only on most MSX2+ machines;
+     * driving it can damage the mainboard). The MSX is therefore
+     * running while we boot; its BIOS will probe 0x4000 as soon as
+     * we enable GPIO clocks. Init_Cart -> Cart_SetMapper(FLASH)
+     * below gets the flash selector armed before any cart access
+     * can land, so the BIOS reads the loader ROM and parks there
+     * until it gets a CMD_SOFTRESET. */
     Init_Cart ();
     SCC_Init ();
     Cart_SetMapper (CART_MAP_FLASH);
@@ -71,14 +72,12 @@ int main (void) {
      * main loop (CLI_Service below), never from the IRQ. */
     CLI_Init ();
 
-    Cart_AssertMSXReset_End ();
-
     printf ("\r\n=== boot complete ===\r\n");
 
     /* Idle loop: service CLI commands + the ROM-loader mailbox, sleep
      * between interrupts.  Loader_Service drains any command the MSX
      * posted through the cart mailbox (dir listing, file load, mapper
-     * switch, reset). */
+     * switch, soft-reset). */
     for (;;) {
         CLI_Service ();
         Loader_Service ();
