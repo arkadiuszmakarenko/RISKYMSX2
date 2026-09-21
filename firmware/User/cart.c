@@ -2,99 +2,24 @@
 #include "psram.h"
 #include "scc.h"
 #include "loader.h"
+#include "terminal.h"
 #include "ch32v4x7.h"
 #include "debug.h"
 
 #pragma GCC push_options
 #pragma GCC optimize("Ofast")
 
-/*
- * Cart emulation for RISKYMSX2 (CH32V407V).
- *
- * One PSRAM-backed 8 MiB image window at PSRAM_CART_BASE (0x80000000).
- * The active mapper is selected at runtime; the matching EXTI0 handler
- * is installed in the PFIC VTF slot by Cart_SetMapper().
- *
- * Two classes of mapper:
- *
- *   1. Simple ROM (no bank-switching writes)
- *      ROM16k, ROM32k, ROM48k
- *      -> Hand-scheduled asm handlers (Cart_EXTI0_ROM16k_Handler, etc.)
- *         that mirror the structure of the original Cart_EXTI0_PSRAM_Handler
- *         in this file. The bias is folded into an immediate so the
- *         handler needs zero state from RAM. PSRAM read latency is
- *         hidden by reading the byte BEFORE enabling the data-bus
- *         drivers.
- *
- *   2. Bank-switching mappers (Konami, ASCII, NEO)
- *      -> C handlers (RunKonami, RunKonamiNOSCC, RunKonamiSCC,
- *         Run8kASCII, Run16kASCII, RunNEO8, RunNEO16) that read bank
- *         state from `s_state` in zero-wait-state SRAM. Konami/ASCII/
- *         NEO handlers are reached via the trampoline
- *         Cart_Banked_Dispatch (one shared VTF entry). ASCII8k and
- *         ASCII16k additionally have hand-scheduled asm twins
- *         (Cart_EXTI0_ASCII8k_Handler / Cart_EXTI0_ASCII16k_Handler)
- *         installed as direct VTF entries to skip the dispatcher hop
- *         on those hot paths.
- *         Reads hit PSRAM
- *         (~30 cycle latency); the Z80's data sample point still has
- *         comfortable margin because EXTI0 fires on the falling edge
- *         of SLTSL which precedes ~RD by several T-states.
- *
- * NOTE: Cart_EXTI0_KonamiNOSCC_Handler still exists as a hand-
- * scheduled asm twin of RunKonamiNOSCC (see its definition near the
- * bottom of this file), but KONAMISCC + KONAMINOSCC are routed
- * through Cart_Banked_Dispatch like every other C handler. The asm
- * version was found unreliable on Metal Gear 2 / >256 KiB Konami
- * carts - the C body uses the exact v303 bank-bias formula and is
- * the proven path; the asm body is preserved for reference / future
- * debug but is NOT installed in the VTF slot by Cart_SetMapper.
- *
- * SCC: KONAMISCC (Konami-with-SCC, port of the legacy v303 mapper)
- *       banks like KONAMINOSCC but routes the 0x9800..0x98FF window
- *       to the SCC emulator (scc.c / emu2212) - see RunKonamiSCC.
- *
- * Mapper selection lives in `g_mapper`. Cart_SetMapper() writes both
- * `g_mapper` and the VTF slot atomically relative to the Z80 bus
- * (the VTF slot rewrite is a single register write; g_mapper is only
- * read at the start of an invocation, never mid-cycle).
- */
-
-/* ------------------------------------------------------------------ */
-/* Cart state, in zero-wait-state SRAM. The bank-switching handlers    */
-/* mutate this struct. Field layout chosen to keep hot fields in the   */
-/* first 16 bytes (one cache line / one lbu window).                    */
-/* ------------------------------------------------------------------ */
 
 struct MSXState {
     uint32_t bankOffsets[16]; /* bank bias = (page * bankSize) - (Z80 - 0x4000) */
 } s_state;
 
-/* Active mapper. Read by the EXTI0 dispatcher trampoline (Cart_EXTI0_
- * Dispatch, below) on every IRQ entry. Writes happen only inside
- * Cart_SetMapper() which is called from the main loop, never from the
- * IRQ, so the dispatcher's read is race-free relative to mapper swaps. */
+
 volatile Cart_Mapper g_mapper = CART_MAP_NONE;
 
-/* Pointer to s_state used by the bank-switching handlers. Decoupled
- * from `&s_state` so a future port can relocate the state without
- * touching every handler. */
 static struct MSXState *const g_state = &s_state;
-
-/* Active EXTI0 handler trampoline address (PFIC VTF slot 0). Cart_
- * SetMapper() rewrites this. The trampoline reads g_mapper and jumps
- * to the right Run<Mapper>() function - ONE trampoline serves all
- * bank-switching mappers. The simple-ROM mappers get their own VTF
- * entry directly so the hot path is one indirect jump, not two. */
 static void Cart_Banked_Dispatch (void) __attribute__((section(".ramfunc"), noinline,
                                                          interrupt("WCH-Interrupt-fast")));
-
-/* Per-mapper C handlers. Each is called from Cart_Banked_Dispatch
- * via a normal jal. They are PLAIN C functions (no interrupt
- * attribute) - the interrupt prologue/epilogue (mret) lives in
- * Cart_Banked_Dispatch, which is the actual VTF entry point.
- * KONAMINOSCC also has a hand-scheduled asm twin installed directly
- * via SetVTFIRQ - see Cart_EXTI0_KonamiNOSCC_Handler below. */
 static void RunKonamiNOSCC (void) __attribute__((section(".ramfunc"), noinline));
 static void RunKonami  (void) __attribute__((section(".ramfunc"), noinline));
 static void RunKonamiSCC (void) __attribute__((section(".ramfunc"), noinline));
@@ -103,37 +28,11 @@ static void Run16kASCII(void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO8    (void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO16   (void) __attribute__((section(".ramfunc"), noinline));
 
-/* KONAMISCC SCC-queue toggle (2026-09-19 isolation test).
- *
- * Compile-time: default 1 (queue enabled, normal SCC operation).
- * Set to 0 from the build (`make rebuild KONAMISCC_SCC_QUEUE=0`) to
- * compile KONAMISCC with the SCC_QueueWrite call stubbed, leaving
- * the handler byte-for-byte equivalent to RunKonamiNOSCC apart from
- * the missing queue push.
- *
- * Why: KONAMISCC freezes on >256 KiB carts even after the page-
- * filter + WR-stale fixes, while KONAMINOSCC (the same logic minus
- * the SCC path) boots Metal Gear 2 (512 KiB) cleanly. To isolate
- * whether the freeze is in the Konami bank-switching logic or in
- * the SCC integration, run the same cart with KONAMISCC_SCC_QUEUE=0
- * and the queue call commented out. If it boots, the bug is in the
- * SCC path (init, queue, or DAC/TIM). If it still freezes, the bug
- * is in the cart-init / mapper-install path that differs between
- * KONAMISCC and KONAMINOSCC (the only such diff is SCC_Init() at
- * mapper install time - which would then be the suspect). */
 #ifndef KONAMISCC_SCC_QUEUE
 #define KONAMISCC_SCC_QUEUE 1
 #endif
 
-/* Hand-scheduled asm handlers. One per mapper that needs the tightest
- * read latency (ROM16/32/48, ASCII8k, ASCII16k) - each gets its own
- * VTF slot entry so Cart_SetMapper() picks it directly, with no
- * intermediate dispatch.
- *
- * Cart_EXTI0_KonamiNOSCC_Handler below is also defined and marked
- * VTF-installable, but KONAMISCC / KONAMINOSCC are intentionally
- * routed through Cart_Banked_Dispatch -> RunKonamiNOSCC (the C
- * handler) instead. Kept here as a reference / debug aid. */
+
 void Cart_EXTI0_KonamiNOSCC_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                             interrupt("WCH-Interrupt-fast"))) __attribute__((unused));
 void Cart_EXTI0_ASCII8k_Handler (void) __attribute__((section(".ramfunc"), noinline,
@@ -147,9 +46,19 @@ void Cart_EXTI0_ROM32k_Handler (void) __attribute__((section(".ramfunc"), noinli
 void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                        interrupt("WCH-Interrupt-fast")));
 
+
 /* Embedded ROM-selector image (flash-resident, generated from
  * MSXSoftware/RomLoader/selector.bin). */
 extern const uint8_t selector_rom[];
+
+/* Embedded terminal ROM image (flash-resident, generated from
+ * MSXSoftware/RomLoader/terminal.bin). Served by CART_MAP_TERMINAL
+ * via Cart_EXTI0_Terminal_Handler. terminal_rom[] is sized to fit
+ * just the actually-used bytes (~256 bytes: 0x4000..0x40FF) - the
+ * rest of the 32 KiB cart window is floating-bus (0xFF) since the
+ * MSX-side terminal program never fetches from 0x4100..0xBFFF. */
+extern const uint8_t terminal_rom[];
+extern const uint32_t terminal_rom_len;
 
 /* Flash-selector mapper: serves the embedded ROM-selector image
  * (selector_rom[]) for ordinary cart reads, and decodes the mailbox
@@ -160,6 +69,17 @@ extern const uint8_t selector_rom[];
  * selector. */
 void Cart_EXTI0_Flash_Handler (void) __attribute__((noinline,
                                                      interrupt("WCH-Interrupt-fast")));
+
+/* Terminal mapper: serves the embedded terminal ROM (terminal_rom[])
+ * for ordinary cart reads, and decodes the v303-style 3-byte mailbox
+ * window 0x7FFD/0x7FFE/0x7FFF. The MSX-side program (MSXSoftware/
+ * RomLoader/asm/terminal.asm) drives the screen and forwards keystrokes
+ * on 0x7FFD; the firmware hosts the menu logic (file list, ROM load,
+ * mapper select) via the FIFO at 0x7FFF. Kept in flash: the cart
+ * flash path is zero-wait, and the boot path benefits from having the
+ * terminal ROM live before PSRAM is even initialised. */
+void Cart_EXTI0_Terminal_Handler (void) __attribute__((noinline,
+                                                        interrupt("WCH-Interrupt-fast")));
 
 /* No-mapper fallback: just clears the pending bit and releases the bus.
  * The Z80 reads 0xFF (floating bus). */
@@ -183,6 +103,7 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "NEO16",
     "KONAMISCC",
     "FLASH",
+    "TERMINAL",
 };
 
 uint32_t Cart_GetImageBase (void) { return PSRAM_CART_BASE; }
@@ -292,6 +213,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         && m != CART_MAP_ROM32k
         && m != CART_MAP_ROM48k
         && m != CART_MAP_FLASH
+        && m != CART_MAP_TERMINAL
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -320,6 +242,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
     case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
+    case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     default:                   return -1;
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
@@ -1741,6 +1664,153 @@ void Cart_EXTI0_Flash_Handler (void) {
         }
         /* Other writes: ignore (the loader never writes elsewhere
          * through the cart window). */
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+        return;
+    }
+
+    /* Neither RD nor WR asserted - spurious; release. */
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    GPIOB->CFGHR = CART_BUS_OFF;
+}
+
+/* ------------------------------------------------------------------ */
+/* Terminal mapper: serve the embedded terminal ROM (terminal_rom[])  */
+/* for ordinary cart reads; decode the v303-style 3-byte mailbox      */
+/* window 0x7FFD/0x7FFE/0x7FFF.                                       */
+/* ------------------------------------------------------------------ */
+/*
+ * The MSX-side terminal program (MSXSoftware/RomLoader/asm/terminal.asm)
+ * is a port of v303'smsxterminal.asm. Its 32 KiB image lives in flash
+ * (terminal_rom[]). The cart-window contract is:
+ *
+ *   0x4000..0x7FFF  : the terminal ROM (32 KiB at 0x4000, accessed
+ *                     directly - identical layout to the FLASH mapper)
+ *   0x7FFD  WRITE   : MSX -> firmware keyboard FIFO (push 1 byte)
+ *   0x7FFE  WRITE   : MSX -> firmware control byte
+ *                        0x00 = "show the menu / stay in terminal"
+ *                        0x04 = "user held GRPH - skip terminal, boot
+ *                                the cart image straight away"
+ *                        0x03 = "user chose to launch the cart image"
+ *   0x7FFF  READ    : firmware -> MSX output FIFO (pop 1 byte)
+ *                        0x00 = empty (no byte to print, MSX loops)
+ *                        0x01..0xFF = printable / control byte to print
+ *                        0x04 = "move the cursor" (followed by reading
+ *                               X then Y on the FIFO)
+ *                        0x03 = "boot the cart image"
+ *
+ * terminal.c owns the menu state machine and pumps bytes into
+ * g_term_mbox.out_fifo; Cart_EXTI0_Terminal_Handler drains that FIFO
+ * via reads at 0x7FFF and pushes keystrokes from 0x7FFD writes into
+ * g_term_mbox.kbd_fifo. The control byte at 0x7FFE is latched into
+ * g_term_mbox.control; terminal.c polls that flag and acts on it.
+ *
+ * Mailbox storage is in zero-wait-state SRAM. terminal.c and the cart
+ * IRQ handler share it through the same kind of SPSC discipline used
+ * by the FLASH loader mailbox.
+ */
+
+#define TERM_KBD_FIFO_DEPTH  16U
+#define TERM_OUT_FIFO_DEPTH  2048U
+
+/* TerminalMailbox struct + g_term_mbox definition live in terminal.h /
+ * terminal.c. cart.c just touches the fields through the extern decl
+ * below. */
+
+extern TerminalMailbox g_term_mbox;
+
+void Cart_EXTI0_Terminal_Handler (void) {
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl = GPIOE->INDR;
+
+    /* Late entry: SLTSL already high, this cycle is already over. */
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
+     * bail if SLTSL rises first. Same fix as Cart_EXTI0_Flash_Handler. */
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        /* READ cycle. */
+        uint8_t v;
+        if (address == 0x7FFFU) {
+            /* Output FIFO pop. Paired with Terminal_Service::out_push:
+             * the producer does `fence w,w` between byte-write and
+             * tail-increment, so reading tail and then the byte is safe
+             * in the IRQ context. */
+            if (g_term_mbox.out_n > 0U) {
+                v = g_term_mbox.out_buf[g_term_mbox.out_head];
+                __asm__ volatile ("fence r, r" ::: "memory");
+                g_term_mbox.out_head = (uint8_t)(
+                    (g_term_mbox.out_head + 1U) % 2048U);
+                g_term_mbox.out_n--;
+            } else {
+                v = 0x00U;  /* empty: MSX loops and waits */
+            }
+        } else if (address >= 0x4000U && address < 0xC000U) {
+            /* Serve the embedded terminal ROM. The ROM image is sized
+             * to fit just the actually-used bytes (terminal_rom_len),
+             * not the full 32 KiB - bytes above terminal_rom_len
+             * float to 0xFF (open-bus pattern, matches what an empty
+             * cart would deliver if the user reads beyond the ROM).
+             * The MSX-side terminal never fetches from 0x4100..0xBFFF,
+             * so this saves ~31 KiB of flash per build. */
+            const uint32_t off = (uint32_t)(address - 0x4000U);
+            if (off < terminal_rom_len) {
+                v = terminal_rom[off];
+            } else {
+                v = 0xFFU;
+            }
+        } else {
+            /* Out of the terminal's window: float. */
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            GPIOB->CFGHR = CART_BUS_OFF;
+            return;
+        }
+        /* Drive the byte. */
+        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                     | ((uint32_t)v << 8);
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+        return;
+    }
+
+    /* WRITE cycle: WR is low now; data valid on PB8..15. */
+    if ((ctrl & CART_WR_MASK) == 0U) {
+        const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+        if (address == 0x7FFDU) {
+            /* Keyboard FIFO push. Drop on overflow - the terminal
+             * never sends faster than human typing, so overflow is a
+             * firmware-side bug worth noticing. */
+            uint8_t next = (uint8_t)((g_term_mbox.kbd_tail + 1U) % 16U);
+            if (next != g_term_mbox.kbd_head) {
+                g_term_mbox.kbd_buf[g_term_mbox.kbd_tail] = w;
+                g_term_mbox.kbd_tail = next;
+                g_term_mbox.kbd_n++;
+            }
+        } else if (address == 0x7FFEU) {
+            /* Control byte. Latched verbatim - terminal.c reads and
+             * clears it (so the cart-side IRQ sees each control byte
+             * exactly once). */
+            g_term_mbox.control = w;
+        }
+        /* Other writes: ignore. */
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;

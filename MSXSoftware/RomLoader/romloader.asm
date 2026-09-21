@@ -833,20 +833,20 @@ ___str_4:
 	.db 0x0d
 	.db 0x0a
 	.db 0x00
-;romloader.c:560: static void soft_reset_install(void) __naked
+;romloader.c:505: static void soft_reset_install(void) __naked
 ;	---------------------------------
 ; Function soft_reset_install
 ; ---------------------------------
 _soft_reset_install:
-;romloader.c:584: __endasm;
+;romloader.c:525: __endasm;
 ;;	di - mirrors crt0; belt and braces
 	di
-;;	source = soft_reset_code (resolved by SDCC at link time)
-	ld	hl, #_soft_reset_code
+;;	source = ugly_patch_code (resolved by SDCC at link time)
+	ld	hl, #_ugly_patch_code
 ;;	dest = 0xE000
 	ld	de, #0xE000
-;;	count = 130 (keep in sync with soft_reset_code[])
-	ld	c, #130
+;;	count = 5 (keep in sync with ugly_patch_code[])
+	ld	c, #5
 ;;	copy loop: ld a,(hl); ld (de),a; inc hl; inc de; dec c; jr nz,-5
 	 loop$:
 	ld	a, (hl)
@@ -855,21 +855,21 @@ _soft_reset_install:
 	inc	de
 	dec	c
 	jr	nz, loop$
-;;	Function returns - the slingshot at 0xE000 is what
-;;	soft_reset() enters, not this function. We MUST return
-;;	to the C caller (main()), which continues to set up the
-;;	menu etc. until the user picks a file/mapper.
 	ret
-;romloader.c:585: }
-;romloader.c:604: static void soft_reset(void) __naked
+;romloader.c:526: }
+;romloader.c:555: static void soft_reset(void) __naked
 ;	---------------------------------
 ; Function soft_reset
 ; ---------------------------------
 _soft_reset:
-;romloader.c:608: __endasm;
-	jp	0xE000
-;romloader.c:609: }
-;romloader.c:613: int main(void)
+;romloader.c:563: __endasm;
+;;	Warm boot to BIOS MAIN. The cart is now PSRAM-backed
+;;	(the loaded .ROM), so BIOS's SLTTBL-driven INIT call
+;;	will read the new AB header from PSRAM[0] and call the
+;;	new INIT.
+	rst	0x00
+;romloader.c:564: }
+;romloader.c:568: int main(void)
 ;	---------------------------------
 ; Function main
 ; ---------------------------------
@@ -878,44 +878,42 @@ _main::
 	ld	hl, #-24
 	add	hl, sp
 	ld	sp, hl
-;romloader.c:621: soft_reset_install();
-	call	_soft_reset_install
-;romloader.c:623: chgmod(0);		/* SCREEN 0, 40 columns */
+;romloader.c:576: chgmod(0);		/* SCREEN 0, 40 columns */
 	ld	l, #0x00
 ;	spillPairReg hl
 ;	spillPairReg hl
 	call	_chgmod
-;romloader.c:625: cls();
+;romloader.c:578: cls();
 	call	_cls
-;romloader.c:626: print("RISKYMSX2 ROM LOADER\r\n\r\n");
+;romloader.c:579: print("RISKYMSX2 ROM LOADER\r\n\r\n");
 	ld	hl, #___str_17
 	call	_print
-;romloader.c:627: print("Reading USB directory...\r\n");
+;romloader.c:580: print("Reading USB directory...\r\n");
 	ld	hl, #___str_18
 	call	_print
-;romloader.c:629: fetch_file_list();
+;romloader.c:582: fetch_file_list();
 	call	_fetch_file_list
-;romloader.c:631: if (s_count == 0U) {
+;romloader.c:584: if (s_count == 0U) {
 	ld	a, (_s_count+1)
 	ld	hl, #_s_count
 	or	a, (hl)
 	jr	NZ, 00131$
-;romloader.c:632: cls();
+;romloader.c:585: cls();
 	call	_cls
-;romloader.c:633: print("NO .ROM FILES ON USB STICK\r\n\r\n");
+;romloader.c:586: print("NO .ROM FILES ON USB STICK\r\n\r\n");
 	ld	hl, #___str_19
 	call	_print
-;romloader.c:634: print("Plug a stick with .ROM files,\r\n");
+;romloader.c:587: print("Plug a stick with .ROM files,\r\n");
 	ld	hl, #___str_20
 	call	_print
-;romloader.c:635: print("power-cycle the MSX.\r\n");
+;romloader.c:588: print("power-cycle the MSX.\r\n");
 	ld	hl, #___str_21
 	call	_print
 00111$:
-;romloader.c:637: wait_any_key();
+;romloader.c:590: wait_any_key();
 	call	_wait_any_key
 	jr	00111$
-;romloader.c:642: for (uint16_t i = 0; i < s_count; i++)
+;romloader.c:595: for (uint16_t i = 0; i < s_count; i++)
 00131$:
 	ld	bc, #0x0000
 00114$:
@@ -926,7 +924,7 @@ _main::
 	ld	a, b
 	sbc	a, (hl)
 	jr	NC, 00104$
-;romloader.c:643: file_ptrs[i] = s_files[i];
+;romloader.c:596: file_ptrs[i] = s_files[i];
 	ld	l, c
 ;	spillPairReg hl
 ;	spillPairReg hl
@@ -953,11 +951,11 @@ _main::
 	ld	(hl), e
 	inc	hl
 	ld	(hl), d
-;romloader.c:642: for (uint16_t i = 0; i < s_count; i++)
+;romloader.c:595: for (uint16_t i = 0; i < s_count; i++)
 	inc	bc
 	jr	00114$
 00104$:
-;romloader.c:644: uint16_t sel = choose("SELECT ROM FILE:", file_ptrs, s_count, 0);
+;romloader.c:597: uint16_t sel = choose("SELECT ROM FILE:", file_ptrs, s_count, 0);
 	ld	hl, #0x0000
 	push	hl
 	ld	hl, (_s_count)
@@ -966,13 +964,13 @@ _main::
 	push	hl
 	ld	hl, #___str_5
 	call	_choose
-;romloader.c:647: cls();
+;romloader.c:600: cls();
 	push	de
 	call	_cls
 	ld	hl, #___str_22
 	call	_print
 	pop	de
-;romloader.c:649: print(s_files[sel]);
+;romloader.c:602: print(s_files[sel]);
 	ld	l, e
 	ld	h, d
 	add	hl, hl
@@ -991,7 +989,7 @@ _main::
 	ld	hl, #___str_23
 	call	_print
 	pop	bc
-;romloader.c:653: for (uint8_t i = 0; i < LOADER_NAME_LEN; i++)
+;romloader.c:606: for (uint8_t i = 0; i < LOADER_NAME_LEN; i++)
 	ld	hl, #0
 	add	hl, sp
 	ex	de, hl
@@ -1000,7 +998,7 @@ _main::
 	ld	a, -1 (ix)
 	sub	a, #0x0c
 	jr	NC, 00105$
-;romloader.c:654: args[i] = (uint8_t)s_files[sel][i];
+;romloader.c:607: args[i] = (uint8_t)s_files[sel][i];
 	ld	l, -1 (ix)
 	ld	h, #0x00
 	add	hl, de
@@ -1019,23 +1017,23 @@ _main::
 	add	iy, bc
 	ld	a, 0 (iy)
 	ld	(hl), a
-;romloader.c:653: for (uint8_t i = 0; i < LOADER_NAME_LEN; i++)
+;romloader.c:606: for (uint8_t i = 0; i < LOADER_NAME_LEN; i++)
 	inc	-1 (ix)
 	jr	00117$
 00105$:
-;romloader.c:655: mbox_cmd(CMD_LOAD_ROM, args, LOADER_NAME_LEN);
+;romloader.c:608: mbox_cmd(CMD_LOAD_ROM, args, LOADER_NAME_LEN);
 	ld	a, #0x0c
 	push	af
 	inc	sp
 	ld	a, #0x03
 	call	_mbox_cmd
-;romloader.c:658: for (uint8_t i = 0; i < 4; i++)
+;romloader.c:611: for (uint8_t i = 0; i < 4; i++)
 	ld	c, #0x00
 00120$:
 	ld	a, c
 	sub	a, #0x04
 	jr	NC, 00106$
-;romloader.c:659: len[i] = mbox_pop();
+;romloader.c:612: len[i] = mbox_pop();
 	ld	e, c
 	ld	d, #0x00
 	ld	hl, #12
@@ -1047,11 +1045,11 @@ _main::
 	pop	bc
 	pop	hl
 	ld	(hl), a
-;romloader.c:658: for (uint8_t i = 0; i < 4; i++)
+;romloader.c:611: for (uint8_t i = 0; i < 4; i++)
 	inc	c
 	jr	00120$
 00106$:
-;romloader.c:660: uint32_t total = ((uint32_t)len[0] << 24)
+;romloader.c:613: uint32_t total = ((uint32_t)len[0] << 24)
 	ld	c, -12 (ix)
 	ld	-5 (ix), c
 	xor	a, a
@@ -1118,10 +1116,10 @@ _main::
 	ld	-3 (ix), b
 	ld	-2 (ix), e
 	ld	-1 (ix), d
-;romloader.c:664: print("LOADED ");
+;romloader.c:617: print("LOADED ");
 	ld	hl, #___str_24
 	call	_print
-;romloader.c:665: print_dec((uint16_t)((total + 1023U) / 1024U));
+;romloader.c:618: print_dec((uint16_t)((total + 1023U) / 1024U));
 	ld	a, -4 (ix)
 	add	a, #0xff
 	ld	a, -3 (ix)
@@ -1147,10 +1145,10 @@ _main::
 	rr	l
 	djnz	00192$
 	call	_print_dec
-;romloader.c:666: print(" KiB\r\n\r\n");
+;romloader.c:619: print(" KiB\r\n\r\n");
 	ld	hl, #___str_25
 	call	_print
-;romloader.c:683: uint8_t chosen = (uint8_t)choose("SELECT MAPPER:",
+;romloader.c:636: uint8_t chosen = (uint8_t)choose("SELECT MAPPER:",
 	ld	hl, #0x0001
 	push	hl
 	ld	l, #0x0a
@@ -1160,12 +1158,12 @@ _main::
 	ld	hl, #___str_16
 	call	_choose
 	ld	-1 (ix), e
-;romloader.c:687: cls();
+;romloader.c:640: cls();
 	call	_cls
-;romloader.c:688: print("MAPPER: ");
+;romloader.c:641: print("MAPPER: ");
 	ld	hl, #___str_26
 	call	_print
-;romloader.c:689: print(mapper_names[chosen]);
+;romloader.c:642: print(mapper_names[chosen]);
 	ld	l, -1 (ix)
 ;	spillPairReg hl
 ;	spillPairReg hl
@@ -1180,184 +1178,59 @@ _main::
 	ld	d, (hl)
 	ex	de, hl
 	call	_print
-;romloader.c:690: print("\r\n");
+;romloader.c:643: print("\r\n");
 	ld	hl, #___str_27
 	call	_print
-;romloader.c:693: args[0] = (uint8_t)(chosen + 1U);	/* Cart_Mapper index */
+;romloader.c:646: args[0] = (uint8_t)(chosen + 1U);	/* Cart_Mapper index */
 	ld	hl, #15
 	add	hl, sp
 	ex	de, hl
 	ld	a, -1 (ix)
 	inc	a
 	ld	(de), a
-;romloader.c:694: mbox_cmd(CMD_SET_MAPPER, args, 1);
+;romloader.c:647: mbox_cmd(CMD_SET_MAPPER, args, 1);
 	ld	a, #0x01
 	push	af
 	inc	sp
 	ld	a, #0x04
 	call	_mbox_cmd
-;romloader.c:695: uint8_t rc = mbox_pop();
+;romloader.c:648: uint8_t rc = mbox_pop();
 	call	_mbox_pop
-;romloader.c:696: if (rc != 0U) {
+;romloader.c:649: if (rc != 0U) {
 	or	a, a
 	jr	Z, 00109$
-;romloader.c:697: print("REFUSED! (PSRAM not ready?)\r\n");
+;romloader.c:650: print("REFUSED! (PSRAM not ready?)\r\n");
 	ld	hl, #___str_28
 	call	_print
 00122$:
-;romloader.c:699: wait_any_key();
+;romloader.c:652: wait_any_key();
 	call	_wait_any_key
 	jr	00122$
 00109$:
-;romloader.c:734: print("BOOT...");
+;romloader.c:687: print("BOOT...");
 	ld	hl, #___str_29
 	call	_print
-;romloader.c:735: mbox_cmd(CMD_SOFTRESET, 0, 0);
+;romloader.c:688: mbox_cmd(CMD_SOFTRESET, 0, 0);
 	xor	a, a
 	push	af
 	inc	sp
 	ld	de, #0x0000
 	ld	a, #0x07
 	call	_mbox_cmd
-;romloader.c:736: delay_ms(50);
-	ld	hl, #0x0032
+;romloader.c:689: delay_ms(300);
+	ld	hl, #0x012c
 	call	_delay_ms
-;romloader.c:737: soft_reset();
+;romloader.c:705: soft_reset();
 	call	_soft_reset
 00125$:
-;romloader.c:747: }
+;romloader.c:712: }
 	jr	00125$
-_soft_reset_code:
-	.db #0xf3	; 243
-	.db #0x3e	; 62
-	.db #0x00	; 0
-	.db #0xed	; 237
-	.db #0x47	; 71	'G'
-	.db #0x31	; 49	'1'
-	.db #0xfe	; 254
-	.db #0xff	; 255
-	.db #0x21	; 33
-	.db #0xb0	; 176
-	.db #0xf3	; 243
-	.db #0x36	; 54	'6'
-	.db #0x00	; 0
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x00	; 0
-	.db #0x3e	; 62
-	.db #0x01	; 1
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0xfe	; 254
-	.db #0x41	; 65	'A'
-	.db #0x20	; 32
-	.db #0x2c	; 44
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x01	; 1
-	.db #0x3e	; 62
-	.db #0x01	; 1
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0xfe	; 254
-	.db #0x42	; 66	'B'
-	.db #0x20	; 32
-	.db #0x1f	; 31
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x02	; 2
-	.db #0x3e	; 62
-	.db #0x01	; 1
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0x5f	; 95
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x03	; 3
-	.db #0x3e	; 62
-	.db #0x01	; 1
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0x57	; 87	'W'
-	.db #0xd5	; 213
-	.db #0xdd	; 221
+_ugly_patch_code:
+	.db #0xc1	; 193
 	.db #0xe1	; 225
-	.db #0xfd	; 253
-	.db #0x21	; 33
-	.db #0x00	; 0
-	.db #0x01	; 1
-	.db #0xfb	; 251
-	.db #0xcd	; 205
-	.db #0x1c	; 28
-	.db #0x00	; 0
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x00	; 0
-	.db #0x3e	; 62
-	.db #0x02	; 2
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0xfe	; 254
-	.db #0x41	; 65	'A'
-	.db #0x20	; 32
-	.db #0x2c	; 44
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x01	; 1
-	.db #0x3e	; 62
-	.db #0x02	; 2
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0xfe	; 254
-	.db #0x42	; 66	'B'
-	.db #0x20	; 32
-	.db #0x1f	; 31
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x02	; 2
-	.db #0x3e	; 62
-	.db #0x02	; 2
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0x5f	; 95
-	.db #0x26	; 38
-	.db #0x40	; 64
-	.db #0x2e	; 46
-	.db #0x03	; 3
-	.db #0x3e	; 62
-	.db #0x02	; 2
-	.db #0xcd	; 205
-	.db #0x0c	; 12
-	.db #0x00	; 0
-	.db #0x57	; 87	'W'
-	.db #0xd5	; 213
-	.db #0xdd	; 221
-	.db #0xe1	; 225
-	.db #0xfd	; 253
-	.db #0x21	; 33
-	.db #0x00	; 0
-	.db #0x02	; 2
-	.db #0xfb	; 251
-	.db #0xcd	; 205
-	.db #0x1c	; 28
-	.db #0x00	; 0
 	.db #0xc3	; 195
-	.db #0x00	; 0
-	.db #0x00	; 0
+	.db #0x84	; 132
+	.db #0x7d	; 125
 ___str_5:
 	.ascii "SELECT ROM FILE:"
 	.db 0x00

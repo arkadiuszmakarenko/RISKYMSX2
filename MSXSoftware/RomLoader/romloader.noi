@@ -15,7 +15,7 @@ DEF s__HEADER1 0x0
 DEF l__HEADER1 0x7
 DEF l__HEADER0 0x10
 DEF l__DATA 0x782
-DEF l__CODE 0x883
+DEF l__CODE 0x801
 DEF s__CODE 0x4020
 DEF s__DATA 0xC000
 DEF s__GSFINAL 0xC782
@@ -23,12 +23,12 @@ DEF s__GSINIT 0xC782
 DEF s__HOME 0xC782
 DEF s__INITIALIZED 0xC782
 DEF s__INITIALIZER 0xC782
-DEF _main 0x4455
-DEF __divuchar 0x4859
-DEF __divu8 0x485B
-DEF __divu16 0x485E
-DEF __divuint 0x485E
-DEF ___sdcc_enter_ix 0x488D
-DEF __moduchar 0x4897
-DEF __moduint 0x489E
+DEF _main 0x4453
+DEF __divuchar 0x47D7
+DEF __divu8 0x47D9
+DEF __divu16 0x47DC
+DEF __divuint 0x47DC
+DEF ___sdcc_enter_ix 0x480B
+DEF __moduchar 0x4815
+DEF __moduint 0x481C
 LOAD romloader.ihx

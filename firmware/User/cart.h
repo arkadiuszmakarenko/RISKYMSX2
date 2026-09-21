@@ -115,7 +115,19 @@ typedef enum {
                                   * MSX-side loader. The boot mapper - stays
                                   * active across SET_MAPPER + RESET so the
                                   * user can pick a new mapper from the menu. */
-    CART_MAP_MAX        = 12,
+    CART_MAP_TERMINAL   = 12,  /* Terminal cart: serves the embedded
+                                  * terminal ROM (terminal_rom[]) at
+                                  * 0x4000..0xBFFF for ordinary reads, and
+                                  * decodes the v303-style 0x7FFD/0x7FFE/
+                                  * 0x7FFF mailbox. The MSX-side terminal
+                                  * program drives the screen + keyboard;
+                                  * the firmware hosts the menu logic
+                                  * (file list, ROM load, mapper select).
+                                  * The boot mapper for the terminal
+                                  * workflow - swap away via the menu to
+                                  * the FLASH mapper if the user prefers
+                                  * the existing mailbox-driven loader. */
+    CART_MAP_MAX        = 13,
 } Cart_Mapper;
 
 /* Mapper names used by `MAP ?` and CLI error messages. */

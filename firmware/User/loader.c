@@ -278,7 +278,8 @@ static void cmd_softreset (void) {
      * MSX waits. The MSX-side `soft_reset()` delay is in
      * MSXSoftware/RomLoader/romloader.c, between the mbox_cmd ack
      * and the jp 0xE000. */
-    (void)Cart_SetMapper_Safe (s_pending_mapper);
+    const int swap_rc = Cart_SetMapper_Safe (s_pending_mapper);
+    printf ("LOADER: SOFTRESET swap done rc=%d\r\n", swap_rc);
 }
 
 /* ------------------------------------------------------------------ */
@@ -308,6 +309,16 @@ void Loader_Service (void) {
         cmd_set_mapper (g_loader_mbox.args[0]);
         break;
     case LOADER_CMD_SOFTRESET:
+        /* Mark DONE BEFORE cmd_softreset swaps the mapper. The FLASH
+         * handler is what serves the mailbox window at 0x7FF0; the
+         * PSRAM-backed mappers don't expose it. If we set DONE
+         * post-swap (the normal post-switch path below), the MSX's
+         * mbox_wait_done() loop reads from the new mapper's window
+         * (PSRAM bytes), never sees ST_DONE, and hangs forever -
+         * which is why "BOOT..." printed but nothing else happened.
+         * Set it here, BEFORE the swap; the post-switch |= 1 below
+         * is then a redundant no-op. */
+        g_loader_mbox.status |= LOADER_ST_DONE;
         cmd_softreset ();
         break;
     default:

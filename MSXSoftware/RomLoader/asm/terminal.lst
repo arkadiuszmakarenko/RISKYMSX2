@@ -1,0 +1,230 @@
+                                      1 ;-------------------------------------------------------------------------------
+                                      2 ; terminal.asm - MSX-side terminal ROM for RISKYMSX2 (CH32V407).
+                                      3 ;
+                                      4 ; Ported from v303firmwaer/MSXTerminal/msxterminal.asm (sjasmplus syntax) to
+                                      5 ; sdasz80 syntax so it builds with the existing MSXSoftware/RomLoader
+                                      6 ; toolchain (sdcc + sdasz80 + makebin).
+                                      7 ;
+                                      8 ; Layout, mailbox semantics, and screen I/O are byte-for-byte identical to
+                                      9 ; v303 (the firmware side expects the same protocol - see cart.c
+                                     10 ; Cart_EXTI0_Terminal_Handler).
+                                     11 ;
+                                     12 ; Mailbox at the cart edge:
+                                     13 ;
+                                     14 ;   0x7FFD  WRITE   - keyboard byte (firmware pops the byte, decides key)
+                                     15 ;   0x7FFE  WRITE   - control byte
+                                     16 ;                        0x00 = "continue / terminal menu"
+                                     17 ;                        0x04 = "user held GRPH - skip the terminal, boot
+                                     18 ;                                the cart image straight away"
+                                     19 ;   0x7FFF  READ    - firmware output FIFO (CHAR by CHAR; 0 = empty, the
+                                     20 ;                     byte itself is the printable character; 0x03 = "user
+                                     21 ;                     asked to abort / soft-reset the MSX into ROM");
+                                     22 ;                     0x04 = "move the menu cursor" (followed by reading
+                                     23 ;                     X-then-Y bytes).
+                                     24 ;
+                                     25 ; For RISKYMSX2 the firmware also recognises a few extra control codes that
+                                     26 ; the v303 firmware did not need:
+                                     27 ;
+                                     28 ;   0x7FF0..0x7FF7  READ  - "USB stick presence" status (1 byte = "stick
+                                     29 ;                           present", 0 = "no stick yet")
+                                     30 ;
+                                     31 ; Boot flow:
+                                     32 ;   1. INIT moves the post-init body to RAM at 0xE000. The body length is
+                                     33 ;      a fixed constant (BODY_SIZE = 213 bytes, matching the v303 ROM).
+                                     34 ;   2. INIT probes GRPH-key. If GRPH is held, send 0x04 on 0x7FFE -> the
+                                     35 ;      firmware swaps to the user cart and reboots the MSX into the game.
+                                     36 ;   3. Otherwise, set 32-column screen, palette, sprite cursor, then loop:
+                                     37 ;      read 0x7FFF, print whatever the firmware puts there, poll keyboard
+                                     38 ;      and forward each keystroke on 0x7FFD.
+                                     39 ;-------------------------------------------------------------------------------
+                                     40 
+                                     41         .module terminal
+                                     42 
+                                     43 ;-------------------------------------------------------------------------------
+                                     44 ; Empty _DATA area. sdcc's linker emits a spurious
+                                     45 ; "No definition of area _DATA" warning (which it returns exit code 1
+                                     46 ; for) when a standalone asm binary has no .data section. Declaring an
+                                     47 ; empty area here silences both the warning and the exit code without
+                                     48 ; affecting the binary output.
+                                     49 ;-------------------------------------------------------------------------------
+                                     50         .area _DATA
+      000000                         51         .ds 1
+                                     52 
+                                     53 ;-------------------------------------------------------------------------------
+                                     54 ; ROM header - "AB" + INIT pointer, then ID/version strings.
+                                     55 ;-------------------------------------------------------------------------------
+                                     56         .area   _HEADER (ABS)
+      004000                         57         .org    0x4000
+                                     58 
+                                     59         ;; --- MSX ROM header (16 bytes) ---
+      004000 41 42                   60         .db     0x41, 0x42              ; 'A' 'B' cartridge ID
+      004002r10r40                   61         .dw     init                    ; INIT: auto-start entry point
+      004004 00 00                   62         .dw     0x0000                  ; STATEMENT
+      004006 00 00                   63         .dw     0x0000                  ; DEVICE
+      004008 00 00                   64         .dw     0x0000                  ; TEXT
+      00400A 00 00 00 00 00 00       65         .dw     0x0000, 0x0000, 0x0000  ; reserved
+                                     66 
+                                     67         ;; --- INIT body at 0x4010 ---
+                                     68         ;; The MSX BIOS calls init() during ROM probing. init() copies
+                                     69         ;; a fixed-size body (BODY_SIZE bytes) from ROM to MSX RAM at
+                                     70         ;; 0xE000, then JP into RAM. Same trick as v303 - the cart may
+                                     71         ;; swap itself out for the user's cart image before we are done
+                                     72         ;; printing, so we run from RAM.
+      004010                         73         .org    0x4010
+      004010                         74 init:
+                                     75         ;; Probe GRPH key. If held, return to the BIOS so the MSX
+                                     76         ;; drops to BASIC / old loader (no terminal menu visible).
+                                     77         ;; If NOT held, copy the body to MSX RAM and enter the
+                                     78         ;; terminal menu.
+      004010 3E 06            [ 7]   79         ld      a, #6
+      004012 CD 41 01         [17]   80         call    0x0141                  ; GTSIZE - row 6 of matrix
+      004015 E6 04            [ 7]   81         and     #0x04                   ; GRPH = bit 2 of row 6
+      004017 C0               [11]   82         ret     nz                       ; held -> BIOS continues slot probe
+                                     83         ;; GRPH not held: continue with body copy + run
+      004018 21r26r40         [10]   84         ld      hl, #body              ; source in ROM
+      00401B 11 00 E0         [10]   85         ld      de, #0xE000            ; destination in MSX RAM
+      00401E 01 A6 00         [10]   86         ld      bc, #BODY_SIZE         ; byte count
+      004021 ED B0            [21]   87         ldir
+      004023 C3 00 E0         [10]   88         jp      0xE000                 ; jump into the relocated copy
+                                     89 
+                                     90 ;-------------------------------------------------------------------------------
+                                     91 ; Body to copy to RAM. Same shape as v303: GRPH-probe, screen setup,
+                                     92 ; poll-FIFO + forward-keyboard loop, ROM_START path.
+                                     93 ;
+                                     94 ; IMPORTANT: do NOT use .org here - let the assembler place body right
+                                     95 ; after the init code. The .org 0x401D in the previous version collided
+                                     96 ; with the trailing byte of the JP 0xE000 instruction (3 bytes ending
+                                     97 ; at 0x401D), so body actually got placed at 0x401E while LDIR still
+                                     98 ; pointed at 0x401D - that one-byte offset meant the RAM copy started
+                                     99 ; with the trailing E0 of the JP, which Z80 decodes as RET PO. RET PO
+                                    100 ; sometimes returns to a random stack address, which is exactly the
+                                    101 ; "rubbish on screen / doesn't drop to BASIC" symptom. Letting the
+                                    102 ; assembler place body sequentially keeps the LDIR source correct.
+                                    103 ;-------------------------------------------------------------------------------
+      004026                        104 body:
+                                    105         ;; GRPH-key probe is DISABLED: the v303 CALL #141 (GTSIZE)
+                                    106         ;; behaviour is model-dependent (Panasonic returns GRPH bit,
+                                    107         ;; some clones always return 0x04). When the firmware treated
+                                    108         ;; that as "boot the OLD loader", the terminal would silently
+                                    109         ;; disappear on affected hardware with no recovery path. The
+                                    110         ;; terminal menu is now always shown; the user picks the OLD
+                                    111         ;; loader from the menu by pressing F. Just initialise the
+                                    112         ;; screen + cursor and enter the main loop.
+                                    113 
+                                    114         ;; Set 32-column screen, palette, sprite cursor.
+      004026 3E 20            [ 7]  115         ld      a, #32
+      004028 32 AF F3         [13]  116         ld      (0xF3AF), a
+      00402B 21 0F 00         [10]  117         ld      hl, #0x000F
+      00402E 22 EA F3         [16]  118         ld      (0xF3EA), hl
+      004031 22 E9 F3         [16]  119         ld      (0xF3E9), hl
+      004034 3E 01            [ 7]  120         ld      a, #1
+      004036 CD 5F 00         [17]  121         call    0x005F
+      004039 21rF0r40         [10]  122         ld      hl, #arrow
+      00403C 11 00 38         [10]  123         ld      de, #0x3800
+      00403F 01 08 00         [10]  124         ld      bc, #8
+      004042 CD 5C 00         [17]  125         call    0x005C
+      004045 3E 08            [ 7]  126         ld      a, #8
+      004047 21 03 1B         [10]  127         ld      hl, #0x1B03
+      00404A CD 4D 00         [17]  128         call    0x004D
+                                    129         ;; Initialise sprite 0 properly. v303 only wrote 8 to 0x1B03
+                                    130         ;; (the unused attribute byte on MSX1) and relied on the
+                                    131         ;; pattern index at 0x1B02 being zero - which is only true
+                                    132         ;; on cold boot. After other carts or sprites use 0x1B02 the
+                                    133         ;; arrow shows whatever pattern sits at the stale index.
+                                    134         ;; Force pattern index = 0 (arrow lives at VRAM 0x3800) and
+                                    135         ;; start with the sprite hidden (Y = 0) so a stale VRAM Y
+                                    136         ;; doesn't show junk before the firmware's first 0x04 push.
+      00404D 3E 00            [ 7]  137         ld      a, #0                   ; pattern index 0 = arrow @ 0x3800
+      00404F 21 02 1B         [10]  138         ld      hl, #0x1B02
+      004052 CD 4D 00         [17]  139         call    0x004D
+      004055 3E 00            [ 7]  140         ld      a, #0                   ; Y = 0 = sprite hidden
+      004057 21 00 1B         [10]  141         ld      hl, #0x1B00
+      00405A CD 4D 00         [17]  142         call    0x004D
+      00405D 3E 01            [ 7]  143         ld      a, #1                   ; X = 1 (off-screen) - hidden by Y first
+      00405F 21 01 1B         [10]  144         ld      hl, #0x1B01
+      004062 CD 4D 00         [17]  145         call    0x004D
+                                    146 
+      004065                        147 loop:
+                                    148         ;; Poll firmware FIFO at 0x7FFF.
+      004065 3A FF 7F         [13]  149         ld      a, (0x7FFF)
+      004068 FE 03            [ 7]  150         cp      #3
+      00406A 28 2B            [12]  151         jr      z, rom_start            ; "boot the cart"
+      00406C FE 04            [ 7]  152         cp      #4
+      00406E 28 14            [12]  153         jr      z, sprite               ; "move the cursor"
+      004070 A7               [ 4]  154         and     a
+      004071 CCrC1r40         [17]  155         call    z, wait                 ; empty -> wait one refresh
+      004074 C4 A2 00         [17]  156         call    nz, 0x00A2              ; non-empty -> CHPUT (BIOS print)
+                                    157         ;; Poll keyboard and forward on 0x7FFD.
+      004077 CD 9C 00         [17]  158         call    0x009C                  ; CHSNS - any key?
+      00407A 28 E9            [12]  159         jr      z, loop
+      00407C CD 9F 00         [17]  160         call    0x009F                  ; CHGET - read key
+      00407F 32 FD 7F         [13]  161         ld      (0x7FFD), a
+      004082 18 E1            [12]  162         jr      loop
+                                    163 
+      004084                        164 sprite:
+      004084 3A FF 7F         [13]  165         ld      a, (0x7FFF)             ; X
+      004087 21 01 1B         [10]  166         ld      hl, #0x1B01
+      00408A CD 4D 00         [17]  167         call    0x004D
+      00408D 3A FF 7F         [13]  168         ld      a, (0x7FFF)             ; Y
+      004090 3D               [ 4]  169         dec     a
+      004091 2D               [ 4]  170         dec     l
+      004092 CD 4D 00         [17]  171         call    0x004D
+      004095 18 CE            [12]  172         jr      loop
+                                    173 
+      004097                        174 rom_start:
+      004097 CDrC1r40         [17]  175         call    wait
+      00409A CDrC1r40         [17]  176         call    wait                    ; >= 20 ms for firmware to settle
+      00409D 2A B1 F6         [16]  177         ld      hl, (0xF6B1)
+      0040A0 11 F4 FF         [10]  178         ld      de, #-12
+      0040A3 19               [11]  179         add     hl, de
+      0040A4 E5               [11]  180         push    hl
+      0040A5 5E               [ 7]  181         ld      e, (hl)
+      0040A6 23               [ 6]  182         inc     hl
+      0040A7 56               [ 7]  183         ld      d, (hl)
+      0040A8 21 A3 7D         [10]  184         ld      hl, #0x7DA3
+      0040AB E7               [11]  185         rst     #0x20                   ; COMPARE HL, DE (BIOS helper)
+      0040AC E1               [10]  186         pop     hl
+      0040AD 20 0C            [12]  187         jr      nz, unknown
+      0040AF 11rB6r40         [10]  188         ld      de, #ugly_patch
+      0040B2 73               [ 7]  189         ld      (hl), e
+      0040B3 23               [ 6]  190         inc     hl
+      0040B4 72               [ 7]  191         ld      (hl), d
+      0040B5 C9               [10]  192         ret
+                                    193 
+      0040B6                        194 ugly_patch:
+      0040B6 C1               [10]  195         pop     bc
+      0040B7 E1               [10]  196         pop     hl
+      0040B8 C3 84 7D         [10]  197         jp      0x7D84
+                                    198 
+      0040BB                        199 unknown:
+      0040BB 1E 52            [ 7]  200         ld      e, #'R'
+      0040BD CD B1 FF         [17]  201         call    0xFFB1
+      0040C0 C7               [11]  202         rst     0
+                                    203 
+      0040C1                        204 wait:
+      0040C1 F5               [11]  205         push    af
+      0040C2 FB               [ 4]  206         ei
+      0040C3 21 9E FC         [10]  207         ld      hl, #0xFC9E             ; JIFFY
+      0040C6 7E               [ 7]  208         ld      a, (hl)
+      0040C7                        209 wait_loop:
+      0040C7 BE               [ 7]  210         cp      (hl)
+      0040C8 28 FD            [12]  211         jr      z, wait_loop
+      0040CA F1               [10]  212         pop     af
+      0040CB C9               [10]  213         ret
+      0040CC                        214 body_end:
+                                    215 
+                           0000A6   216 BODY_SIZE = body_end - body
+                                    217 
+                                    218 ;-------------------------------------------------------------------------------
+                                    219 ; Cursor arrow sprite pattern - sits just past the relocated body.
+                                    220 ;-------------------------------------------------------------------------------
+      0040F0                        221         .org    0x40F0
+      0040F0                        222 arrow:
+      0040F0 20                     223         .db     0b00100000
+      0040F1 30                     224         .db     0b00110000
+      0040F2 38                     225         .db     0b00111000
+      0040F3 3C                     226         .db     0b00111100
+      0040F4 38                     227         .db     0b00111000
+      0040F5 30                     228         .db     0b00110000
+      0040F6 20                     229         .db     0b00100000
+      0040F7 00                     230         .db     0b00000000

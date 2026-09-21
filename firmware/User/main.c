@@ -15,6 +15,7 @@
 #include "psram.h"
 #include "scc.h"
 #include "loader.h"
+#include "terminal.h"
 #include "usb_disk.h"
 #include "usb_tests.h"
 
@@ -48,13 +49,17 @@ int main (void) {
      * never drives MSX ~RESET (read-only on most MSX2+ machines;
      * driving it can damage the mainboard). The MSX is therefore
      * running while we boot; its BIOS will probe 0x4000 as soon as
-     * we enable GPIO clocks. Init_Cart -> Cart_SetMapper(FLASH)
-     * below gets the flash selector armed before any cart access
-     * can land, so the BIOS reads the loader ROM and parks there
-     * until it gets a CMD_SOFTRESET. */
+     * we enable GPIO clocks. Init_Cart -> Cart_SetMapper(TERMINAL)
+     * below gets the terminal cart armed before any cart access
+     * can land, so the BIOS reads the terminal ROM and runs the
+     * MSX-side terminal program (which copies itself to RAM and
+     * polls the firmware's output FIFO). */
     Init_Cart ();
     SCC_Init ();
-    Cart_SetMapper (CART_MAP_FLASH);
+    /* Reset the terminal mailbox before installing the mapper so the
+     * EXTI0 handler starts with empty FIFOs. */
+    Terminal_Reset ();
+    Cart_SetMapper (CART_MAP_TERMINAL);
 
 
     printf ("SystemClk:%d\r\n", SystemCoreClock);
@@ -67,16 +72,20 @@ int main (void) {
     /* USBHS host init. Powers up the controller so it's ready. */
     USB_Initialization ();
 
-    printf ("\r\n=== boot complete ===\r\n");
+    printf ("\r\n=== boot complete (terminal mapper active) ===\r\n");
 
-    /* Idle loop: service the ROM-loader mailbox, sleep between
-     * interrupts.  Loader_Service drains any command the MSX posted
-     * through the cart mailbox (dir listing, file load, mapper
-     * switch, soft-reset).  The previous interactive CLI was used
-     * only during early bring-up; USART1's TX path stays live so
-     * `printf` debug lines continue to work. */
+    /* Idle loop: service both mailboxes. The current active mapper
+     * is g_mapper; the FLASH loader mailbox only fires its IRQ when
+     * the FLASH mapper is installed (the 0x7FF0..0x7FFF window is
+     * only decoded by Cart_EXTI0_Flash_Handler), so calling
+     * Loader_Service unconditionally is harmless - the have_cmd
+     * flag stays 0 and the service returns. Same for
+     * Terminal_Service when the TERMINAL mapper is not installed:
+     * it only touches its own volatile fields, which the next cart
+     * swap to TERMINAL simply discards. */
     for (;;) {
         Loader_Service ();
+        Terminal_Service ();
         __asm__ volatile ("wfi");
     }
 }
