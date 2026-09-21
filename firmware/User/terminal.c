@@ -15,7 +15,13 @@
 TerminalMailbox g_term_mbox;
 
 #define TERM_MAX_FILES   32U
-#define FILE_NAME_MAX    28U    /* printed-column width */
+#define FILE_NAME_MAX    26U    /* printed-column width: 25 chars + NUL.
+                                 * Line layout = 25 (name) + 1 (space) +
+                                 * up to 5 (size, e.g. "1023K") = 31
+                                 * printed chars, leaving 1-char margin
+                                 * on the MSX's 32-column screen so the
+                                 * CR/LF never wraps mid-row. */
+#define TERM_PAGE_SIZE   20U    /* rows per page on the file list */
 
 typedef enum {
     MENU_LIST,
@@ -27,11 +33,19 @@ static struct {
     char    names[TERM_MAX_FILES][FILE_NAME_MAX];
     uint32_t sizes[TERM_MAX_FILES];  /* bytes */
     uint16_t count;
-    uint16_t sel;       /* currently-highlighted index */
+    uint16_t sel;       /* currently-highlighted index (absolute,
+                         * i.e. counts across pages) */
+    uint16_t page;      /* current page, 0-based */
     uint8_t  loaded;    /* "ROM was loaded into PSRAM" */
     MenuState state;
     char     picked[FILE_NAME_MAX]; /* file name the user selected */
 } s_menu;
+
+/* Number of pages needed to display s_menu.count files. */
+static uint16_t menu_page_count (void) {
+    if (s_menu.count == 0U) return 1U;
+    return (uint16_t)((s_menu.count + TERM_PAGE_SIZE - 1U) / TERM_PAGE_SIZE);
+}
 
 static const char *const kMapperNames[] = {
     "Standard 16KB ROM",
@@ -69,7 +83,7 @@ static const Cart_Mapper kMenuToCart[] = {
 /* ------------------------------------------------------------------ */
 
 static int out_push (uint8_t b) {
-    uint8_t next = (uint8_t)((g_term_mbox.out_tail + 1U) % 2048U);
+    uint16_t next = (uint16_t)((g_term_mbox.out_tail + 1U) % 2048U);
     if (next == g_term_mbox.out_head) return 0;  /* full */
     g_term_mbox.out_buf[g_term_mbox.out_tail] = b;
     /* Memory barrier: make sure the byte write above is visible to the
@@ -152,6 +166,7 @@ void Terminal_Reset (void) {
     g_term_mbox.control = 0xFFU;
     s_menu.count = 0;
     s_menu.sel   = 0;
+    s_menu.page  = 0;
     s_menu.loaded = 0;
     s_menu.state  = MENU_LIST;
     s_menu.picked[0] = '\0';
@@ -181,11 +196,15 @@ static void print_size (uint32_t bytes) {
 
 static void print_menu_title (void) {
     clear_screen ();
-    out_str (" RISKYMSX2 ^v RET ESC F=old");
+    out_str (" RISKYMSX2   RET SEL  <- -> page");
     newline ();
 }
 
 static void print_file_list (void) {
+    /* Row of the selection within the current page (0-based offset
+     * into the on-screen file block). */
+    uint16_t row_in_page = (uint16_t)(s_menu.sel % TERM_PAGE_SIZE);
+
     /* Position the sprite cursor FIRST so that the arrow is on-screen
      * even if the MSX-side polling is slow to drain the FIFO. Without
      * this the very first paint had the arrow hidden briefly while
@@ -196,14 +215,20 @@ static void print_file_list (void) {
      * vertical centre of the selected row. Y is sent as (row+1)*8
      * because the MSX-side sprite handler does `dec a` on Y before
      * writing it to VRAM. */
-    move_pointer (0, (uint8_t)(1 + s_menu.sel));
+    move_pointer (0, (uint8_t)(1 + row_in_page));
 
     move_cursor (0, 0);
     print_menu_title ();
-    for (uint16_t i = 0; i < s_menu.count; i++) {
+
+    /* Files of the current page. */
+    uint16_t start = (uint16_t)(s_menu.page * TERM_PAGE_SIZE);
+    uint16_t end   = (uint16_t)(start + TERM_PAGE_SIZE);
+    if (end > s_menu.count) end = s_menu.count;
+
+    for (uint16_t i = start; i < end; i++) {
         /* Reserve column 0 for the sprite cursor - text starts at
          * column 1. */
-        move_cursor ((uint8_t)(1 + i), 1);
+        move_cursor ((uint8_t)(1 + (i - start)), 1);
         /* pad filename to FILE_NAME_MAX */
         const char *n = s_menu.names[i];
         for (int j = 0; j < FILE_NAME_MAX - 1; j++) {
@@ -222,6 +247,14 @@ static void print_file_list (void) {
         out_str ("  (no .ROM files on USB stick)");
         newline ();
     }
+
+    /* Page indicator on the last row. */
+    move_cursor ((uint8_t)(1 + TERM_PAGE_SIZE), 1);
+    char buf[16];
+    snprintf (buf, sizeof (buf), " Pg %u/%u   F=old",
+              (unsigned)(s_menu.page + 1U), (unsigned)menu_page_count ());
+    out_str (buf);
+    newline ();
 }
 
 static void print_mapper_menu (void) {
@@ -265,7 +298,12 @@ static void scan_usb (void) {
     }
     while (s_menu.count < TERM_MAX_FILES) {
         fr = f_readdir (&dir, &fi);
-        if (fr != FR_OK || fi.altname[0] == 0) break;
+        /* End-of-directory check MUST use fi.fname - FatFS only
+         * clears fname[0] on end-of-dir, leaving altname holding a
+         * stale copy of the previous entry's SFN. Using altname made
+         * the last file repeat over and over (observed as "last file
+         * repeated 18 times" on page 2). */
+        if (fr != FR_OK || fi.fname[0] == 0) break;
         if (fi.fattrib & AM_DIR) continue;
         /* Accept any file - the v303 firmware filtered by extension
          * (.ROM) but the cart loader may serve .BIN/.MX1 too.
@@ -298,6 +336,45 @@ static void scan_usb (void) {
 /* ------------------------------------------------------------------ */
 /* Boot path                                                            */
 /* ------------------------------------------------------------------ */
+
+/* Progress bar geometry - keep in sync with the header printed by
+ * Terminal_BootCart: "  [--------------------]   0%" = 2 spaces + '['
+ * + 20 blocks + ']' + 2 spaces + 3 digits + '%' = 30 chars. */
+#define TERM_PROG_BAR_BLOCKS  20U
+
+/* Redraws the progress bar in place on the fixed screen row the
+ * header occupied. Called from USB_FileToPSRAM's read loop via the
+ * USB_ProgressCB hook - keep it short. */
+static void term_progress_cb (uint32_t done, uint32_t total) {
+    if (total == 0U) return;
+    /* Throttle: only redraw when the percentage changes. */
+    uint32_t pct = (uint32_t)(((uint64_t)done * 100ULL) / total);
+    static uint32_t s_last_pct = 0xFFFFU;
+    if (pct == s_last_pct) return;
+    s_last_pct = pct;
+
+    uint32_t filled = (uint32_t)(((uint64_t)done * TERM_PROG_BAR_BLOCKS) / total);
+
+    /* Move to the progress-bar row (row 3, column 0) and redraw in
+     * place - must match the header layout in Terminal_BootCart. */
+    move_cursor (3, 0);
+    out_push (' ');
+    out_push (' ');
+    out_push ('[');
+    for (uint32_t i = 0; i < TERM_PROG_BAR_BLOCKS; i++) {
+        out_push ((uint8_t)((i < filled) ? '#' : '-'));
+    }
+    out_push (']');
+    out_push (' ');
+    /* Percentage, 3 chars zero-padded so the column stays fixed. */
+    char num[4];
+    if (pct >= 100U) { num[0] = '1'; num[1] = '0'; num[2] = '0'; }
+    else if (pct >= 10U) { num[0] = (char)('0' + pct / 10U); num[1] = (char)('0' + pct % 10U); num[2] = ' '; }
+    else { num[0] = (char)('0' + pct); num[1] = ' '; num[2] = ' '; }
+    num[3] = '\0';
+    out_str (num);
+    out_push ('%');
+}
 
 static void soft_reset_into_cart (Cart_Mapper m) {
     printf ("TERM: soft_reset push 0x03 to FIFO\r\n");
@@ -364,21 +441,38 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
     out_str (" Mapper: ");
     out_str (kMapperNames[mapper_idx]);
     newline ();
-
-    uint32_t got = USB_FileToPSRAM (path,
-                                    PSRAM_CART_BASE + CART_GAME_BASE,
-                                    PSRAM_CART_SIZE - CART_GAME_BASE);
-    printf ("TERM: USB_FileToPSRAM got=%u\r\n", (unsigned)got);
-    if (got == 0U) {
-        out_str (" Load FAILED");
-        newline ();
-        return;
-    }
-    s_menu.loaded = 1;
-    out_str (" OK - booting MSX into cart");
     newline ();
-    printf ("TERM: soft_reset_into_cart mapper=%d\r\n", (int)m);
-    soft_reset_into_cart (m);
+    /* Progress bar header - drawn once, updated in place by the
+     * callback below. 20 blocks wide + 2 brackets = 22 chars, plus
+     * " 100%" (5) = 27 chars, fits in the 31-char printable width. */
+    out_str ("  [--------------------]   0%");
+    newline ();
+
+    /* Install the progress renderer for the duration of the copy.
+     * Throttle the redraws so the MSX-side FIFO isn't hammered with a
+     * full bar redraw for every 512-byte chunk. */
+    {
+        USB_ProgressCB = term_progress_cb;
+        /* len = 0 makes USB_FileToPSRAM use the real file size, so
+         * the progress percentage is relative to the ROM being
+         * loaded - not the full 8 MiB PSRAM window (a 1 MiB ROM
+         * would otherwise only ever reach ~12%). */
+        uint32_t got = USB_FileToPSRAM (path,
+                                        PSRAM_CART_BASE + CART_GAME_BASE,
+                                        0U);
+        USB_ProgressCB = 0;
+        printf ("TERM: USB_FileToPSRAM got=%u\r\n", (unsigned)got);
+        if (got == 0U) {
+            out_str (" Load FAILED");
+            newline ();
+            return;
+        }
+        s_menu.loaded = 1;
+        out_str (" OK - booting MSX into cart");
+        newline ();
+        printf ("TERM: soft_reset_into_cart mapper=%d\r\n", (int)m);
+        soft_reset_into_cart (m);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -386,12 +480,43 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
 /* ------------------------------------------------------------------ */
 
 static void handle_list_key (uint8_t key) {
-    /* arrow up / down / RET / ESC */
-    printf ("TERM: list key=0x%02X sel=%u count=%u\r\n", key, s_menu.sel, s_menu.count);
+    /* arrow up / down / RET / ESC / LEFT/RIGHT (page nav) */
+    printf ("TERM: list key=0x%02X sel=%u count=%u page=%u\r\n",
+            key, s_menu.sel, s_menu.count, s_menu.page);
     if (key == 0x1E) {                   /* up */
         if (s_menu.sel > 0) s_menu.sel--;
+        /* page change if we crossed a page boundary */
+        uint16_t new_page = (uint16_t)(s_menu.sel / TERM_PAGE_SIZE);
+        if (new_page != s_menu.page) {
+            s_menu.page = new_page;
+            print_file_list ();
+            return;
+        }
     } else if (key == 0x1F) {            /* down */
         if (s_menu.sel + 1U < s_menu.count) s_menu.sel++;
+        /* page change if we crossed a page boundary */
+        uint16_t new_page = (uint16_t)(s_menu.sel / TERM_PAGE_SIZE);
+        if (new_page != s_menu.page) {
+            s_menu.page = new_page;
+            print_file_list ();
+            return;
+        }
+    } else if (key == 0x1D) {            /* LEFT = previous page */
+        if (s_menu.page > 0) {
+            s_menu.page--;
+            /* move sel to top of new page */
+            s_menu.sel = (uint16_t)(s_menu.page * TERM_PAGE_SIZE);
+            print_file_list ();
+            return;
+        }
+    } else if (key == 0x1C) {            /* RIGHT = next page */
+        if (s_menu.page + 1U < menu_page_count ()) {
+            s_menu.page++;
+            /* move sel to top of new page */
+            s_menu.sel = (uint16_t)(s_menu.page * TERM_PAGE_SIZE);
+            print_file_list ();
+            return;
+        }
     } else if (key == 0x0D && s_menu.count > 0U) {
         /* pick this file -> show mapper menu */
         int i = 0;
@@ -409,6 +534,8 @@ static void handle_list_key (uint8_t key) {
     } else if (key == 0x1B) {            /* ESC = rescan */
         printf ("TERM: ESC -> rescan\r\n");
         scan_usb ();
+        s_menu.page = 0;
+        s_menu.sel   = 0;
         print_file_list ();
         return;
     } else if (key == 'F' || key == 'f') {
@@ -421,8 +548,9 @@ static void handle_list_key (uint8_t key) {
         (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
         return;
     }
-    /* redraw cursor + arrow on the line we landed on */
-    move_pointer (0, (uint8_t)(1 + s_menu.sel));
+    /* redraw cursor + arrow on the line we landed on (in-page row) */
+    uint16_t row_in_page = (uint16_t)(s_menu.sel % TERM_PAGE_SIZE);
+    move_pointer (0, (uint8_t)(1 + row_in_page));
 }
 
 static void handle_mapper_key (uint8_t key) {

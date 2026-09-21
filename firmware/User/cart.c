@@ -1751,10 +1751,10 @@ void Cart_EXTI0_Terminal_Handler (void) {
              * the producer does `fence w,w` between byte-write and
              * tail-increment, so reading tail and then the byte is safe
              * in the IRQ context. */
-            if (g_term_mbox.out_n > 0U) {
+                        if (g_term_mbox.out_n > 0U) {
                 v = g_term_mbox.out_buf[g_term_mbox.out_head];
                 __asm__ volatile ("fence r, r" ::: "memory");
-                g_term_mbox.out_head = (uint8_t)(
+                g_term_mbox.out_head = (uint16_t)(
                     (g_term_mbox.out_head + 1U) % 2048U);
                 g_term_mbox.out_n--;
             } else {

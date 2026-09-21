@@ -108,6 +108,17 @@ extern FATFS g_fatfs;
 
 /* --- High-level helpers used by the CLI ------------------------------- */
 
+/* Optional progress callback, invoked by USB_FileToPSRAM once per
+ * chunk (every s_sector_buf bytes). Lets the caller draw a progress
+ * bar / percentage on the MSX terminal while a multi-megabyte ROM is
+ * being streamed into PSRAM (8 MiB takes 10-20 s over USB FS - long
+ * enough that a static "Loading" line looks like a crash).
+ *
+ * Set to NULL to disable. Called with (bytes_copied_so_far,
+ * total_bytes_planned). Keep the body SHORT - it runs inside the
+ * read loop and slows the copy down. */
+extern void (*USB_ProgressCB) (uint32_t done, uint32_t total);
+
 /* Read `len` bytes of `path` into the PSRAM buffer at `psram_addr`.
  * If `len` is 0, the file size is used. Uses FATFS to seek/open/read
  * and PSRAM DMA to push each chunk into PSRAM. `len` is capped at the

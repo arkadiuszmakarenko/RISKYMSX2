@@ -809,6 +809,10 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
  * SRAM is only ~135 KB but a single 512-byte buffer is fine. */
 __attribute__ ((aligned (4))) static uint8_t s_sector_buf[512];
 
+/* Optional progress callback for USB_FileToPSRAM (see usb_disk.h).
+ * NULL by default - only the terminal loader installs one. */
+void (*USB_ProgressCB) (uint32_t done, uint32_t total) = 0;
+
 /* Set by USB_TryEnsureMounted() once f_mount() has succeeded.  Cleared
  * on every disconnect (so the next file op re-mounts).  Keeps the
  * "am I mounted?" check out of every f_opendir / f_open. */
@@ -944,6 +948,11 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
             break;
         }
         total += (uint32_t)br;
+        /* Progress hook: call AFTER the chunk lands in PSRAM so the
+         * percentage reflects data actually stored, not just read. */
+        if (USB_ProgressCB != 0) {
+            USB_ProgressCB (total, len);
+        }
         if (br < chunk) break;     /* EOF */
     }
 

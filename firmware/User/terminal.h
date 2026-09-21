@@ -39,14 +39,19 @@ typedef struct {
     volatile uint8_t  kbd_n;
     /* output FIFO: terminal.c pushes; MSX pops at 0x7FFF. Sized to
      * hold an entire file-list refresh plus title, screen-clear,
-     * sprite-position and a comfortable safety margin (~620 bytes
-     * for a 15-file menu), so the menu pushes in one Terminal_Service
+     * sprite-position and a comfortable safety margin (~800 bytes
+     * for a 20-file menu), so the menu pushes in one Terminal_Service
      * pass without overflowing and the MSX never sees a partial
-     * refresh. */
+     * refresh.
+     *
+     * out_head / out_tail MUST be uint16_t: the ring wraps at 2048,
+     * and a uint8_t index would alias after 256 bytes - which was
+     * exactly the "only 6 files render, second page repeats one
+     * file" bug. */
     volatile uint8_t  out_buf[2048];
-    volatile uint8_t  out_head;
-    volatile uint8_t  out_tail;
-    volatile uint8_t  out_n;
+    volatile uint16_t out_head;
+    volatile uint16_t out_tail;
+    volatile uint16_t out_n;
     /* control byte: latched on every 0x7FFE write. terminal.c reads
      * and clears. Set to 0xFF to mean "no control yet" (since valid
      * control values are 0x00/0x03/0x04 - all small, so 0xFF never
