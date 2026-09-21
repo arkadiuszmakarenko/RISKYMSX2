@@ -83,7 +83,7 @@
                                      83         ;; GRPH not held: continue with body copy + run
       004018 21r26r40         [10]   84         ld      hl, #body              ; source in ROM
       00401B 11 00 E0         [10]   85         ld      de, #0xE000            ; destination in MSX RAM
-      00401E 01 A6 00         [10]   86         ld      bc, #BODY_SIZE         ; byte count
+      00401E 01 8E 00         [10]   86         ld      bc, #BODY_SIZE         ; byte count
       004021 ED B0            [21]   87         ldir
       004023 C3 00 E0         [10]   88         jp      0xE000                 ; jump into the relocated copy
                                      89 
@@ -126,105 +126,88 @@
       004045 3E 08            [ 7]  126         ld      a, #8
       004047 21 03 1B         [10]  127         ld      hl, #0x1B03
       00404A CD 4D 00         [17]  128         call    0x004D
-                                    129         ;; Initialise sprite 0 properly. v303 only wrote 8 to 0x1B03
-                                    130         ;; (the unused attribute byte on MSX1) and relied on the
-                                    131         ;; pattern index at 0x1B02 being zero - which is only true
-                                    132         ;; on cold boot. After other carts or sprites use 0x1B02 the
-                                    133         ;; arrow shows whatever pattern sits at the stale index.
-                                    134         ;; Force pattern index = 0 (arrow lives at VRAM 0x3800) and
-                                    135         ;; start with the sprite hidden (Y = 0) so a stale VRAM Y
-                                    136         ;; doesn't show junk before the firmware's first 0x04 push.
-      00404D 3E 00            [ 7]  137         ld      a, #0                   ; pattern index 0 = arrow @ 0x3800
-      00404F 21 02 1B         [10]  138         ld      hl, #0x1B02
-      004052 CD 4D 00         [17]  139         call    0x004D
-      004055 3E 00            [ 7]  140         ld      a, #0                   ; Y = 0 = sprite hidden
-      004057 21 00 1B         [10]  141         ld      hl, #0x1B00
-      00405A CD 4D 00         [17]  142         call    0x004D
-      00405D 3E 01            [ 7]  143         ld      a, #1                   ; X = 1 (off-screen) - hidden by Y first
-      00405F 21 01 1B         [10]  144         ld      hl, #0x1B01
-      004062 CD 4D 00         [17]  145         call    0x004D
+                                    129 
+      00404D                        130 loop:
+                                    131         ;; Poll firmware FIFO at 0x7FFF.
+      00404D 3A FF 7F         [13]  132         ld      a, (0x7FFF)
+      004050 FE 03            [ 7]  133         cp      #3
+      004052 28 2B            [12]  134         jr      z, rom_start            ; "boot the cart"
+      004054 FE 04            [ 7]  135         cp      #4
+      004056 28 14            [12]  136         jr      z, sprite               ; "move the cursor"
+      004058 A7               [ 4]  137         and     a
+      004059 CCrA9r40         [17]  138         call    z, wait                 ; empty -> wait one refresh
+      00405C C4 A2 00         [17]  139         call    nz, 0x00A2              ; non-empty -> CHPUT (BIOS print)
+                                    140         ;; Poll keyboard and forward on 0x7FFD.
+      00405F CD 9C 00         [17]  141         call    0x009C                  ; CHSNS - any key?
+      004062 28 E9            [12]  142         jr      z, loop
+      004064 CD 9F 00         [17]  143         call    0x009F                  ; CHGET - read key
+      004067 32 FD 7F         [13]  144         ld      (0x7FFD), a
+      00406A 18 E1            [12]  145         jr      loop
                                     146 
-      004065                        147 loop:
-                                    148         ;; Poll firmware FIFO at 0x7FFF.
-      004065 3A FF 7F         [13]  149         ld      a, (0x7FFF)
-      004068 FE 03            [ 7]  150         cp      #3
-      00406A 28 2B            [12]  151         jr      z, rom_start            ; "boot the cart"
-      00406C FE 04            [ 7]  152         cp      #4
-      00406E 28 14            [12]  153         jr      z, sprite               ; "move the cursor"
-      004070 A7               [ 4]  154         and     a
-      004071 CCrC1r40         [17]  155         call    z, wait                 ; empty -> wait one refresh
-      004074 C4 A2 00         [17]  156         call    nz, 0x00A2              ; non-empty -> CHPUT (BIOS print)
-                                    157         ;; Poll keyboard and forward on 0x7FFD.
-      004077 CD 9C 00         [17]  158         call    0x009C                  ; CHSNS - any key?
-      00407A 28 E9            [12]  159         jr      z, loop
-      00407C CD 9F 00         [17]  160         call    0x009F                  ; CHGET - read key
-      00407F 32 FD 7F         [13]  161         ld      (0x7FFD), a
-      004082 18 E1            [12]  162         jr      loop
-                                    163 
-      004084                        164 sprite:
-      004084 3A FF 7F         [13]  165         ld      a, (0x7FFF)             ; X
-      004087 21 01 1B         [10]  166         ld      hl, #0x1B01
-      00408A CD 4D 00         [17]  167         call    0x004D
-      00408D 3A FF 7F         [13]  168         ld      a, (0x7FFF)             ; Y
-      004090 3D               [ 4]  169         dec     a
-      004091 2D               [ 4]  170         dec     l
-      004092 CD 4D 00         [17]  171         call    0x004D
-      004095 18 CE            [12]  172         jr      loop
-                                    173 
-      004097                        174 rom_start:
-      004097 CDrC1r40         [17]  175         call    wait
-      00409A CDrC1r40         [17]  176         call    wait                    ; >= 20 ms for firmware to settle
-      00409D 2A B1 F6         [16]  177         ld      hl, (0xF6B1)
-      0040A0 11 F4 FF         [10]  178         ld      de, #-12
-      0040A3 19               [11]  179         add     hl, de
-      0040A4 E5               [11]  180         push    hl
-      0040A5 5E               [ 7]  181         ld      e, (hl)
-      0040A6 23               [ 6]  182         inc     hl
-      0040A7 56               [ 7]  183         ld      d, (hl)
-      0040A8 21 A3 7D         [10]  184         ld      hl, #0x7DA3
-      0040AB E7               [11]  185         rst     #0x20                   ; COMPARE HL, DE (BIOS helper)
-      0040AC E1               [10]  186         pop     hl
-      0040AD 20 0C            [12]  187         jr      nz, unknown
-      0040AF 11rB6r40         [10]  188         ld      de, #ugly_patch
-      0040B2 73               [ 7]  189         ld      (hl), e
-      0040B3 23               [ 6]  190         inc     hl
-      0040B4 72               [ 7]  191         ld      (hl), d
-      0040B5 C9               [10]  192         ret
-                                    193 
-      0040B6                        194 ugly_patch:
-      0040B6 C1               [10]  195         pop     bc
-      0040B7 E1               [10]  196         pop     hl
-      0040B8 C3 84 7D         [10]  197         jp      0x7D84
+      00406C                        147 sprite:
+      00406C 3A FF 7F         [13]  148         ld      a, (0x7FFF)             ; X
+      00406F 21 01 1B         [10]  149         ld      hl, #0x1B01
+      004072 CD 4D 00         [17]  150         call    0x004D
+      004075 3A FF 7F         [13]  151         ld      a, (0x7FFF)             ; Y
+      004078 3D               [ 4]  152         dec     a
+      004079 2D               [ 4]  153         dec     l
+      00407A CD 4D 00         [17]  154         call    0x004D
+      00407D 18 CE            [12]  155         jr      loop
+                                    156 
+      00407F                        157 rom_start:
+      00407F CDrA9r40         [17]  158         call    wait
+      004082 CDrA9r40         [17]  159         call    wait                    ; >= 20 ms for firmware to settle
+      004085 2A B1 F6         [16]  160         ld      hl, (0xF6B1)
+      004088 11 F4 FF         [10]  161         ld      de, #-12
+      00408B 19               [11]  162         add     hl, de
+      00408C E5               [11]  163         push    hl
+      00408D 5E               [ 7]  164         ld      e, (hl)
+      00408E 23               [ 6]  165         inc     hl
+      00408F 56               [ 7]  166         ld      d, (hl)
+      004090 21 A3 7D         [10]  167         ld      hl, #0x7DA3
+      004093 E7               [11]  168         rst     #0x20                   ; COMPARE HL, DE (BIOS helper)
+      004094 E1               [10]  169         pop     hl
+      004095 20 0C            [12]  170         jr      nz, unknown
+      004097 11r9Er40         [10]  171         ld      de, #ugly_patch
+      00409A 73               [ 7]  172         ld      (hl), e
+      00409B 23               [ 6]  173         inc     hl
+      00409C 72               [ 7]  174         ld      (hl), d
+      00409D C9               [10]  175         ret
+                                    176 
+      00409E                        177 ugly_patch:
+      00409E C1               [10]  178         pop     bc
+      00409F E1               [10]  179         pop     hl
+      0040A0 C3 84 7D         [10]  180         jp      0x7D84
+                                    181 
+      0040A3                        182 unknown:
+      0040A3 1E 52            [ 7]  183         ld      e, #'R'
+      0040A5 CD B1 FF         [17]  184         call    0xFFB1
+      0040A8 C7               [11]  185         rst     0
+                                    186 
+      0040A9                        187 wait:
+      0040A9 F5               [11]  188         push    af
+      0040AA FB               [ 4]  189         ei
+      0040AB 21 9E FC         [10]  190         ld      hl, #0xFC9E             ; JIFFY
+      0040AE 7E               [ 7]  191         ld      a, (hl)
+      0040AF                        192 wait_loop:
+      0040AF BE               [ 7]  193         cp      (hl)
+      0040B0 28 FD            [12]  194         jr      z, wait_loop
+      0040B2 F1               [10]  195         pop     af
+      0040B3 C9               [10]  196         ret
+      0040B4                        197 body_end:
                                     198 
-      0040BB                        199 unknown:
-      0040BB 1E 52            [ 7]  200         ld      e, #'R'
-      0040BD CD B1 FF         [17]  201         call    0xFFB1
-      0040C0 C7               [11]  202         rst     0
-                                    203 
-      0040C1                        204 wait:
-      0040C1 F5               [11]  205         push    af
-      0040C2 FB               [ 4]  206         ei
-      0040C3 21 9E FC         [10]  207         ld      hl, #0xFC9E             ; JIFFY
-      0040C6 7E               [ 7]  208         ld      a, (hl)
-      0040C7                        209 wait_loop:
-      0040C7 BE               [ 7]  210         cp      (hl)
-      0040C8 28 FD            [12]  211         jr      z, wait_loop
-      0040CA F1               [10]  212         pop     af
-      0040CB C9               [10]  213         ret
-      0040CC                        214 body_end:
-                                    215 
-                           0000A6   216 BODY_SIZE = body_end - body
-                                    217 
-                                    218 ;-------------------------------------------------------------------------------
-                                    219 ; Cursor arrow sprite pattern - sits just past the relocated body.
-                                    220 ;-------------------------------------------------------------------------------
-      0040F0                        221         .org    0x40F0
-      0040F0                        222 arrow:
-      0040F0 20                     223         .db     0b00100000
-      0040F1 30                     224         .db     0b00110000
-      0040F2 38                     225         .db     0b00111000
-      0040F3 3C                     226         .db     0b00111100
-      0040F4 38                     227         .db     0b00111000
-      0040F5 30                     228         .db     0b00110000
-      0040F6 20                     229         .db     0b00100000
-      0040F7 00                     230         .db     0b00000000
+                           00008E   199 BODY_SIZE = body_end - body
+                                    200 
+                                    201 ;-------------------------------------------------------------------------------
+                                    202 ; Cursor arrow sprite pattern - sits just past the relocated body.
+                                    203 ;-------------------------------------------------------------------------------
+      0040F0                        204         .org    0x40F0
+      0040F0                        205 arrow:
+      0040F0 20                     206         .db     0b00100000
+      0040F1 30                     207         .db     0b00110000
+      0040F2 38                     208         .db     0b00111000
+      0040F3 3C                     209         .db     0b00111100
+      0040F4 38                     210         .db     0b00111000
+      0040F5 30                     211         .db     0b00110000
+      0040F6 20                     212         .db     0b00100000
+      0040F7 00                     213         .db     0b00000000
