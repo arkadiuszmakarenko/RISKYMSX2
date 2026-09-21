@@ -169,6 +169,22 @@ static void newline (void) {
     out_push ('\n');
 }
 
+/* Spin until the MSX has drained the output FIFO (out_n == 0) or the
+ * given millisecond budget expires, whichever comes first.
+ *
+ * Clock-derived calibration: empirically 4,000,000 iterations = 20 ms
+ * at 200 MHz HCLK (~1 cycle/iteration), so iters-per-ms =
+ * SystemCoreClock (HCLK) / 1000. Stays correct at 175 MHz HCLK too
+ * (this is only a scheduling budget, not a hard deadline). */
+static void term_wait_drain (uint32_t ms) {
+    const uint32_t iters = ms * (SystemCoreClock / 1000U);
+    uint32_t i;
+    for (i = 0; i < iters; i++) {
+        if (g_term_mbox.out_n == 0U) break;
+        __asm__ volatile ("nop");
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Public mailbox lifecycle                                            */
 /* ------------------------------------------------------------------ */
@@ -404,6 +420,16 @@ static void term_progress_cb (uint32_t done, uint32_t total) {
 
     uint32_t filled = (uint32_t)(((uint64_t)done * TERM_PROG_BAR_BLOCKS) / total);
 
+    /* Backpressure: the ring is only 2048 bytes and the MSX drains at
+     * ~50 µs/byte, so a bar redraw every 1% can outrun it. If out_n is
+     * high, SKIP this redraw - a skipped cosmetic update is harmless,
+     * but out_push() silently drops bytes when full, and dropping the
+     * trailing " OK - booting MSX into cart" + 0x03 launch byte (see
+     * soft_reset_into_cart) leaves the MSX in the terminal loop and
+     * the cart never boots. Threading the ring below ~50% always
+     * leaves room for the launch sequence. */
+    if (g_term_mbox.out_n > 1024U) return;
+
     /* Move to the progress-bar row (row 3, column 0) and redraw in
      * place - must match the header layout in Terminal_BootCart. */
     move_cursor (3, 0);
@@ -449,24 +475,28 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * handler is uninstalled, reads at 0x7FFF return 0xFF (open bus,
      * served by RunKonamiSCC as "page 7, bus off"), and the MSX-side
      * terminal loop prints those 0xFFs forever = the "random rubbish
-     * on screen" bug. So: push 0x03, then SPIN until the MSX has
-     * actually drained the FIFO (out_n == 0), THEN swap. Bounded so a
-     * dead MSX can't wedge the firmware - after 200 ms we swap
-     * anyway (best effort). */
+     * on screen" bug. Terminal_BootCart already FLUSHED the backlog
+     * and pushed the short " OK..." line BEFORE the 0x03, so only
+     * ~30 bytes precede the launch byte and the polling MSX consumes
+     * them within one jiffy frame (<= ~18 ms). */
     out_push (0x03);
     {
-        /* 200 ms ceiling at ~2.7 cycles/iteration (200 MHz HCLK):
-         * 200e-3 * 200e6 / 5 cycles-per-iteration ≈ 8e6. Use a
-         * generous 12e6 so the MSX's ~50 µs/byte CHPUT drain has
-         * plenty of headroom even for a full progress-bar FIFO. */
-        for (volatile uint32_t i = 0; i < 12000000U; i++) {
-            if (g_term_mbox.out_n == 0U) break;
+        /* FIXED ~20 ms spin - the PROVEN 55b6b88 schedule, restored.
+         * Do NOT break early when out_n hits 0: swapping the instant
+         * the MSX pops the 0x03 (while it is still finishing its poll
+         * loop) was tried and games stopped booting; the fixed delay
+         * lands the swap safely inside rom_start's jiffy WAITs, with
+         * the BIOS slot probe still >= 15 ms away. Same loop shape
+         * and same 4,000,000-iteration constant as the working build
+         * (empirically ~20 ms at 200 MHz HCLK including the volatile
+         * counter overhead). */
+        for (volatile uint32_t i = 0; i < 4000000U; i++) {
             __asm__ volatile ("nop");
         }
         if (g_term_mbox.out_n != 0U) {
-            printf ("TERM: WARNING FIFO not drained (out_n=%u) - "
-                    "swapping mapper anyway, MSX may show rubbish\r\n",
-                    g_term_mbox.out_n);
+            printf ("TERM: WARNING FIFO not drained (out_n=%u at swap "
+                    "time) - MSX has not read the 0x03 yet, it may "
+                    "show rubbish\r\n", g_term_mbox.out_n);
         }
     }
     printf ("TERM: soft_reset swap mapper=%d\r\n", (int)m);
@@ -476,7 +506,8 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * new ROM's 'AB' header. */
     (void)Cart_SetMapper_Safe (m);
     /* 50 ms cushion for PSRAM settle + new INIT LDIR copy + slot
-     * probe completion + return-to-user-code. */
+     * probe completion + return-to-user-code. Same 10,000,000-iteration
+     * loop as the working 55b6b88 build. */
     for (volatile uint32_t i = 0; i < 10000000U; i++) { __asm__ volatile ("nop"); }
 }
 
@@ -545,6 +576,43 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
                     "verify the ROM file\r\n");
         }
         s_menu.loaded = 1;
+        /* VERIFY the image really landed in PSRAM: the cart handler
+         * serves BIOS slot probes from PSRAM[GAME_BASE + addr], so a
+         * valid bootable ROM starts with "AB" (0x41 0x42) at offset
+         * 0 and a second "AB" at 0x4000 for Konami/SCC mappers
+         * (2-page image). If these bytes are wrong the reset sequence
+         * works perfectly but the BIOS probes will never accept the
+         * cart - or serves garbage. Read back directly over the
+         * PSRAM window (same bus the ELF handler uses). */
+        {
+            volatile const uint8_t *ps =
+                (volatile const uint8_t *)(PSRAM_CART_BASE + CART_GAME_BASE);
+            printf ("TERM: PSRAM verify [0000]=%02x %02x | [4000]=%02x %02x"
+                    " (want 41 42)\r\n",
+                    ps[0x0000U], ps[0x0001U], ps[0x4000U], ps[0x4001U]);
+            if (ps[0] != 0x41U || ps[1] != 0x42U) {
+                printf ("TERM: WARNING no 'AB' header at PSRAM 0 - "
+                        "BIOS will not boot this image!\r\n");
+            }
+        }
+        /* DRAIN THE BACKLOG BEFORE THE LAUNCH TEXT: the MSX prints at
+         * ~50 µs/byte, so a ~1 KB bar/status backlog takes ~50 ms to
+         * consume. The old flow pushed " OK..."+0x03 directly behind
+         * that backlog; the 20 ms mapper-swap budget then expired with
+         * 610 bytes still unread (observed on the console) and the MSX
+         * never actually READ the 0x03 -> after the swap its 0x7FFF
+         * polls return open bus and the cart never boots. Flushing
+         * here is safe: until 0x03 is pushed the MSX is only printing
+         * (its terminal LOOP), it cannot reach ROM_START or touch
+         * 0x4000. 600 ms covers the worst-case 2048-byte ring at ~50
+         * µs/byte (~102 ms) with margin; normally it returns in tens
+         * of ms. */
+        term_wait_drain (600U);
+        if (g_term_mbox.out_n != 0U) {
+            printf ("TERM: WARNING MSX still draining (out_n=%u after "
+                    "600 ms) - launch text will queue behind it\r\n",
+                    g_term_mbox.out_n);
+        }
         out_str (" OK - booting MSX into cart");
         newline ();
         printf ("TERM: about to soft_reset_into_cart mapper=%d "

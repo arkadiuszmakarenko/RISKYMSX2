@@ -106,10 +106,23 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "TERMINAL",
 };
 
+Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
+
+/* Diagnostics (currently DORMANT - nothing increments these): an
+ * earlier instrumented build incremented them from inside the
+ * .ramfunc EXTI0 handlers, but a volatile global RMW (~5-8 cycles)
+ * on the cycle-critical read path (must drive the Z80 data bus
+ * before its sampling point) broke the BIOS slot probe ("games
+ * don't boot" regression). Keep the symbols for a future LA-gated
+ * variant, but NEVER increment from the EXTI0 hot path. */
+volatile uint32_t g_cart_rd_cycles = 0U;
+volatile uint32_t g_cart_wr_cycles = 0U;
+uint32_t Cart_GetRdCycles (void) { return g_cart_rd_cycles; }
+uint32_t Cart_GetWrCycles (void) { return g_cart_wr_cycles; }
+
 uint32_t Cart_GetImageBase (void) { return PSRAM_CART_BASE; }
 uint32_t Cart_GetImageSize (void) { return PSRAM_CART_SIZE; }
 uint32_t Cart_GetGameBase (void) { return CART_GAME_BASE; }
-Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
 
 /* ------------------------------------------------------------------ */
 /* Cart_SetMapper_Safe                                                */

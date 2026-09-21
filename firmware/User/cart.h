@@ -139,6 +139,16 @@ extern const char *const Cart_MapperNames[CART_MAP_MAX];
 int  Cart_SetMapper (Cart_Mapper m);
 Cart_Mapper Cart_GetMapper (void);
 
+/* Diagnostics: count of cart image-window READ cycles served post-swap
+ * (ROM32k/ROM48k handlers). Cleared by soft_reset_into_cart, printed
+ * after the 500 ms boot-probe observation window. rd>0 proves the MSX
+ * BIOS probed the cart after the reset dance; rd==0 means it never
+ * touched the cart window (rom_start/reset path failed MSX-side). */
+extern volatile uint32_t g_cart_rd_cycles;
+extern volatile uint32_t g_cart_wr_cycles;
+uint32_t Cart_GetRdCycles (void);
+uint32_t Cart_GetWrCycles (void);
+
 /* Hardened mapper-swap primitive (see Cart_SetMapper_Safe() body in
  * cart.c for the full list of hazards it closes).
  *
