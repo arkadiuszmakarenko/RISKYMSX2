@@ -13,7 +13,6 @@
 #include "debug.h"
 #include "cart.h"
 #include "psram.h"
-#include "cli.h"
 #include "scc.h"
 #include "loader.h"
 #include "usb_disk.h"
@@ -68,18 +67,15 @@ int main (void) {
     /* USBHS host init. Powers up the controller so it's ready. */
     USB_Initialization ();
 
-    /* CLI: USART1 command interface.  Commands are dispatched from the
-     * main loop (CLI_Service below), never from the IRQ. */
-    CLI_Init ();
-
     printf ("\r\n=== boot complete ===\r\n");
 
-    /* Idle loop: service CLI commands + the ROM-loader mailbox, sleep
-     * between interrupts.  Loader_Service drains any command the MSX
-     * posted through the cart mailbox (dir listing, file load, mapper
-     * switch, soft-reset). */
+    /* Idle loop: service the ROM-loader mailbox, sleep between
+     * interrupts.  Loader_Service drains any command the MSX posted
+     * through the cart mailbox (dir listing, file load, mapper
+     * switch, soft-reset).  The previous interactive CLI was used
+     * only during early bring-up; USART1's TX path stays live so
+     * `printf` debug lines continue to work. */
     for (;;) {
-        CLI_Service ();
         Loader_Service ();
         __asm__ volatile ("wfi");
     }

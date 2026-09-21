@@ -64,9 +64,9 @@ __attribute__ ((aligned (4))) uint8_t DevDesc_Buf[18];
 struct _ROOT_HUB_DEVICE RootHubDev[DEF_TOTAL_ROOT_HUB];
 struct __HOST_CTL        HostCtl[DEF_TOTAL_ROOT_HUB * DEF_ONE_USB_SUP_DEV_TOTAL];
 
-/* The single FATFS volume handle used by the firmware (mounted in cli.c
- * once USBH_PreDeal reports success).  Declared here so the disk glue +
- * the CLI share the same instance. */
+/* The single FATFS volume handle used by the firmware (mounted once
+ * USBH_PreDeal reports success).  Declared here so the disk glue +
+ * the loader share the same instance. */
 FATFS g_fatfs;
 
 /* The PSRAM-based buffers must be exposed via their PSRAM addresses too
