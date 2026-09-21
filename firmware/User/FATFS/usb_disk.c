@@ -777,11 +777,24 @@ uint8_t usb_scsi_test_unit_ready (void) {
  * (must be in SRAM, NOT in PSRAM - the PSRAM controller reads from the
  * system bus).  `sram_src` points at a 4-byte-aligned SRAM region of
  * `byte_count` bytes (must be a multiple of 4). */
+/* Chunk-print throttle for psram_dma_copy: only the first
+ * USB_DMA_DBG_CHUNKS chunks of each load print debug lines, so the
+ * console isn't flooded (an 8 MiB file = 16384 chunks). */
+#define USB_DMA_DBG_CHUNKS  4U
+static uint32_t s_dbg_count = 0U;
+
 static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
                                uint32_t byte_count) {
     if ((byte_count & 3U) != 0U) return 1;        /* must be 4-byte aligned */
     if (((uint32_t)sram_src & 3U) != 0U) return 1;
     if (byte_count == 0U) return 0;
+
+    if (s_dbg_count < USB_DMA_DBG_CHUNKS) {
+        printf ("USB:   DMA[%lu] sram=0x%08lx psram=0x%08lx bytes=%lu\r\n",
+                (unsigned long)s_dbg_count, (unsigned long)sram_src,
+                (unsigned long)psram_addr, (unsigned long)byte_count);
+        s_dbg_count++;
+    }
 
     PSRAMDMATypeDef dmas = {0};
     dmas.PSRAM_DMA_DAT_DIR      = DMA_DIR_PSRAM;   /* SRAM -> PSRAM */
@@ -900,7 +913,13 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
     /* Lazy-mount: if the user skipped `USB` (or replugged after a
      // disconnect), get the stick enumerated and the volume mounted
      // before we try to open the file. */
-    if (USB_TryEnsureMounted () != DEF_SUCCESS) return 0U;
+    printf ("USB: FileToPSRAM path='%s' psram=0x%08lx len=%lu\r\n",
+            path, (unsigned long)psram_addr, (unsigned long)len);
+    if (USB_TryEnsureMounted () != DEF_SUCCESS) {
+        printf ("USB: ensure-mounted FAILED - aborting copy\r\n");
+        return 0U;
+    }
+    printf ("USB: volume mounted OK\r\n");
 
     FIL     fp;
     FRESULT fr;
@@ -912,6 +931,7 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
         printf ("USB: f_open('%s') failed (%u)\r\n", path, (unsigned)fr);
         return 0U;
     }
+    printf ("USB: f_open OK (size=%lu)\r\n", (unsigned long)f_size (&fp));
 
     /* Bounds check: psram_addr is the absolute PSRAM bus address
      * (always >= PSRAM_CART_BASE 0x80000000). Compare the offset
@@ -926,25 +946,54 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
                 (unsigned long)psram_addr);
         return 0U;
     }
+    printf ("USB: PSRAM addr in range (offset %lu)\r\n",
+            (unsigned long)(psram_addr - PSRAM_CART_BASE));
 
     if (len == 0U) {
         len = (uint32_t)f_size (&fp);
+        printf ("USB: len=0 -> using file size %lu\r\n",
+                (unsigned long)len);
     }
 
     uint32_t remaining = PSRAM_CART_SIZE - (psram_addr - PSRAM_CART_BASE);
     if (len > remaining) {
+        printf ("USB: len %lu capped to remaining %lu\r\n",
+                (unsigned long)len, (unsigned long)remaining);
         len = remaining;
     }
+    printf ("USB: copy plan: %lu bytes in %lu x %u-byte chunks\r\n",
+            (unsigned long)len,
+            (unsigned long)((len + sizeof (s_sector_buf) - 1U) /
+                            sizeof (s_sector_buf)),
+            (unsigned)sizeof (s_sector_buf));
 
     while (total < len) {
         uint32_t chunk = len - total;
         if (chunk > sizeof (s_sector_buf)) chunk = sizeof (s_sector_buf);
 
         fr = f_read (&fp, s_sector_buf, chunk, &br);
-        if (fr != FR_OK || br == 0U) break;
+        if (fr != FR_OK) {
+            printf ("USB: f_read FAILED at offset %lu: FRESULT=%u "
+                    "(disk error / stick unplug?)\r\n",
+                    (unsigned long)total, (unsigned)fr);
+            break;
+        }
+        if (br == 0U) {
+            printf ("USB: f_read returned 0 bytes at offset %lu "
+                    "(unexpected EOF)\r\n", (unsigned long)total);
+            break;
+        }
+        if (br != chunk) {
+            printf ("USB: short read at offset %lu: got %u, wanted %lu "
+                    "(treated as EOF)\r\n",
+                    (unsigned long)total, (unsigned)br,
+                    (unsigned long)chunk);
+        }
+
         if (psram_dma_copy (s_sector_buf, psram_addr + total, (uint32_t)br) != 0U) {
-            printf ("USB: PSRAM DMA copy failed at offset %u\r\n",
-                    (unsigned)total);
+            printf ("USB: PSRAM DMA copy FAILED at offset %lu, len %u "
+                    "(alignment or DMA error)\r\n",
+                    (unsigned long)total, (unsigned)br);
             break;
         }
         total += (uint32_t)br;
@@ -956,7 +1005,15 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
         if (br < chunk) break;     /* EOF */
     }
 
+    printf ("USB: copy done: %lu / %lu bytes (%lu%%), last f_read "
+            "FRESULT=%u\r\n",
+            (unsigned long)total, (unsigned long)len,
+            (unsigned long)(len ? (total * 100UL) / len : 0UL),
+            (unsigned)fr);
+    printf ("USB: closing file, final result %s\r\n",
+            (total == len) ? "COMPLETE" : "INCOMPLETE");
     f_close (&fp);
+    s_dbg_count = 0U;   /* re-arm the first-chunk debug for next load */
     return total;
 }
 

@@ -30,15 +30,28 @@ typedef enum {
 
 /* Per-file menu state. */
 static struct {
+    /* SFN (8.3 short name, e.g. "METALG~1.ROM") - what f_open() gets
+     * for every file operation. LFN paths fail f_open with
+     * FR_NO_FILE (4) on our stick, so all operations use the SFN. */
     char    names[TERM_MAX_FILES][FILE_NAME_MAX];
+    /* LFN (long name, up to 25 printable chars) - DISPLAY ONLY.
+     * Drawn in the file list so the menu stays human-readable; never
+     * used for f_open / path building. */
+    char    lfns[TERM_MAX_FILES][FILE_NAME_MAX];
     uint32_t sizes[TERM_MAX_FILES];  /* bytes */
     uint16_t count;
     uint16_t sel;       /* currently-highlighted index (absolute,
                          * i.e. counts across pages) */
     uint16_t page;      /* current page, 0-based */
+    uint16_t file_idx;  /* index of the file picked for the mapper
+                         * screen - s_menu.sel is REUSED as the
+                         * mapper-row index on that screen, so this
+                         * preserves which LFN to display. */
     uint8_t  loaded;    /* "ROM was loaded into PSRAM" */
     MenuState state;
-    char     picked[FILE_NAME_MAX]; /* file name the user selected */
+    char     picked[FILE_NAME_MAX]; /* SFN of the selected file - the
+                                 * operational name passed to
+                                 * Terminal_BootCart */
 } s_menu;
 
 /* Number of pages needed to display s_menu.count files. */
@@ -167,6 +180,7 @@ void Terminal_Reset (void) {
     s_menu.count = 0;
     s_menu.sel   = 0;
     s_menu.page  = 0;
+    s_menu.file_idx = 0;
     s_menu.loaded = 0;
     s_menu.state  = MENU_LIST;
     s_menu.picked[0] = '\0';
@@ -229,8 +243,10 @@ static void print_file_list (void) {
         /* Reserve column 0 for the sprite cursor - text starts at
          * column 1. */
         move_cursor ((uint8_t)(1 + (i - start)), 1);
-        /* pad filename to FILE_NAME_MAX */
-        const char *n = s_menu.names[i];
+        /* print the long name, padded to FILE_NAME_MAX for a stable
+         * column layout (operations keep using the SFN - see
+         * scan_usb). */
+        const char *n = s_menu.lfns[i];
         for (int j = 0; j < FILE_NAME_MAX - 1; j++) {
             char c = n[j];
             if (c == '\0') {
@@ -265,8 +281,10 @@ static void print_mapper_menu (void) {
 
     clear_screen ();
     move_cursor (0, 0);
+    /* Display the long name (human-readable) - operations still use
+     * the SFN stored in s_menu.picked. */
     out_str (" File: ");
-    out_str (s_menu.picked);
+    out_str (s_menu.lfns[s_menu.file_idx]);
     newline ();
     out_str (" Pick mapper (Up/Down/RET/ESC):");
     newline ();
@@ -308,23 +326,54 @@ static void scan_usb (void) {
         /* Accept any file - the v303 firmware filtered by extension
          * (.ROM) but the cart loader may serve .BIN/.MX1 too.
          *
-         * Use the 8.3 SFN (fi.altname), not the LFN (fi.fname). LFN
-         * paths like "0:/Metal Gear 2 - Solid Snake" fail f_open
-         * with FR_NO_FILE (4) for some reason on our stick - the SFN
-         * "METALG~1.ROM" works correctly. The loader (loader.c) was
-         * already using the SFN; align the terminal with that.
-         *
-         * Trade-off: the file shown in the menu is now
-         * METALG~1.ROM, not the human-friendly LFN. Good enough for
-         * testing; can switch back to LFN once f_open's LFN handling
-         * is diagnosed. */
-        const char *n = fi.altname;
+         * Store BOTH name forms:
+         *   - s_menu.names[] = SFN (fi.altname, 8.3) - used for ALL
+         *     file operations (f_open in Terminal_BootCart). LFN
+         *     paths fail f_open with FR_NO_FILE (4) on our stick.
+         *   - s_menu.lfns[]  = LFN (fi.fname) - display only, so the
+         *     menu shows "Metal Gear 2 - Solid Snake" instead of
+         *     METALG~1.ROM. Truncated to the printable width with a
+         *     trailing '.'-style ellipsis when longer. */
+        const char *sf = fi.altname;
         size_t k = 0;
-        while (n[k] && k < FILE_NAME_MAX - 1) {
-            s_menu.names[s_menu.count][k] = n[k];
+        while (sf[k] && k < FILE_NAME_MAX - 1) {
+            s_menu.names[s_menu.count][k] = sf[k];
             k++;
         }
         s_menu.names[s_menu.count][k] = '\0';
+
+        const char *ln = fi.fname;
+        k = 0;
+        while (ln[k] && k < FILE_NAME_MAX - 1) {
+            s_menu.lfns[s_menu.count][k] = ln[k];
+            k++;
+        }
+        s_menu.lfns[s_menu.count][k] = '\0';
+        /* If the LFN is longer than the display width, keep the
+         * extension readable: show first (width-4) chars + "~X" style
+         * ellipsis + extension. Simplest robust rule: keep the last
+         * '.' and truncate the stem. */
+        if (ln[k] != '\0') {
+            /* find extension in the SFN (always present for ROMs) */
+            const char *dot = sf;
+            for (size_t t = 0; sf[t]; t++) if (sf[t] == '.') dot = sf + t;
+            const char *ext = dot;   /* ".ROM" */
+            size_t ext_len = 0;
+            while (ext[ext_len] && (ext - sf) + ext_len < 12U) ext_len++;
+            if (ext_len > 0 && ext_len <= 4U &&
+                (size_t)(FILE_NAME_MAX - 1) > ext_len) {
+                size_t stem = (size_t)(FILE_NAME_MAX - 1) - ext_len;
+                /* copy first `stem` chars of LFN then the extension */
+                for (size_t t = 0; t < stem && ln[t]; t++) {
+                    s_menu.lfns[s_menu.count][t] = ln[t];
+                }
+                size_t w = stem < k ? stem : k;
+                for (size_t t = 0; t < ext_len; t++) {
+                    s_menu.lfns[s_menu.count][w + t] = ext[t];
+                }
+                s_menu.lfns[s_menu.count][w + ext_len] = '\0';
+            }
+        }
         s_menu.sizes[s_menu.count] = fi.fsize;
         printf ("TERM:   file[%u] SFN=[%s] LFN=[%s] sz=%u\r\n",
                 s_menu.count, s_menu.names[s_menu.count], fi.fname, (unsigned)fi.fsize);
@@ -394,12 +443,32 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * triggering. Swap the mapper EARLY (after ~20 ms - just enough
      * for the MSX to read 0x03 and start rom_start) so the slot probe
      * in both paths sees the new ROM image.
-     */
+     *
+     * CRITICAL RACE (fixed here): the MSX has to READ 0x03 from the
+     * FIFO before we swap the mapper - after the swap the TERMINAL
+     * handler is uninstalled, reads at 0x7FFF return 0xFF (open bus,
+     * served by RunKonamiSCC as "page 7, bus off"), and the MSX-side
+     * terminal loop prints those 0xFFs forever = the "random rubbish
+     * on screen" bug. So: push 0x03, then SPIN until the MSX has
+     * actually drained the FIFO (out_n == 0), THEN swap. Bounded so a
+     * dead MSX can't wedge the firmware - after 200 ms we swap
+     * anyway (best effort). */
     out_push (0x03);
-    /* 20 ms: enough for the MSX to read 0x03 (one screen-refresh poll)
-     * and enter rom_start. At 200 MHz HCLK and ~5 ns/nop, 4,000,000
-     * iterations = 20 ms. */
-    for (volatile uint32_t i = 0; i < 4000000U; i++) { __asm__ volatile ("nop"); }
+    {
+        /* 200 ms ceiling at ~2.7 cycles/iteration (200 MHz HCLK):
+         * 200e-3 * 200e6 / 5 cycles-per-iteration ≈ 8e6. Use a
+         * generous 12e6 so the MSX's ~50 µs/byte CHPUT drain has
+         * plenty of headroom even for a full progress-bar FIFO. */
+        for (volatile uint32_t i = 0; i < 12000000U; i++) {
+            if (g_term_mbox.out_n == 0U) break;
+            __asm__ volatile ("nop");
+        }
+        if (g_term_mbox.out_n != 0U) {
+            printf ("TERM: WARNING FIFO not drained (out_n=%u) - "
+                    "swapping mapper anyway, MSX may show rubbish\r\n",
+                    g_term_mbox.out_n);
+        }
+    }
     printf ("TERM: soft_reset swap mapper=%d\r\n", (int)m);
     /* Swap the mapper. The MSX-side rom_start is now executing in
      * MSX RAM; both path (A) (UGLY_PATCH) and path (B) (RST 0 from
@@ -461,16 +530,26 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
                                         PSRAM_CART_BASE + CART_GAME_BASE,
                                         0U);
         USB_ProgressCB = 0;
-        printf ("TERM: USB_FileToPSRAM got=%u\r\n", (unsigned)got);
+        printf ("TERM: USB_FileToPSRAM got=%u (expected full file)\r\n",
+                (unsigned)got);
         if (got == 0U) {
             out_str (" Load FAILED");
             newline ();
+            printf ("TERM: load failed - f_open or first f_read error; "
+                    "check USB: lines above\r\n");
             return;
+        }
+        if (got < 1024U) {
+            /* Suspiciously small - could be a wrong file / FAT issue. */
+            printf ("TERM: WARNING got < 1 KiB - suspicious, "
+                    "verify the ROM file\r\n");
         }
         s_menu.loaded = 1;
         out_str (" OK - booting MSX into cart");
         newline ();
-        printf ("TERM: soft_reset_into_cart mapper=%d\r\n", (int)m);
+        printf ("TERM: about to soft_reset_into_cart mapper=%d "
+                "(PSRAM has %u bytes of '%s')\r\n",
+                (int)m, (unsigned)got, path);
         soft_reset_into_cart (m);
     }
 }
@@ -524,6 +603,10 @@ static void handle_list_key (uint8_t key) {
         while (n[i] && i < FILE_NAME_MAX - 1) { s_menu.picked[i] = n[i]; i++; }
         s_menu.picked[i] = '\0';
         printf ("TERM: picked file [%s] -> mapper menu\r\n", s_menu.picked);
+        /* Remember which file was picked (for the LFN display on the
+         * mapper screen) BEFORE s_menu.sel is reused as the
+         * mapper-row index. */
+        s_menu.file_idx = s_menu.sel;
         /* Reuse s_menu.sel as the mapper-screen highlight index.
          * Reset to 0 so the arrow starts on the first (default)
          * mapper entry. */

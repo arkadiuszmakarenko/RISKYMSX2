@@ -152,6 +152,7 @@ Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
  * Returns the same value as Cart_SetMapper(). */
 int Cart_SetMapper_Safe (Cart_Mapper m);
 int Cart_SetMapper_Safe (Cart_Mapper m) {
+    printf ("CART: SetMapper_Safe -> %d\r\n", (int)m);
     /* Phase 1: stop the IRQ. The order matters:
      *   - EXTI0's pending bit is in EXTI->INTFR (edge-triggered on
      *     PE0 falling edge). Masking it via EXTI->INTENR bit is
@@ -187,6 +188,7 @@ int Cart_SetMapper_Safe (Cart_Mapper m) {
 
     /* Phase 4: the actual swap (handler + bankOffsets + g_mapper). */
     const int rc = Cart_SetMapper (m);
+    printf ("CART: SetMapper(%d) -> rc=%d\r\n", (int)m, rc);
 
     /* Phase 5: clear any phantom EXTI0 edge that latched during the
      * wait. Writing 1 to the bit clears it (WCH edge-triggered IRQ
