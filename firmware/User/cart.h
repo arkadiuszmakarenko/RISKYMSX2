@@ -127,7 +127,15 @@ typedef enum {
                                   * workflow - swap away via the menu to
                                   * the FLASH mapper if the user prefers
                                   * the existing mailbox-driven loader. */
-    CART_MAP_MAX        = 13,
+    CART_MAP_NEXTOR     = 13,  /* Nextor kernel cart: serves the embedded
+     * Nextor 3.0 kernel ROM (nextor_rom[], .cartrom) through an
+     * ASCII16-style banked window at page 1 (0x4000-0x7FFF; the bank
+     * number is written to 0x6000). The 0x7FF0..0x7FF7 window is the
+     * Nextor mailbox (MSXSoftware/NextorDriver/driver.asm <->
+     * nextor.c Nextor_Service). Flash-served: no PSRAM image. Reached
+     * via the terminal menu's N key (handle_list_key ->
+     * soft_reset_into_cart(CART_MAP_NEXTOR)). */
+    CART_MAP_MAX        = 14,
 } Cart_Mapper;
 
 /* Mapper names used by `MAP ?` and CLI error messages. */

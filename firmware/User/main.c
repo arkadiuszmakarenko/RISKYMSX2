@@ -15,6 +15,7 @@
 #include "psram.h"
 #include "scc.h"
 #include "loader.h"
+#include "nextor.h"
 #include "terminal.h"
 #include "usb_disk.h"
 #include "usb_tests.h"
@@ -83,7 +84,14 @@ int main (void) {
      * Terminal_Service when the TERMINAL mapper is not installed:
      * it only touches its own volatile fields, which the next cart
      * swap to TERMINAL simply discards. */
+    /* The Nextor engine is additionally gated on its mapper being
+     * active, so it stays fully inert in the terminal workflow and
+     * only services the DOS driver's mailbox after the N-key launch
+     * installs CART_MAP_NEXTOR. */
     for (;;) {
+        if (Cart_GetMapper () == CART_MAP_NEXTOR) {
+            Nextor_Service ();
+        }
         Loader_Service ();
         Terminal_Service ();
         __asm__ volatile ("wfi");

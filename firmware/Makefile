@@ -173,13 +173,18 @@ INCDIRS        := -IDebug -ICore \
                   -IPeripheral/inc -IStartup
 MSX_SOFTWARE_DIR := $(CURDIR)/../MSXSoftware
 ROM_LOADER_DIR   := $(MSX_SOFTWARE_DIR)/RomLoader
-ROM_EMBED_SRCS   := User/terminal_rom.c
+ROM_EMBED_SRCS   := User/terminal_rom.c User/nextor_rom.c
 ROM_EMBED_SRC    := $(ROM_EMBED_SRCS)
 # terminal_rom.c reads
 # MSXSoftware/RomLoader/terminal.bin, which is produced by the
 # terminal.asm build under MSXSoftware/RomLoader/asm/.
+# nextor_rom.c re-runs `make -C $(NEXTOR_DRIVER_DIR) embed` (N80 ->
+# mknexrom -> rom2c.py --nextor, docs/NEXTOR_PLAN.md D3).
+NEXTOR_DRIVER_DIR := $(MSX_SOFTWARE_DIR)/NextorDriver
 ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/RomLoader/asm/Makefile \
 					$(MSX_SOFTWARE_DIR)/RomLoader/asm/terminal.asm \
+					$(NEXTOR_DRIVER_DIR)/driver.asm \
+					$(NEXTOR_DRIVER_DIR)/Makefile \
 					$(CURDIR)/../tools/rom2c.py
 OBJDIR         := obj
 
@@ -286,6 +291,8 @@ $(ROM_EMBED_SRC): $(ROM_EMBED_DEPS)
 	        python3 "$(CURDIR)/../tools/rom2c.py" \
 	            "$(ROM_LOADER_DIR)/terminal.bin" \
 	            "$@" "MSX terminal ROM" ;; \
+	    User/nextor_rom.c) \
+	        $(MAKE) -C "$(NEXTOR_DRIVER_DIR)" embed ;; \
 	esac
 
 $(HEX): $(ELF)

@@ -4,11 +4,11 @@ Hexadecimal [24-Bits]
 Symbol Table
 
     .__.$$$.=  002710 L   |     .__.ABS.=  000000 G   |     .__.CPU.=  000000 L
-    .__.H$L.=  000000 L   |     BODY_SIZ=  0000A6     |   5 arrow      0040F0 R
-  4 body       004026 R   |   4 body_end   0040CC R   |   4 init       004010 R
-  4 loop       004065 R   |   4 rom_star   004097 R   |   4 sprite     004084 R
-  4 ugly_pat   0040B6 R   |   4 unknown    0040BB R   |   4 wait       0040C1 R
-  4 wait_loo   0040C7 R
+    .__.H$L.=  000000 L   |     BODY_SIZ=  0000B6     |   5 arrow      0040F0 R
+  4 body       004026 R   |   4 body_end   0040DC R   |   4 init       004010 R
+  4 loop       004070 R   |   4 rom_star   0040A2 R   |   4 rs_w1      0040A7 R
+  4 rs_w2      0040AB R   |   4 sprite     00408F R   |   4 ugly_pat   0040C6 R
+  4 unknown    0040CB R   |   4 wait       0040D1 R   |   4 wait_loo   0040D7 R
 
 ASxxxx Assembler V02.00 + NoICE + SDCC mods  (Zilog Z80 / Hitachi HD64180 / ZX-Next / eZ80), page 2.
 Hexadecimal [24-Bits]
@@ -19,6 +19,6 @@ Area Table
    1 _DATA      size      1   flags    0
    2 _HEADER    size      0   flags    8
    3 _HEADER0   size     10   flags    8
-   4 _HEADER1   size     BC   flags    8
+   4 _HEADER1   size     CC   flags    8
    5 _HEADER2   size      8   flags    8
 

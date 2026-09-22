@@ -111,6 +111,19 @@ body:
         ;; loader from the menu by pressing F. Just initialise the
         ;; screen + cursor and enter the main loop.
 
+        ;; Relocate the 5-byte launch patch to a FIXED MSX RAM address
+        ;; (0xE100). The BIOS executes it later - after the firmware
+        ;; has swapped the cart mapper away from this ROM - so a
+        ;; ROM-resident patch would fetch game bytes as code. The
+        ;; v303 original solved this with PHASE #E000 (all body labels
+        ;; resolved to RAM); the sdasz80 port keeps ROM addresses, so
+        ;; the copy is explicit. Body RAM base = 0xE000, body ROM
+        ;; base = 0x4026, so 0xE100 is well clear of the copy.
+        ld      hl, #ugly_patch
+        ld      de, #0xE100
+        ld      bc, #5
+        ldir
+
         ;; Set 32-column screen, palette, sprite cursor.
         ld      a, #32
         ld      (0xF3AF), a
@@ -172,8 +185,20 @@ sprite:
         jr      loop
 
 rom_start:
-        call    wait
-        call    wait                    ; >= 20 ms for firmware to settle
+        ;; >= ~35 ms for the firmware to settle: wait two JIFFY ticks.
+        ;; INLINED and executed from MSX RAM - no cart access from
+        ;; here on (the firmware swaps the mapper during this window;
+        ;; a `call wait` would fetch the swapped-in cart's bytes).
+        ei
+        ld      hl, #0xFC9E             ; JIFFY
+        ld      a, (hl)
+rs_w1:
+        cp      (hl)
+        jr      z, rs_w1                ; jiffy change #1
+        ld      a, (hl)
+rs_w2:
+        cp      (hl)
+        jr      z, rs_w2                ; ... and #2
         ld      hl, (0xF6B1)
         ld      de, #-12
         add     hl, de
@@ -185,10 +210,12 @@ rom_start:
         rst     #0x20                   ; COMPARE HL, DE (BIOS helper)
         pop     hl
         jr      nz, unknown
-        ld      de, #ugly_patch
-        ld      (hl), e
+        ;; Patch the BIOS INIT-return frame to 0xE100 (little-endian
+        ;; 00 E1): the launch patch executes from MSX RAM, safe under
+        ;; the mapper swap.
+        ld      (hl), #0x00
         inc     hl
-        ld      (hl), d
+        ld      (hl), #0xE1
         ret
 
 ugly_patch:

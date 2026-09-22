@@ -189,6 +189,14 @@ static void term_wait_drain (uint32_t ms) {
 /* Public mailbox lifecycle                                            */
 /* ------------------------------------------------------------------ */
 
+/* Set once per terminal session: the next Terminal_Service pass scans
+ * the stick and renders the file list. Terminal_Reset() re-arms it, so
+ * a session entered via the boot gate (BOOTGATE -> TERMINAL swap)
+ * renders even though Terminal_Service already ran while the boot
+ * gate was active (the firmware main loop calls every service
+ * unconditionally). */
+static uint8_t s_list_pending = 1;
+
 void Terminal_Reset (void) {
     g_term_mbox.kbd_head = g_term_mbox.kbd_tail = g_term_mbox.kbd_n = 0;
     g_term_mbox.out_head = g_term_mbox.out_tail = g_term_mbox.out_n = 0;
@@ -200,6 +208,7 @@ void Terminal_Reset (void) {
     s_menu.loaded = 0;
     s_menu.state  = MENU_LIST;
     s_menu.picked[0] = '\0';
+    s_list_pending = 1U;
 }
 
 /* ------------------------------------------------------------------ */
@@ -283,7 +292,7 @@ static void print_file_list (void) {
     /* Page indicator on the last row. */
     move_cursor ((uint8_t)(1 + TERM_PAGE_SIZE), 1);
     char buf[16];
-    snprintf (buf, sizeof (buf), " Pg %u/%u   F=old",
+    snprintf (buf, sizeof (buf), " Pg %u/%u  F=old N=nextor",
               (unsigned)(s_menu.page + 1U), (unsigned)menu_page_count ());
     out_str (buf);
     newline ();
@@ -481,18 +490,24 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * them within one jiffy frame (<= ~18 ms). */
     out_push (0x03);
     {
-        /* FIXED ~20 ms spin - the PROVEN 55b6b88 schedule, restored.
-         * Do NOT break early when out_n hits 0: swapping the instant
-         * the MSX pops the 0x03 (while it is still finishing its poll
-         * loop) was tried and games stopped booting; the fixed delay
-         * lands the swap safely inside rom_start's jiffy WAITs, with
-         * the BIOS slot probe still >= 15 ms away. Same loop shape
-         * and same 4,000,000-iteration constant as the working build
-         * (empirically ~20 ms at 200 MHz HCLK including the volatile
-         * counter overhead). */
-        for (volatile uint32_t i = 0; i < 4000000U; i++) {
-            __asm__ volatile ("nop");
-        }
+        /* FIXED 30 ms delay via the timer-calibrated Delay_Ms (the
+         * old 4,000,000-iteration spin measured anywhere from ~20 to
+         * ~110 ms depending on codegen - too imprecise to land the
+         * swap inside the launch window). Timing contract with the
+         * MSX-side launch (terminal.asm rom_start):
+         *   - the MSX polls the FIFO at most one jiffy apart, so it
+         *     reads the 0x03 within ~17 ms of the push;
+         *   - rom_start then waits ~35 ms IN RAM (no cart access),
+         *     patches the BIOS return to the RAM-resident launch
+         *     patch (0xE100) and unwinds into the BIOS;
+         *   - the BIOS slot re-probe reads 0x4000 a few ms later.
+         * So the swap must land AFTER the ~17 ms read (else the
+         * launch byte is lost) and BEFORE the ~40-45 ms probe - 30 ms
+         * is the centre of that window. With the launch fully
+         * RAM-resident the swap can no longer poison executing code,
+         * so this race now has huge margins instead of being a
+         * knife-edge. */
+        Delay_Ms (30U);
         if (g_term_mbox.out_n != 0U) {
             printf ("TERM: WARNING FIFO not drained (out_n=%u at swap "
                     "time) - MSX has not read the 0x03 yet, it may "
@@ -505,10 +520,9 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * unknown) reach the BIOS slot probe within ~20 ms and find the
      * new ROM's 'AB' header. */
     (void)Cart_SetMapper_Safe (m);
-    /* 50 ms cushion for PSRAM settle + new INIT LDIR copy + slot
-     * probe completion + return-to-user-code. Same 10,000,000-iteration
-     * loop as the working 55b6b88 build. */
-    for (volatile uint32_t i = 0; i < 10000000U; i++) { __asm__ volatile ("nop"); }
+    /* 100 ms cushion for PSRAM settle + new INIT LDIR copy + slot
+     * probe completion + return-to-user-code. */
+    Delay_Ms (100U);
 }
 
 void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
@@ -698,6 +712,25 @@ static void handle_list_key (uint8_t key) {
         newline ();
         (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
         return;
+    } else if (key == 'N' || key == 'n') {
+        /* Boot the flash-served Nextor kernel (docs/NEXTOR_PLAN.md
+         * D2b, terminal-menu variant). Uses EXACTLY the proven game-
+         * launch dance (soft_reset_into_cart): push the launch byte,
+         * the MSX-side terminal's rom_start runs rst 0 from MSX RAM,
+         * and the BIOS re-probe finds the armed cart - here the
+         * Nextor kernel's 'AB' at 0x4000 (nextor_rom bank 0).
+         * Physical F1 cannot be sniffed through the menu's CHGET
+         * forwarding (the BIOS turns F1 into its KEY string), so the
+         * menu accepts the letter N; the footer hints it. */
+        printf ("TERM: N -> NEXTOR\r\n");
+        clear_screen ();
+        out_str (" Booting NEXTOR...");
+        newline ();
+        /* Let the MSX print the launch text before the 0x03 byte and
+         * the mapper swap (same discipline as Terminal_BootCart). */
+        term_wait_drain (600U);
+        soft_reset_into_cart (CART_MAP_NEXTOR);
+        return;
     }
     /* redraw cursor + arrow on the line we landed on (in-page row) */
     uint16_t row_in_page = (uint16_t)(s_menu.sel % TERM_PAGE_SIZE);
@@ -771,13 +804,12 @@ void Terminal_Service (void) {
         }
     }
 
-    /* On first entry after Terminal_Reset, render the file list once
-     * - the trigger is "state == MENU_LIST and count == 0 (no scan
-     * yet) and the FIFO is not currently being filled with a
-     * boot-cart message." */
-    static uint8_t s_first = 1;
-    if (s_first) {
-        s_first = 0;
+    /* On the first service pass of each terminal session, render the
+     * file list once - the trigger is s_list_pending (re-armed by
+     * Terminal_Reset), not a never-reset static, so sessions entered
+     * via the boot gate render correctly too. */
+    if (s_list_pending) {
+        s_list_pending = 0;
         printf ("TERM: first service - scanning USB\r\n");
         scan_usb ();
         printf ("TERM: scan_usb -> count=%u\r\n", s_menu.count);
