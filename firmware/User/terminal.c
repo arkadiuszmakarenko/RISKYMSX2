@@ -520,9 +520,13 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * unknown) reach the BIOS slot probe within ~20 ms and find the
      * new ROM's 'AB' header. */
     (void)Cart_SetMapper_Safe (m);
-    /* 100 ms cushion for PSRAM settle + new INIT LDIR copy + slot
-     * probe completion + return-to-user-code. */
-    Delay_Ms (100U);
+    /* Post-swap settle cushion: keep the firmware quiet (no PSRAM /
+     * USB churn) while the game's own INIT runs its first cart reads.
+     * The legacy 55b6b88 build spun ~10,000,000 iterations here
+     * (~250 ms) - shorter budgets made some games (e.g. Metal Gear 2,
+     * Konami-SCC with a large INIT) fail to boot. Tune via the
+     * constant below if a title needs more. */
+    Delay_Ms (250U);
 }
 
 void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
