@@ -410,6 +410,22 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR0) | EXTI_FTENR_TR0;
     EXTI->INTFR = EXTI_INTENR_MR0;
 
+    /* Route PE8 (/IORQ) -> EXTI8 (shared lines 9:5), FALLING edge.
+     * The MSX memory mapper protocol drives I/O ports 0xFC..0xFF; the
+     * Nextor kernel uses those to adopt the cart as its primary
+     * mapper. Decoded ONLY while the NEXTOR mapper is active
+     * (Cart_EXTI95_IORQ_Handler bails for every other port). Runs in
+     * VTF slot 1, one priority step below the cart EXTI0. */
+    AFIO->EXTICR[2] = (AFIO->EXTICR[2] & ~(0xFU << 0)) |
+                      (AFIO_EXTICR3_EXTI8_PE << 0);
+    EXTI->INTENR = (EXTI->INTENR & ~EXTI_INTENR_MR8) | EXTI_INTENR_MR8;
+    EXTI->RTENR &= ~EXTI_RTENR_TR8;
+    EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
+    EXTI->INTFR = EXTI_INTENR_MR8;
+    SetVTFIRQ ((uint32_t)Cart_EXTI95_IORQ_Handler, EXTI9_5_IRQn, 1, ENABLE);
+    NVIC_EnableIRQ (EXTI9_5_IRQn);
+    NVIC_SetPriority (EXTI9_5_IRQn, 0x01);
+
     /* Install the no-mapper handler by default. main()/CLI installs the
      * real mapper via Cart_SetMapper() once PSRAM_Init() has succeeded.
      * SetVTFIRQ writes VTFADDR[0]; NVIC_EnableIRQ sets the per-IRQ
@@ -995,6 +1011,7 @@ _Static_assert (CART_SLTSL_MASK   == 0x0001U, "asm SLTSL drift");
 _Static_assert (CART_RD_MASK     == 0x0002U, "asm RD drift");
 _Static_assert (CART_WR_MASK     == 0x0004U, "asm WR drift");
 _Static_assert (CART_MREQ_MASK    == 0x0020U, "asm MREQ drift");
+_Static_assert (CART_IORQ_MASK    == 0x0100U, "asm IORQ drift (PE8 = bit 8)");
 
 /* Game-base immediates for the asm handlers below. These must be
  * GAS-evaluable constant expressions (no C type suffixes) because
@@ -1897,47 +1914,61 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
     if ((ctrl & CART_RD_MASK) == 0U) {
         /* READ cycle. */
         uint8_t v;
-        if (address >= 0x7FF0U) {
-            /* Nextor mailbox window (0x7FF0..0x7FFF). */
-            switch (address - 0x7FF0U) {
-            case 0:  /* STATUS */
-                v = g_nextor_mbox.status;
-                break;
-            case 1: {  /* DATA pop */
-                if (g_nextor_mbox.rx_n != 0U) {
-                    v = *(volatile const uint8_t *)
-                        (NEXTOR_RX_BUF + g_nextor_mbox.rx_idx);
-                    g_nextor_mbox.rx_idx++;
-                    g_nextor_mbox.rx_n--;
-                } else {
-                    v = 0xFFU;   /* nothing to drain */
+        if (address >= 0x4000U && address < 0x8000U) {
+            if (address >= 0x7FF0U) {
+                /* Nextor mailbox window (0x7FF0..0x7FFF). */
+                switch (address - 0x7FF0U) {
+                case 0:  /* STATUS */
+                    v = g_nextor_mbox.status;
+                    break;
+                case 1: {  /* DATA pop */
+                    if (g_nextor_mbox.rx_n != 0U) {
+                        v = *(volatile const uint8_t *)
+                            (NEXTOR_RX_BUF + g_nextor_mbox.rx_idx);
+                        g_nextor_mbox.rx_idx++;
+                        g_nextor_mbox.rx_n--;
+                    } else {
+                        v = 0xFFU;   /* nothing to drain */
+                    }
+                    break;
                 }
-                break;
+                case 2:  /* RX_COUNT low */
+                    v = (uint8_t)(g_nextor_mbox.rx_n & 0xFFU);
+                    break;
+                case 3:  /* RX_COUNT high */
+                    v = (uint8_t)(g_nextor_mbox.rx_n >> 8);
+                    break;
+                case 4:  /* ERR code */
+                    v = g_nextor_mbox.err;
+                    break;
+                case 5:  /* firmware version */
+                    v = NEXTOR_FW_VERSION;
+                    break;
+                default: /* 0x7FF6..0x7FFF reserved */
+                    v = 0xFFU;
+                    break;
+                }
+            } else {
+                /* Page 1: serve the banked kernel window from flash.
+                 * bankOffsets[0] = (bank << 14) - 0x4000, so addr + bias
+                 * is the byte index into nextor_rom[]. */
+                v = nextor_rom[(uint32_t)address + s_state.bankOffsets[0]];
             }
-            case 2:  /* RX_COUNT low */
-                v = (uint8_t)(g_nextor_mbox.rx_n & 0xFFU);
-                break;
-            case 3:  /* RX_COUNT high */
-                v = (uint8_t)(g_nextor_mbox.rx_n >> 8);
-                break;
-            case 4:  /* ERR code */
-                v = g_nextor_mbox.err;
-                break;
-            case 5:  /* firmware version */
-                v = NEXTOR_FW_VERSION;
-                break;
-            default: /* 0x7FF6..0x7FFF reserved */
-                v = 0xFFU;
-                break;
-            }
-        } else if (address >= 0x4000U && address < 0x8000U) {
-            /* Page 1: serve the banked kernel window from flash.
-             * bankOffsets[0] = (bank << 14) - 0x4000, so addr + bias
-             * is the byte index into nextor_rom[]. */
-            v = nextor_rom[(uint32_t)address + s_state.bankOffsets[0]];
+        } else if (address >= 0x8000U) {
+            /* Mapper window (pages 2/3, 0x8000..0xFFFF): once the
+             * kernel adopts the cart as its primary mapper it selects
+             * this slot at page 2 (and, after SWAP_RAM_SLOT, page 3)
+             * and runs its DOS work segments here - serve the mapped
+             * PSRAM segment. */
+            const uint8_t preg = (address < 0xC000U)
+                               ? g_nx_mapper.page_reg[2]
+                               : g_nx_mapper.page_reg[3];
+            const uint32_t seg = (uint32_t)(preg & NEXTOR_MAPPER_SEG_MASK);
+            v = *(volatile const uint8_t *)
+                (g_nx_mapper.ram_base + (seg << 14)
+                 + (uint32_t)(address - 0x8000U));
         } else {
-            /* Page 2/3 (0x8000..0xFFFF): the Nextor cartridge only
-             * claims page 1 - float, like a real single-page DOS cart. */
+            /* Page 0 (0x0000..0x3FFF): outside the cart's claim - float. */
             EXTI->INTFR = EXTI_INTENR_MR0;
             while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
             GPIOB->CFGHR = CART_BUS_OFF;
@@ -1955,6 +1986,7 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
     /* WRITE cycle: WR is low now; data valid on PB8..15. */
     if ((ctrl & CART_WR_MASK) == 0U) {
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+        uint32_t mw_addr = 0U;   /* mapper RAM address, 0 = not a write */
         if (address == 0x6000U) {
             /* Bank select: the kernel's CHGBNK writes the bank NUMBER
              * (no +/-1 bias). Latch the window bias into bankOffsets[0]:
@@ -1978,6 +2010,7 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
                 if (w != NEXTOR_CMD_READ && w != NEXTOR_CMD_WRITE) {
                     g_nextor_mbox.arg_n = 0U;
                     g_nextor_mbox.have_cmd = 1U;
+                    g_nx_cmd_count++;   /* mailbox activity trace */
                 }
             }
         } else if (address == NEXTOR_MB_DATA) {
@@ -1995,6 +2028,7 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
                     } else {
                         g_nextor_mbox.have_cmd = 1U;
                         g_nextor_mbox.status &= (uint8_t)~NEXTOR_ST_DONE;
+                        g_nx_cmd_count++;   /* mailbox activity */
                     }
                 }
             } else if (g_nextor_mbox.state == NEXTOR_WRITE_XFER) {
@@ -2008,10 +2042,27 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
                 }
             }
             /* Stray DATA writes (no command in flight) are dropped. */
+        } else if (address >= 0x8000U) {
+            /* Mapper window write (pages 2/3): the kernel writes its
+             * DOS work segments here. Capture the target address now
+             * (the data byte was latched above); the PSRAM write
+             * happens after the bus cycle ends, below. */
+            const uint8_t preg = (address < 0xC000U)
+                               ? g_nx_mapper.page_reg[2]
+                               : g_nx_mapper.page_reg[3];
+            const uint32_t seg = (uint32_t)(preg & NEXTOR_MAPPER_SEG_MASK);
+            mw_addr = g_nx_mapper.ram_base + (seg << 14)
+                    + (uint32_t)(address - 0x8000U);
         }
         /* Other writes (0x7FF2..0x7FFF etc): ignore. */
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (mw_addr != 0U) {
+            /* Deferred mapper-RAM write: the bus cycle is over
+             * (SLTSL high), so the ~30-cycle PSRAM write cannot
+             * race the next Z80 cycle (~350 MCU cycles away). */
+            *(volatile uint8_t *)mw_addr = w;
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
@@ -2019,6 +2070,71 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
     /* Neither RD nor WR asserted - spurious; release. */
     EXTI->INTFR = EXTI_INTENR_MR0;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    GPIOB->CFGHR = CART_BUS_OFF;
+}
+
+/* ------------------------------------------------------------------ */
+/* MSX memory-mapper I/O decoder (/IORQ, shared EXTI lines 9:5, VTF     */
+/* slot 1). The Nextor kernel adopts the cart as its primary mapper     */
+/* by driving I/O ports 0xFC..0xFF with `out` (page registers) and      */
+/* serving mapper RAM at pages 2/3 through this cart (handled by the    */
+/* NEXTOR EXTI0 handler). Protocol per the kernel's TEST_MAPPER_SLOT:   */
+/* only register WRITES and page-2/3 memory cycles are exercised; the   */
+/* register read-back (`in`) is implemented for completeness - real     */
+/* mappers return partial bits, returning the full byte matches         */
+/* openMSX's "largest" mode and is accepted by the kernel.              */
+/*                                                                      */
+/* This IRQ fires on EVERY I/O cycle of the MSX (PSG/VDP/PPI traffic    */
+/* included): the common case must bail in a handful of instructions.   */
+/* ------------------------------------------------------------------ */
+
+void Cart_EXTI95_IORQ_Handler (void) {
+    /* Clear whichever of lines 5-9 fired (we only act on line 8). */
+    EXTI->INTFR = (EXTI->INTFR & 0x3E0U);
+
+    /* Inert outside the Nextor mapper: bail fast - this IRQ fires on
+     * every I/O cycle of the MSX. */
+    if (g_mapper != CART_MAP_NEXTOR || g_nx_mapper.armed == 0U) {
+        return;
+    }
+
+    /* The I/O port number lives on A0..A7. Only the mapper's four
+     * register ports belong to us; everything else is owned by the
+     * machine's own devices (PSG/VDP/PPI) - do not drive. */
+    const uint16_t port = (uint16_t)(GPIOD->INDR & 0xFFU);
+    if (port < 0xFCU) {
+        return;
+    }
+
+    uint32_t ctrl = GPIOE->INDR;
+    /* RD/WR lag IORQ by a gate delay - poll until one settles, or
+     * bail if IORQ rises first (cycle over). Same discipline as the
+     * memory handlers. */
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_IORQ_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            return;
+        }
+    }
+
+    const uint8_t idx = (uint8_t)(port - 0xFCU);
+    if ((ctrl & CART_WR_MASK) == 0U) {
+        /* OUT: latch the page register (full byte; the memory path
+         * masks with NEXTOR_MAPPER_SEG_MASK so high values mirror
+         * low segments exactly like real hardware). */
+        const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+        g_nx_mapper.page_reg[idx] = w;
+    } else if ((ctrl & CART_RD_MASK) == 0U) {
+        /* IN: register read-back (the kernel does not rely on it;
+         * returning the latched byte matches the "largest" mapper
+         * read-back behaviour). */
+        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                     | ((uint32_t)g_nx_mapper.page_reg[idx] << 8);
+        GPIOB->CFGHR = CART_BUS_ON;
+    }
+    /* Spin until IORQ rises (cycle end), then release the bus. */
+    while ((GPIOE->INDR & CART_IORQ_MASK) == 0U) { }
     GPIOB->CFGHR = CART_BUS_OFF;
 }
 

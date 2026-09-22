@@ -23,6 +23,7 @@
 #define CART_RD_MASK      0x0002U  /* PE1  ~RD */
 #define CART_WR_MASK      0x0004U  /* PE2  ~WR */
 #define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
+#define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)    */
 
 /* Data bus drive config for GPIOB CFGHR (pins 8..15).
  * 0x3 nibble = 50MHz push-pull output, 0x4 nibble = floating input. */
@@ -174,6 +175,18 @@ uint32_t Cart_GetWrCycles (void);
  *
  * Returns the same value as Cart_SetMapper(). */
 int  Cart_SetMapper_Safe (Cart_Mapper m);
+
+/* MSX memory-mapper I/O decoder (shared EXTI lines 9:5 IRQ, VTF slot
+ * 1). Decodes the mapper's register ports 0xFC..0xFF: `out` latches
+ * the page register, `in` returns it (register read-back) - this is
+ * what lets the Nextor kernel adopt the cart as its primary mapper
+ * (the kernel drives the registers with `out` and serves mapper RAM
+ * at pages 2/3 via the NEXTOR EXTI0 handler). Fires on EVERY I/O
+ * cycle of the MSX: bails immediately for any other port and is fully
+ * inert outside the NEXTOR mapper. See nextor.h for the mapper state
+ * and docs/NEXTOR_PLAN.md for the detection protocol. */
+void Cart_EXTI95_IORQ_Handler (void) __attribute__((noinline,
+                                                    interrupt("WCH-Interrupt-fast")));
 
 /* Get the base address of the cart image window in PSRAM. Always
  * PSRAM_CART_BASE. Kept for API symmetry with the previous SRAM/PSRAM

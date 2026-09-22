@@ -36,6 +36,23 @@ void Nextor_Reset (void) {
     memset ((void *)&g_nextor_mbox, 0, sizeof (g_nextor_mbox));
     g_nextor_mbox.state = NEXTOR_IDLE;
     g_nextor_mbox.status = NEXTOR_ST_READY;
+    Nextor_MapperInit ();
+}
+
+/* ------------------------------------------------------------------ */
+/* Cart-side memory-mapper emulation (see nextor.h)                     */
+/* ------------------------------------------------------------------ */
+
+NextorMapperState g_nx_mapper;
+volatile uint32_t g_nx_cmd_count = 0U;
+
+void Nextor_MapperInit (void) {
+    g_nx_mapper.page_reg[0] = 0U;
+    g_nx_mapper.page_reg[1] = 0U;
+    g_nx_mapper.page_reg[2] = 0U;
+    g_nx_mapper.page_reg[3] = 0U;
+    g_nx_mapper.ram_base = PSRAM_CART_BASE + NEXTOR_MAPPER_RAM_OFF;
+    g_nx_mapper.armed = 1U;
 }
 
 /* Compose the STATUS byte the IRQ serves at mailbox 0x7FF0:
@@ -205,6 +222,17 @@ void Nextor_Service (void) {
         return;
     }
     g_nextor_mbox.have_cmd = 0U;
+
+    /* Log the low-frequency commands (handshake/capacity/status) -
+     * these trace the driver bring-up on USART. Per-sector READ/WRITE
+     * commands are deliberately not logged (they would flood the log
+     * during disk I/O). */
+    if (g_nextor_mbox.cmd != NEXTOR_CMD_READ
+        && g_nextor_mbox.cmd != NEXTOR_CMD_WRITE) {
+        printf ("NEXTOR: cmd=0x%02X lba=%u\r\n",
+                (unsigned)g_nextor_mbox.cmd,
+                (unsigned)g_nextor_mbox.lba);
+    }
 
     Nextor_RunCommand ();
 }

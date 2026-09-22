@@ -68,6 +68,41 @@ extern "C" {
  * this much per command - docs/NEXTOR_PLAN.md D5). */
 #define NEXTOR_SECTOR_SIZE   512U
 
+/* ------------------------------------------------------------------ */
+/* Cart-side memory-mapper emulation                                     */
+/* ------------------------------------------------------------------ */
+/* The Nextor kernel scans EVERY slot at page 2 for an MSX-standard
+ * memory mapper (I/O ports 0xFC..0xFF = page registers + memory at
+ * 0x8000-0xBFFF for page 2 / 0xC000-0xFFFF for page 3) and adopts the
+ * largest one it finds as its primary mapper - then moves the system
+ * RAM slot to it. With this emulation our cart slot becomes the DOS
+ * system RAM on mapper-less machines (TFMSX). Segments live in PSRAM:
+ * 32 x 16 KiB = 512 KiB, far away from the game image (bottom) and
+ * the mailbox sector buffers (top 4 KiB). Registers are I/O-decoded
+ * by Cart_EXTI95_IORQ_Handler (/IORQ is wired to PE8). */
+#define NEXTOR_MAPPER_RAM_OFF   0x700000UL  /* PSRAM offset of segment 0 */
+#define NEXTOR_MAPPER_SEGS      32U         /* 32 x 16 KiB = 512 KiB */
+#define NEXTOR_MAPPER_SEG_MASK  0x1FU       /* high regs mirror (real HW) */
+#define NEXTOR_MAPPER_SEGSIZE   16384U
+
+typedef struct {
+    volatile uint8_t  page_reg[4];   /* ports 0xFC..0xFF latched values */
+    volatile uint32_t ram_base;      /* PSRAM address of segment 0 */
+    volatile uint8_t  armed;         /* mapper emulation live */
+} NextorMapperState;
+
+extern NextorMapperState g_nx_mapper;
+
+/* Debug/activity counter: incremented by the cart IRQ handler every
+ * time a mailbox command is latched. The main loop watches it and
+ * prints on change - it tells us whether the kernel's driver is
+ * actually talking to the mailbox (the driver phase would otherwise
+ * be silent in both the firmware log and, possibly, on screen). */
+extern volatile uint32_t g_nx_cmd_count;
+
+/* Arm the mapper (called when the NEXTOR mapper installs). */
+void Nextor_MapperInit (void);
+
 /* PSRAM placement of the mailbox sector buffers: the very top of the
  * 8 MiB window, well clear of the game image (which lives at the bottom,
  * optionally shifted by CART_GAME_BASE). RX = results/sector reads,

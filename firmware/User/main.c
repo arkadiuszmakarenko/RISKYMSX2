@@ -90,6 +90,15 @@ int main (void) {
      * installs CART_MAP_NEXTOR. */
     for (;;) {
         if (Cart_GetMapper () == CART_MAP_NEXTOR) {
+            /* Debug: report mailbox activity as it happens - if the
+             * counter never moves after the NEXTOR boot, the kernel's
+             * driver never reached the mailbox. */
+            static uint32_t s_last_cmd_count = 0U;
+            if (g_nx_cmd_count != s_last_cmd_count) {
+                s_last_cmd_count = g_nx_cmd_count;
+                printf ("NEXTOR: mailbox cmds=%u\r\n",
+                        (unsigned)g_nx_cmd_count);
+            }
             Nextor_Service ();
         }
         Loader_Service ();
