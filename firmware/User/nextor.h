@@ -99,6 +99,47 @@ extern NextorMapperState g_nx_mapper;
  * actually talking to the mailbox (the driver phase would otherwise
  * be silent in both the firmware log and, possibly, on screen). */
 extern volatile uint32_t g_nx_cmd_count;
+extern volatile uint32_t g_nx_cmd_attempts;  /* raw 0x7FF0 WRITE count
+                                             * regardless of have_cmd
+                                             * dedup; shows whether the
+                                             * driver is writing CMD
+                                             * bytes at all */
+extern volatile uint32_t g_nx_stat_reads;   /* raw 0x7FF0 READ count
+                                            * (STATUS polls the driver
+                                            * does while waiting for
+                                            * DONE) */
+extern volatile uint32_t g_nx_irq_entry;    /* every EXTI0 IRQ entry */
+extern volatile uint32_t g_nx_irq_late;     /* late-entry bail (SLTSL
+                                            * already high) */
+extern volatile uint32_t g_nx_irq_zero;     /* RD&WR both high bail */
+extern volatile uint32_t g_nx_addr_counts[16]; /* address high-nibble
+                                              * histogram - each IRQ
+                                              * entry adds to the slot
+                                              * for its top 12 bits */
+extern volatile uint32_t g_nx_last_addr;   /* last seen address */
+extern volatile uint32_t g_nx_reads;       /* RD=0 cycles served */
+extern volatile uint32_t g_nx_writes;      /* WR=0 cycles served */
+
+/* Debug/activity counter: incremented by the cart IRQ handler every
+ * time the kernel writes the page-1 bank-select register at 0x6000
+ * (ASCII16 CHGBNK). Watching this fires whenever the kernel decides
+ * to page in bank 7 (the driver bank) - the driver probe doesn't
+ * have to complete a full handshake for this to tick. With
+ * g_nx_cmd_count staying at 0 + g_nx_bank_writes ticking on bank=7
+ * we know the driver was selected but is silent (signalling that the
+ * driver is paged in but the kernel hasn't reached its first disk
+ * request yet - typical when sitting at the MSX-BASIC prompt). */
+extern volatile uint32_t g_nx_bank_writes;
+extern volatile uint8_t  g_nx_last_bank;   /* bank number of last 0x6000 write */
+extern volatile uint32_t g_nx_bank7_selects;  /* counts writes of 7 to 0x6000
+                                               * (driver bank select) */
+
+/* Debug/activity counter: incremented by Nextor_MediaPoll on every
+ * USB-stick insertion/removal transition. With this staying at 0
+ * the kernel never even sees a media change - either the stick is
+ * not enumerated or the kernel hasn't requested a status query. */
+extern volatile uint32_t g_nx_media_changes;
+extern volatile uint8_t  g_nx_media_now;   /* current media_ok */
 
 /* Arm the mapper (called when the NEXTOR mapper installs). */
 void Nextor_MapperInit (void);

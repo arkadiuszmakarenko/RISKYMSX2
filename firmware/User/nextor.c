@@ -28,6 +28,24 @@
 
 NextorMailbox g_nextor_mbox;
 
+volatile uint32_t g_nx_bank_writes   = 0U;
+volatile uint8_t  g_nx_last_bank     = 0xFFU;
+volatile uint32_t g_nx_bank7_selects = 0U;  /* NEW: counts only bank-7 writes
+                                             * to 0x6000; if this stays 0
+                                             * the kernel never selected the
+                                             * driver bank -> scan fails */
+volatile uint32_t g_nx_media_changes = 0U;
+volatile uint8_t  g_nx_media_now     = 0U;
+volatile uint32_t g_nx_cmd_attempts  = 0U;
+volatile uint32_t g_nx_stat_reads    = 0U;
+volatile uint32_t g_nx_irq_entry     = 0U;
+volatile uint32_t g_nx_irq_late      = 0U;
+volatile uint32_t g_nx_irq_zero      = 0U;
+volatile uint32_t g_nx_addr_counts[16] = {0};
+volatile uint32_t g_nx_last_addr     = 0U;
+volatile uint32_t g_nx_reads         = 0U;
+volatile uint32_t g_nx_writes        = 0U;
+
 /* ------------------------------------------------------------------ */
 /* Mailbox lifecycle                                                    */
 /* ------------------------------------------------------------------ */
@@ -93,8 +111,10 @@ static void Nextor_MediaPoll (void) {
     uint8_t present = nextor_media_present ();
     if (present != s_last_present) {
         g_nextor_mbox.change_latch = 1U;
+        g_nx_media_changes++;
         s_last_present = present;
     }
+    g_nx_media_now = present;
     if (present) {
         g_nextor_mbox.media_ok = 1U;
     } else {

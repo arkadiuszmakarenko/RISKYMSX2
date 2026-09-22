@@ -1890,11 +1890,15 @@ void Cart_EXTI0_Terminal_Handler (void) {
 /* ------------------------------------------------------------------ */
 
 void Cart_EXTI0_NEXTOR_Handler (void) {
+    g_nx_irq_entry++;
     const uint16_t address = (uint16_t)GPIOD->INDR;
+    g_nx_last_addr = address;
+    g_nx_addr_counts[(address >> 12) & 0xFU]++;
     uint32_t ctrl = GPIOE->INDR;
 
     /* Late entry: SLTSL already high, this cycle is already over. */
     if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        g_nx_irq_late++;
         GPIOB->CFGHR = CART_BUS_OFF;
         EXTI->INTFR = EXTI_INTENR_MR0;
         return;
@@ -1902,9 +1906,13 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
 
     /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
      * bail if SLTSL rises first. Same fix as Cart_EXTI0_Flash_Handler. */
+    if ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        g_nx_irq_zero++;
+    }
     while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
         ctrl = GPIOE->INDR;
         if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            g_nx_irq_late++;
             GPIOB->CFGHR = CART_BUS_OFF;
             EXTI->INTFR = EXTI_INTENR_MR0;
             return;
@@ -1912,6 +1920,7 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
     }
 
     if ((ctrl & CART_RD_MASK) == 0U) {
+        g_nx_reads++;
         /* READ cycle. */
         uint8_t v;
         if (address >= 0x4000U && address < 0x8000U) {
@@ -1920,6 +1929,7 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
                 switch (address - 0x7FF0U) {
                 case 0:  /* STATUS */
                     v = g_nextor_mbox.status;
+                    g_nx_stat_reads++;
                     break;
                 case 1: {  /* DATA pop */
                     if (g_nextor_mbox.rx_n != 0U) {
@@ -1985,6 +1995,7 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
 
     /* WRITE cycle: WR is low now; data valid on PB8..15. */
     if ((ctrl & CART_WR_MASK) == 0U) {
+        g_nx_writes++;
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
         uint32_t mw_addr = 0U;   /* mapper RAM address, 0 = not a write */
         if (address == 0x6000U) {
@@ -1992,11 +2003,17 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
              * (no +/-1 bias). Latch the window bias into bankOffsets[0]:
              * bias = (bank << 14) - 0x4000. */
             s_state.bankOffsets[0] = ((uint32_t)w << 14) - 0x4000U;
+            g_nx_bank_writes++;
+            g_nx_last_bank = w;
+            if (w == 7U) {
+                g_nx_bank7_selects++;
+            }
         } else if (address == 0x7FF0U) {
             /* Mailbox CMD write. have_cmd dedup: while a command is
              * still pending (unserved), ignore further CMD bytes -
              * EXTI0 re-triggers can re-deliver the same byte 20+ times
              * (the loader's 21x-duplication lesson). */
+            g_nx_cmd_attempts++;
             if (g_nextor_mbox.have_cmd == 0U) {
                 g_nextor_mbox.cmd = w;
                 g_nextor_mbox.err = NEXTOR_ERR_NONE;
@@ -2006,11 +2023,86 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
                 g_nextor_mbox.status &= (uint8_t)~NEXTOR_ST_DONE;
                 g_nextor_mbox.arg_n = 4U;   /* READ/WRITE take a 4-byte LBA */
                 g_nextor_mbox.state = NEXTOR_ARGS;
-                /* No-arg commands latch immediately. */
+                /* No-arg commands latch AND complete inline. The Z80
+                 * polls MB_POLL immediately after MB_SEND at 3.58 MHz;
+                 * the main loop is asleep in WFI and won't run
+                 * Nextor_Service() until the EXTI0 handler returns,
+                 * by which time the driver has already called
+                 * MB_POLL thousands of times and timed out at ~0.8 s
+                 * with NO=DONE=0. The fix: pre-fill the result bytes
+                 * and set DONE here, in IRQ context. The driver's
+                 * next MB_POLL sees DONE, calls MB_GETRES for the
+                 * pre-filled bytes, and the handshake completes
+                 * without ever needing Nextor_Service() to run.
+                 * Status byte gets DONE+RX_AVAIL.
+                 */
                 if (w != NEXTOR_CMD_READ && w != NEXTOR_CMD_WRITE) {
                     g_nextor_mbox.arg_n = 0U;
                     g_nextor_mbox.have_cmd = 1U;
                     g_nx_cmd_count++;   /* mailbox activity trace */
+                    /* Inline "fast path" for the four no-arg commands
+                     * that always return immediately and are used by
+                     * the kernel's binding / runtime probe sequence.
+                     * Other no-arg codes (none yet) would fall through
+                     * to Nextor_Service() in the main loop. */
+                    volatile uint8_t *fast_rx =
+                        (volatile uint8_t *)NEXTOR_RX_BUF;
+                    switch (w) {
+                    case NEXTOR_CMD_HANDSHAKE:
+                        fast_rx[0] = 'R'; fast_rx[1] = 'N';
+                        fast_rx[2] = 'X'; fast_rx[3] = '2';
+                        fast_rx[4] = NEXTOR_FW_VERSION;
+                        g_nextor_mbox.rx_n = 5U;
+                        break;
+                    case NEXTOR_CMD_STATUS:
+                    case NEXTOR_CMD_STAPEEK: {
+                        uint8_t b = 0U;
+                        if (g_nextor_mbox.media_ok) {
+                            b = g_nextor_mbox.change_latch ? 2U : 1U;
+                            if (w == NEXTOR_CMD_STATUS) {
+                                g_nextor_mbox.change_latch = 0U;
+                            }
+                        }
+                        fast_rx[0] = b;
+                        g_nextor_mbox.rx_n = 1U;
+                        break;
+                    }
+                    case NEXTOR_CMD_CAPACITY: {
+                        /* Mark valid so the main-loop path skips SCSI
+                         * bus chatter; we already have cached values
+                         * from the last full ReadCapacity (or 0 if
+                         * not yet). The driver only needs a sane
+                         * answer to the FIRST CAPACITY query to bind
+                         * and then will run real I/O. */
+                        uint32_t blocks = g_nextor_mbox.cap_blocks;
+                        uint32_t bsize  = g_nextor_mbox.cap_size
+                                           ? g_nextor_mbox.cap_size
+                                           : NEXTOR_SECTOR_SIZE;
+                        fast_rx[0] = (uint8_t)(blocks);
+                        fast_rx[1] = (uint8_t)(blocks >> 8);
+                        fast_rx[2] = (uint8_t)(blocks >> 16);
+                        fast_rx[3] = (uint8_t)(blocks >> 24);
+                        fast_rx[4] = (uint8_t)(bsize);
+                        fast_rx[5] = (uint8_t)(bsize >> 8);
+                        fast_rx[6] = (uint8_t)(bsize >> 16);
+                        fast_rx[7] = (uint8_t)(bsize >> 24);
+                        g_nextor_mbox.rx_n = 8U;
+                        break;
+                    }
+                    case NEXTOR_CMD_ABORT:
+                    default:
+                        /* ABORT or unknown: no result bytes, just DONE. */
+                        break;
+                    }
+                    /* Compose STATUS with DONE and (if RX bytes)
+                     * RX_AVAIL, then assert DONE so the driver's
+                     * very next MB_POLL sees it. */
+                    g_nextor_mbox.status =
+                        NEXTOR_ST_READY | NEXTOR_ST_DONE |
+                        (g_nextor_mbox.rx_n ? NEXTOR_ST_RXAVL : 0);
+                    /* Reset have_cmd so the next command is accepted
+                     * (the dedup was for re-triggers; this isn't). */
+                    g_nextor_mbox.have_cmd = 0U;
                 }
             }
         } else if (address == NEXTOR_MB_DATA) {
