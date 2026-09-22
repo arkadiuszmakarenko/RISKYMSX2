@@ -173,17 +173,13 @@ INCDIRS        := -IDebug -ICore \
                   -IPeripheral/inc -IStartup
 MSX_SOFTWARE_DIR := $(CURDIR)/../MSXSoftware
 ROM_LOADER_DIR   := $(MSX_SOFTWARE_DIR)/RomLoader
-ROM_EMBED_SRCS   := User/selector_rom.c User/terminal_rom.c
+ROM_EMBED_SRCS   := User/terminal_rom.c
 ROM_EMBED_SRC    := $(ROM_EMBED_SRCS)
-# Per-embedded-ROM build deps + the rom2c.py tool. selector_rom.c
-# re-runs `make -C $(ROM_LOADER_DIR) embed` (which rebuilds
-# selector.bin via the MSX-side Makefile). terminal_rom.c reads
+# terminal_rom.c reads
 # MSXSoftware/RomLoader/terminal.bin, which is produced by the
 # terminal.asm build under MSXSoftware/RomLoader/asm/.
-ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/RomLoader/Makefile \
-					$(MSX_SOFTWARE_DIR)/RomLoader/crt0.s \
-					$(MSX_SOFTWARE_DIR)/RomLoader/romloader.c \
-					$(MSX_SOFTWARE_DIR)/RomLoader/terminal.bin \
+ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/RomLoader/asm/Makefile \
+					$(MSX_SOFTWARE_DIR)/RomLoader/asm/terminal.asm \
 					$(CURDIR)/../tools/rom2c.py
 OBJDIR         := obj
 
@@ -285,7 +281,6 @@ $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 $(ROM_EMBED_SRC): $(ROM_EMBED_DEPS)
 	@echo "  EMBED $(notdir $@)"
 	@case '$@' in \
-	    User/selector_rom.c) $(MAKE) -C "$(ROM_LOADER_DIR)" embed ;; \
 	    User/terminal_rom.c) \
 	        $(MAKE) -C "$(ROM_LOADER_DIR)/asm" && \
 	        python3 "$(CURDIR)/../tools/rom2c.py" \
