@@ -15,7 +15,7 @@
 #include "psram.h"
 #include "scc.h"
 #include "loader.h"
-#include "nextor.h"
+#include "sunrise_ide.h"
 #include "terminal.h"
 #include "usb_disk.h"
 #include "usb_tests.h"
@@ -73,6 +73,13 @@ int main (void) {
     /* USBHS host init. Powers up the controller so it's ready. */
     USB_Initialization ();
 
+    /* Initialise the Sunrise IDE state machine so a swap to
+     * CART_MAP_SUNRIDE from the terminal menu (N key) starts with
+     * a clean ATA register file + PATA device signature. The actual
+     * USB enumeration is driven by Sunrise_IDE_Service() from the
+     * main loop; this only zeroes the in-RAM state struct. */
+    Sunrise_IDE_Init ();
+
     printf ("\r\n=== boot complete (terminal mapper active) ===\r\n");
 
     /* Idle loop: service both mailboxes. The current active mapper
@@ -84,100 +91,19 @@ int main (void) {
      * Terminal_Service when the TERMINAL mapper is not installed:
      * it only touches its own volatile fields, which the next cart
      * swap to TERMINAL simply discards. */
-    /* The Nextor engine is additionally gated on its mapper being
-     * active, so it stays fully inert in the terminal workflow and
-     * only services the DOS driver's mailbox after the N-key launch
-     * installs CART_MAP_NEXTOR. */
+    /* The Sunrise IDE engine is always live in the background: it drives
+     * the USB enumeration, INQUIRY, READ CAPACITY and IDENTIFY state
+     * machine once after boot, then idles until the kernel needs a
+     * READ/WRITE. Calling Sunrise_IDE_Service() unconditionally is
+     * cheap and harmless outside the SUNRIDE mapper - the lifecycle
+     * state machine parks itself in USB_READY, the in-flight
+     * READ/WRITE check returns immediately (state == IDLE), and the
+     * only real work it does while SUNRIDE is not installed is a
+     * single USBH_PreDeal() call. Once the user swaps to
+     * CART_MAP_SUNRIDE the kernel has already-enumerated stick data
+     * waiting. */
     for (;;) {
-        if (Cart_GetMapper () == CART_MAP_NEXTOR) {
-            /* Debug: report driver-binding activity as it happens. The
-             * three counters answer three independent questions about a
-             * silent boot:
-             *
-             *   g_nx_cmd_count  -- mailbox CMD writes (driver issueing
-             *                      a command). Stays at 0 when the
-             *                      driver never reaches the mailbox.
-             *   g_nx_bank_writes + g_nx_last_bank
-             *                    -- page-1 bank-select writes
-             *                      (ASCII16 CHGBNK). Ticks every
-             *                      time the kernel pages a new bank
-             *                      into 0x4000-0x7FFF. Driver bank
-             *                      is bank 7 - a tick with
-             *                      g_nx_last_bank==7 means the
-             *                      kernel HAS selected the driver
-             *                      bank; if g_nx_cmd_count still
-             *                      reads 0 after that, the driver
-             *                      is sitting idle (no disk request
-             *                      is reaching it yet).
-             *   g_nx_media_changes
-             *                    -- USB stick insertion/removal
-             *                      transitions. The kernel reads
-             *                      STAPEEK/STATUS at boot to pick
-             *                      up the change latch - if this
-             *                      tick happens but cmd_count
-             *                      stays 0, the kernel didn't poll
-             *                      status on this boot (typical at
-             *                      the MSX-BASIC prompt).
-             */
-            static uint32_t s_last_cmd_count = 0U;
-            static uint32_t s_last_attempts = 0U;
-            static uint32_t s_last_stat_reads = 0U;
-            static uint32_t s_last_bank_count = 0U;
-            static uint32_t s_last_media_count = 0U;
-            static uint32_t s_last_irq = 0U;
-            static uint32_t s_last_late = 0U;
-            static uint32_t s_last_zero = 0U;
-            static uint32_t s_last_reads = 0U;
-            static uint32_t s_last_wr = 0U;
-            uint32_t cc = g_nx_cmd_count;
-            uint32_t aa = g_nx_cmd_attempts;
-            uint32_t ss = g_nx_stat_reads;
-            uint32_t bc = g_nx_bank_writes;
-            uint32_t mc = g_nx_media_changes;
-            uint32_t ie = g_nx_irq_entry;
-            uint32_t il = g_nx_irq_late;
-            uint32_t iz = g_nx_irq_zero;
-            uint32_t rr = g_nx_reads;
-            uint32_t ww = g_nx_writes;
-            if (cc != s_last_cmd_count || aa != s_last_attempts
-                || ss != s_last_stat_reads || bc != s_last_bank_count
-                || mc != s_last_media_count || ie != s_last_irq
-                || il != s_last_late || iz != s_last_zero
-                || rr != s_last_reads || ww != s_last_wr) {
-                s_last_cmd_count  = cc;
-                s_last_attempts   = aa;
-                s_last_stat_reads = ss;
-                s_last_bank_count = bc;
-                s_last_media_count = mc;
-                s_last_irq = ie;
-                s_last_late = il;
-                s_last_zero = iz;
-                s_last_reads = rr;
-                s_last_wr = ww;
-                printf ("NEXTOR: cmds=%u A=%u S=%u "
-                        "irq=%u rd=%u wr=%u l=%u z=%u "
-                        "addrs[4/5/6/7/B/F]=%u/%u/%u/%u/%u/%u "
-                        "last=0x%04x "
-                        "banksel=%u (last=%u, b7sel=%u) "
-                        "media_ch=%u (now=%u)\r\n",
-                        (unsigned)cc, (unsigned)aa, (unsigned)ss,
-                        (unsigned)ie, (unsigned)rr, (unsigned)ww,
-                        (unsigned)il, (unsigned)iz,
-                        (unsigned)g_nx_addr_counts[0x4],
-                        (unsigned)g_nx_addr_counts[0x5],
-                        (unsigned)g_nx_addr_counts[0x6],
-                        (unsigned)g_nx_addr_counts[0x7],
-                        (unsigned)g_nx_addr_counts[0xB],
-                        (unsigned)g_nx_addr_counts[0xF],
-                        (unsigned)g_nx_last_addr,
-                        (unsigned)bc,
-                        (unsigned)g_nx_last_bank,
-                        (unsigned)g_nx_bank7_selects,
-                        (unsigned)mc,
-                        (unsigned)g_nx_media_now);
-            }
-            Nextor_Service ();
-        }
+        Sunrise_IDE_Service ();
         Loader_Service ();
         Terminal_Service ();
         __asm__ volatile ("wfi");

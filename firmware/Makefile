@@ -178,14 +178,28 @@ ROM_EMBED_SRC    := $(ROM_EMBED_SRCS)
 # terminal_rom.c reads
 # MSXSoftware/RomLoader/terminal.bin, which is produced by the
 # terminal.asm build under MSXSoftware/RomLoader/asm/.
-# nextor_rom.c re-runs `make -C $(NEXTOR_DRIVER_DIR) embed` (N80 ->
-# mknexrom -> rom2c.py --nextor, docs/NEXTOR_PLAN.md D3).
-NEXTOR_DRIVER_DIR := $(MSX_SOFTWARE_DIR)/NextorDriver
+#
+# nextor_rom.c reads MSXSoftware/Nextor/nextor_sunrise.bin (the
+# user-supplied Sunrise IDE Master Only Nextor kernel, e.g. the
+# SunRise_IDE_MO_Nextor-3.0.bin drop from the blueMSX / Sunrise IDE
+# project the Carnivore2 ships). Until that file exists the rule below
+# falls back to the hand-written placeholder in firmware/User/nextor_rom.c
+# - the placeholder keeps the build green but CANNOT boot Nextor
+# (the Sunrise IDE mapper decode finds no 'AB' header in it). Drop the
+# correct ROM file at the path above and rebuild.
+#
+# NOTE: the .bin file is NOT listed in ROM_EMBED_DEPS - missing source
+# files would otherwise abort `make` before our fallback path could
+# run. The regenerate_nextor_rom target checks for file existence and
+# either regenerates or leaves the hand-written stub in place.
 ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/RomLoader/asm/Makefile \
 					$(MSX_SOFTWARE_DIR)/RomLoader/asm/terminal.asm \
-					$(NEXTOR_DRIVER_DIR)/driver.asm \
-					$(NEXTOR_DRIVER_DIR)/Makefile \
 					$(CURDIR)/../tools/rom2c.py
+
+# Nextor kernel path - override with `make NEXTOR_ROM=path/to/your.bin`
+# to use a different kernel build (e.g. a 2.1.4 release instead of the
+# 3.0.x Carnivore2 sunrise drop).
+NEXTOR_ROM_SRC   ?= $(MSX_SOFTWARE_DIR)/Nextor/nextor_sunrise.bin
 OBJDIR         := obj
 
 # --- Discover sources automatically ------------------------------------------
@@ -262,9 +276,9 @@ endif
 # =============================================================================
 # Rules
 # =============================================================================
-.PHONY: all clean rebuild flash prog size list read erase showsize
+.PHONY: all clean rebuild flash prog size list read erase showsize regenerate_nextor_rom
 
-all: $(ELF) $(HEX) $(LST) showsize
+all: regenerate_nextor_rom $(ELF) $(HEX) $(LST) showsize
 	@echo "*** $(PROJECT) build complete ***"
 
 # --- Link --------------------------------------------------------------------
@@ -283,6 +297,29 @@ $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 		--specs=nano.specs --specs=nosys.specs \
 		-o "$@" $(OBJS) $(EXTRA_OBJS) -lm
 
+# Synthetic target that ALWAYS regenerates User/nextor_rom.c from the
+# Nextor kernel image. Marked PHONY so `make` runs the recipe every
+# time without comparing timestamps - the user wants the .bin file to
+# be the source of truth, and the placeholder nextor_rom.c shipped in
+# git should be overwritten on every build.
+#
+# If MSXSoftware/Nextor/nextor_sunrise.bin is missing, the recipe
+# prints a SKIP line and leaves the hand-written placeholder in place
+# so the build still completes (the Sunrise IDE mapper will not boot
+# Nextor with the placeholder, but the rest of the firmware is fine).
+.PHONY: regenerate_nextor_rom
+regenerate_nextor_rom:
+	@echo "  EMBED nextor_rom.c"
+	@if [ -f "$(NEXTOR_ROM_SRC)" ]; then \
+	    python3 "$(CURDIR)/../tools/rom2c.py" \
+	        "$(NEXTOR_ROM_SRC)" \
+	        "$(CURDIR)/User/nextor_rom.c" \
+	        "Nextor Sunrise IDE kernel (128 KiB)"; \
+	else \
+	    echo "  SKIP nextor_rom.c: $(NEXTOR_ROM_SRC) not found"; \
+	    echo "        Using placeholder - drop the Sunrise IDE Master Only ROM at the path above and rebuild."; \
+	fi
+
 $(ROM_EMBED_SRC): $(ROM_EMBED_DEPS)
 	@echo "  EMBED $(notdir $@)"
 	@case '$@' in \
@@ -291,8 +328,6 @@ $(ROM_EMBED_SRC): $(ROM_EMBED_DEPS)
 	        python3 "$(CURDIR)/../tools/rom2c.py" \
 	            "$(ROM_LOADER_DIR)/terminal.bin" \
 	            "$@" "MSX terminal ROM" ;; \
-	    User/nextor_rom.c) \
-	        $(MAKE) -C "$(NEXTOR_DRIVER_DIR)" embed ;; \
 	esac
 
 $(HEX): $(ELF)

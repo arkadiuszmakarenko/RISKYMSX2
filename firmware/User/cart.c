@@ -2,7 +2,7 @@
 #include "psram.h"
 #include "scc.h"
 #include "loader.h"
-#include "nextor.h"
+#include "sunrise_ide.h"
 #include "terminal.h"
 #include "ch32v4x7.h"
 #include "debug.h"
@@ -58,12 +58,22 @@ void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinli
  * MSX-side terminal program never fetches from 0x4100..0xBFFF. */
 extern const uint8_t terminal_rom[];
 
-/* Embedded Nextor kernel ROM (flash-resident, generated from
- * MSXSoftware/NextorDriver/Nextor-3.0.RISKYMSX2.ROM via make embed).
- * 8 banks x 16 KB = 128 KB; bank n of the Z80 window (written to
- * 0x6000) maps to nextor_rom[n * 16384 .. +0x3FFF]. Bank 0 carries
- * the 'AB' header; bank 7 (K_SIZE=7) is the driver bank. */
-extern const uint8_t nextor_rom[];
+/* Embedded Nextor Sunrise IDE kernel ROM (flash-resident, generated
+ * from MSXSoftware/Nextor/nextor_sunrise.bin via the Makefile's
+ * regenerate_nextor_rom target -> tools/rom2c.py). The Sunrise IDE
+ * mapper decoder uses 8 banks x 16 KiB = 128 KiB; bank n of the Z80
+ * window is selected by writing (bank|0x80) to 0x4104 (bit-reverse of
+ * bits 0..2, IDE-enable in bit 7). See sunrise_ide.c::write_control
+ * for the bit-reverse math.
+ *
+ * If MSXSoftware/Nextor/nextor_sunrise.bin is missing, the Makefile
+ * falls back to the hand-written placeholder nextor_rom.c. That
+ * placeholder will NOT boot Nextor - the Sunrise IDE mapper decode is
+ * useless without a real Sunrise kernel image. The placeholder is
+ * only there to keep the build green until the user drops the
+ * correct ROM file in place. */
+extern const uint8_t  nextor_rom[];
+extern const uint32_t nextor_rom_len;
 extern const uint32_t terminal_rom_len;
 
 /* Flash-selector mapper: serves the embedded ROM-selector image
@@ -82,8 +92,8 @@ extern const uint32_t terminal_rom_len;
  * mapper select) via the FIFO at 0x7FFF. Kept in flash: the cart
  * flash path is zero-wait, and the boot path benefits from having the
  * terminal ROM live before PSRAM is even initialised. */
-void Cart_EXTI0_NEXTOR_Handler (void) __attribute__((noinline,
-                                                     interrupt("WCH-Interrupt-fast")));
+void Cart_EXTI0_Sunride_Handler (void) __attribute__((noinline,
+                                                      interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_Terminal_Handler (void) __attribute__((noinline,
                                                         interrupt("WCH-Interrupt-fast")));
 
@@ -110,7 +120,7 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "KONAMISCC",
     "FLASH",
     "TERMINAL",
-    "NEXTOR",
+    "SUNRIDE",
 };
 
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
@@ -236,7 +246,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         && m != CART_MAP_ROM48k
         && m != CART_MAP_FLASH
         && m != CART_MAP_TERMINAL
-        && m != CART_MAP_NEXTOR
+        && m != CART_MAP_SUNRIDE
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -266,7 +276,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
 
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
-    case CART_MAP_NEXTOR:     h = (uint32_t)Cart_EXTI0_NEXTOR_Handler; break;
+    case CART_MAP_SUNRIDE:    h = (uint32_t)Cart_EXTI0_Sunride_Handler; break;
     default:                   return -1;
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
@@ -275,10 +285,13 @@ int Cart_SetMapper (Cart_Mapper m) {
     if (m == CART_MAP_ROM32k || m == CART_MAP_FLASH) {
         Loader_Reset ();
     }
-    /* Nextor mapper: reset the mailbox so the kernel's driver starts
-     * with a clean engine (no stale command/args from a previous run). */
-    if (m == CART_MAP_NEXTOR) {
-        Nextor_Reset ();
+    /* Sunrise IDE mapper: reset the ATA state machine + PATA device
+     * signature + IDE USB lifecycle so the kernel starts with a clean
+     * engine (no stale LBA / sector buffer / IDENTIFY data from a
+     * previous run, no stale state from a half-completed READ/WRITE).
+     * Safe to call repeatedly. */
+    if (m == CART_MAP_SUNRIDE) {
+        Sunrise_IDE_Init ();
     }
 
     /* Initial-bank assignment for bank-switching mappers so the first
@@ -353,18 +366,16 @@ int Cart_SetMapper (Cart_Mapper m) {
         /* ASCII 16k: 16 KiB banks at 0x6000 and 0x7000. */
         s_state.bankOffsets[0] = 0x0000U - 0x4000U;
         s_state.bankOffsets[8] = 0x0000U - 0x8000U;
-    } else if (m == CART_MAP_NEXTOR) {
-        /* Nextor (ASCII16 at page 1): the kernel's CHGBNK writes the
-         * bank NUMBER directly to 0x6000 (sdk/asm/chgbnk/ascii16.asm),
-         * so the page-1 window bias is (bank << 14) - 0x4000. The
-         * power-on mapper state is bank 0 = nextor_rom[0..0x3FFF] at
-         * 0x4000 (the 'AB' header lives there). bankOffsets[8] is
-         * unused: the Nextor ROM only claims page 1 (page 2 floats,
-         * like a real single-page DOS cartridge). */
-        s_state.bankOffsets[0] = 0x0000U - 0x4000U;
     }
     /* NEO8/NEO16 default to bank 0 for all pages - their writes
-     * compose the 12-bit bank number, no init needed. */
+     * compose the 12-bit bank number, no init needed.
+     *
+     * CART_MAP_SUNRIDE does NOT touch bankOffsets[] - the Sunrise IDE
+     * mapper decode lives entirely inside sunrise_ide.c (the cart IRQ
+     * handler just routes the read/write to Sunrise_IDE_ReadByte /
+     * Sunrise_IDE_WriteByte). The bank state is held in the
+     * s_ide.segment byte inside sunrise_ide.c and pre-selected by
+     * Sunrise_IDE_Init() (called above). */
 
     return 0;
 }
@@ -410,21 +421,17 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR0) | EXTI_FTENR_TR0;
     EXTI->INTFR = EXTI_INTENR_MR0;
 
-    /* Route PE8 (/IORQ) -> EXTI8 (shared lines 9:5), FALLING edge.
-     * The MSX memory mapper protocol drives I/O ports 0xFC..0xFF; the
-     * Nextor kernel uses those to adopt the cart as its primary
-     * mapper. Decoded ONLY while the NEXTOR mapper is active
-     * (Cart_EXTI95_IORQ_Handler bails for every other port). Runs in
-     * VTF slot 1, one priority step below the cart EXTI0. */
-    AFIO->EXTICR[2] = (AFIO->EXTICR[2] & ~(0xFU << 0)) |
-                      (AFIO_EXTICR3_EXTI8_PE << 0);
-    EXTI->INTENR = (EXTI->INTENR & ~EXTI_INTENR_MR8) | EXTI_INTENR_MR8;
-    EXTI->RTENR &= ~EXTI_RTENR_TR8;
-    EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
-    EXTI->INTFR = EXTI_INTENR_MR8;
-    SetVTFIRQ ((uint32_t)Cart_EXTI95_IORQ_Handler, EXTI9_5_IRQn, 1, ENABLE);
-    NVIC_EnableIRQ (EXTI9_5_IRQn);
-    NVIC_SetPriority (EXTI9_5_IRQn, 0x01);
+    /* The legacy ASCII16+mailbox NEXTOR mapper used a Cart_EXTI95_IORQ
+     * handler on PE8 (/IORQ) to decode ports 0xFC..0xFF and adopt the
+     * cart as the kernel's primary memory mapper. The Sunrise IDE
+     * kernel uses an internal mapper (RAM-backed, not a cart mapper)
+     * so it never touches 0xFC..0xFF; the IDE register / data window
+     * (0x7C00..0x7EFF) is decoded purely by address inside the cart
+     * EXTI0 handler. The IORQ decoder is therefore removed.
+     *
+     * PE8 is still wired on the cart edge and not used; the EXTI8 path
+     * is left disabled so spurious /IORQ transitions from other MSX
+     * expansions do not generate spurious IRQs. */
 
     /* Install the no-mapper handler by default. main()/CLI installs the
      * real mapper via Cart_SetMapper() once PSRAM_Init() has succeeded.
@@ -1863,56 +1870,47 @@ void Cart_EXTI0_Terminal_Handler (void) {
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
     GPIOB->CFGHR = CART_BUS_OFF;
 }
-
 /* ------------------------------------------------------------------ */
-/* Nextor mapper handler: serve the embedded Nextor kernel ROM          */
-/* (nextor_rom[], .cartrom) through the ASCII16-style banked window at  */
-/* page 1 (0x4000-0x7FFF, bank number written to 0x6000), and decode    */
-/* the Nextor mailbox window 0x7FF0..0x7FF7 that driver.asm talks to.   */
-/*                                                                      */
-/* Bank semantics (sdk/asm/chgbnk/ascii16.asm, the kernel's own CHGBNK):*/
-/*   page 1 is ONE 16 KB bank selected by writing the bank NUMBER       */
-/*   directly to 0x6000 - no +/-1 bias, no 0x7000 page-2 register       */
-/*   (the kernel never switches page 2; it floats like a real           */
-/*   single-page DOS cartridge).                                        */
-/*                                                                      */
-/* Mailbox contract (nextor.h / driver.asm):                            */
-/*   0x7FF0  r: STATUS (READY|DONE|ERR|RX_AVAIL)   w: CMD byte          */
-/*   0x7FF1  r: DATA pop (RX buffer, rx_idx++)     w: DATA push         */
-/*   0x7FF2/3 r: RX_COUNT lo/hi                    other writes: ignore */
-/*   0x7FF4  r: ERR code   0x7FF5  r: FW version                        */
-/*                                                                      */
-/* This is the C reference version (plan section 7 Phase 1: "a C        */
-/* reference version first if useful for bring-up; asm for the shipped  */
-/* path"). It follows the proven Cart_EXTI0_Flash_Handler structure.    */
-/* The hot path (kernel instruction fetches) can be swapped to the      */
-/* hand-asm clone after hardware bring-up if measurements demand it.    */
+/* Sunrise IDE mapper handler.                                         */
+/*                                                                     */
+/* Cart-window contract (see sunrise_ide.h for the full map):          */
+/*                                                                     */
+/*   0x4000..0x7FFF     : Nextor ROM (nextor_rom[]) - the lower 14      */
+/*                        address bits index into the 16 KiB bank       */
+/*                        selected by the last 0x4104 write.            */
+/*   0x4104 (W)         : control register (bank bit-reversed +        */
+/*                        IDE enable).                                 */
+/*   0x7C00..0x7DFF     : ATA data register (16-bit PIO).              */
+/*   0x7E00..0x7EFF     : ATA task-file register file.                 */
+/*                                                                     */
+/* The handler defers the register file + sector buffer + LBA math to  */
+/* sunrise_ide.c (Sunrise_IDE_ReadByte / Sunrise_IDE_WriteByte) - both */
+/* are IRQ-safe (no blocking, no printf, no long loops). The handler  */
+/* just routes the bus cycle and drives the data byte on a read.      */
+/*                                                                     */
+/* Kept in flash (not .ramfunc): the IDE register / data accesses are  */
+/* infrequent (the kernel's PIO loop runs 256-512 bytes per LBA, but  */
+/* each iteration is dozens of Z80 cycles) and the cart flash path is  */
+/* zero-wait, so there is no benefit to paying the PSRAM cost.         */
 /* ------------------------------------------------------------------ */
 
-void Cart_EXTI0_NEXTOR_Handler (void) {
-    g_nx_irq_entry++;
+void Cart_EXTI0_Sunride_Handler (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
-    g_nx_last_addr = address;
-    g_nx_addr_counts[(address >> 12) & 0xFU]++;
     uint32_t ctrl = GPIOE->INDR;
 
-    /* Late entry: SLTSL already high, this cycle is already over. */
+    /* Late entry: SLTSL already high, this cycle is over. */
     if ((ctrl & CART_SLTSL_MASK) != 0U) {
-        g_nx_irq_late++;
         GPIOB->CFGHR = CART_BUS_OFF;
         EXTI->INTFR = EXTI_INTENR_MR0;
         return;
     }
 
     /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
-     * bail if SLTSL rises first. Same fix as Cart_EXTI0_Flash_Handler. */
-    if ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
-        g_nx_irq_zero++;
-    }
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+     * bail if SLTSL rises first. Same pattern as the terminal handler. */
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) ==
+           (CART_RD_MASK | CART_WR_MASK)) {
         ctrl = GPIOE->INDR;
         if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            g_nx_irq_late++;
             GPIOB->CFGHR = CART_BUS_OFF;
             EXTI->INTFR = EXTI_INTENR_MR0;
             return;
@@ -1920,72 +1918,10 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
     }
 
     if ((ctrl & CART_RD_MASK) == 0U) {
-        g_nx_reads++;
         /* READ cycle. */
-        uint8_t v;
-        if (address >= 0x4000U && address < 0x8000U) {
-            if (address >= 0x7FF0U) {
-                /* Nextor mailbox window (0x7FF0..0x7FFF). */
-                switch (address - 0x7FF0U) {
-                case 0:  /* STATUS */
-                    v = g_nextor_mbox.status;
-                    g_nx_stat_reads++;
-                    break;
-                case 1: {  /* DATA pop */
-                    if (g_nextor_mbox.rx_n != 0U) {
-                        v = *(volatile const uint8_t *)
-                            (NEXTOR_RX_BUF + g_nextor_mbox.rx_idx);
-                        g_nextor_mbox.rx_idx++;
-                        g_nextor_mbox.rx_n--;
-                    } else {
-                        v = 0xFFU;   /* nothing to drain */
-                    }
-                    break;
-                }
-                case 2:  /* RX_COUNT low */
-                    v = (uint8_t)(g_nextor_mbox.rx_n & 0xFFU);
-                    break;
-                case 3:  /* RX_COUNT high */
-                    v = (uint8_t)(g_nextor_mbox.rx_n >> 8);
-                    break;
-                case 4:  /* ERR code */
-                    v = g_nextor_mbox.err;
-                    break;
-                case 5:  /* firmware version */
-                    v = NEXTOR_FW_VERSION;
-                    break;
-                default: /* 0x7FF6..0x7FFF reserved */
-                    v = 0xFFU;
-                    break;
-                }
-            } else {
-                /* Page 1: serve the banked kernel window from flash.
-                 * bankOffsets[0] = (bank << 14) - 0x4000, so addr + bias
-                 * is the byte index into nextor_rom[]. */
-                v = nextor_rom[(uint32_t)address + s_state.bankOffsets[0]];
-            }
-        } else if (address >= 0x8000U) {
-            /* Mapper window (pages 2/3, 0x8000..0xFFFF): once the
-             * kernel adopts the cart as its primary mapper it selects
-             * this slot at page 2 (and, after SWAP_RAM_SLOT, page 3)
-             * and runs its DOS work segments here - serve the mapped
-             * PSRAM segment. */
-            const uint8_t preg = (address < 0xC000U)
-                               ? g_nx_mapper.page_reg[2]
-                               : g_nx_mapper.page_reg[3];
-            const uint32_t seg = (uint32_t)(preg & NEXTOR_MAPPER_SEG_MASK);
-            v = *(volatile const uint8_t *)
-                (g_nx_mapper.ram_base + (seg << 14)
-                 + (uint32_t)(address - 0x8000U));
-        } else {
-            /* Page 0 (0x0000..0x3FFF): outside the cart's claim - float. */
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-            GPIOB->CFGHR = CART_BUS_OFF;
-            return;
-        }
-        /* Drive the byte. */
-        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8)) | ((uint32_t)v << 8);
+        const uint8_t v = Sunrise_IDE_ReadByte (address);
+        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                     | ((uint32_t)v << 8);
         GPIOB->CFGHR = CART_BUS_ON;
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
@@ -1993,240 +1929,19 @@ void Cart_EXTI0_NEXTOR_Handler (void) {
         return;
     }
 
-    /* WRITE cycle: WR is low now; data valid on PB8..15. */
+    /* WRITE cycle. */
     if ((ctrl & CART_WR_MASK) == 0U) {
-        g_nx_writes++;
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
-        uint32_t mw_addr = 0U;   /* mapper RAM address, 0 = not a write */
-        if (address == 0x6000U) {
-            /* Bank select: the kernel's CHGBNK writes the bank NUMBER
-             * (no +/-1 bias). Latch the window bias into bankOffsets[0]:
-             * bias = (bank << 14) - 0x4000. */
-            s_state.bankOffsets[0] = ((uint32_t)w << 14) - 0x4000U;
-            g_nx_bank_writes++;
-            g_nx_last_bank = w;
-            if (w == 7U) {
-                g_nx_bank7_selects++;
-            }
-        } else if (address == 0x7FF0U) {
-            /* Mailbox CMD write. have_cmd dedup: while a command is
-             * still pending (unserved), ignore further CMD bytes -
-             * EXTI0 re-triggers can re-deliver the same byte 20+ times
-             * (the loader's 21x-duplication lesson). */
-            g_nx_cmd_attempts++;
-            if (g_nextor_mbox.have_cmd == 0U) {
-                g_nextor_mbox.cmd = w;
-                g_nextor_mbox.err = NEXTOR_ERR_NONE;
-                g_nextor_mbox.rx_n = 0U;
-                g_nextor_mbox.rx_idx = 0U;
-                g_nextor_mbox.tx_n = 0U;
-                g_nextor_mbox.status &= (uint8_t)~NEXTOR_ST_DONE;
-                g_nextor_mbox.arg_n = 4U;   /* READ/WRITE take a 4-byte LBA */
-                g_nextor_mbox.state = NEXTOR_ARGS;
-                /* No-arg commands latch AND complete inline. The Z80
-                 * polls MB_POLL immediately after MB_SEND at 3.58 MHz;
-                 * the main loop is asleep in WFI and won't run
-                 * Nextor_Service() until the EXTI0 handler returns,
-                 * by which time the driver has already called
-                 * MB_POLL thousands of times and timed out at ~0.8 s
-                 * with NO=DONE=0. The fix: pre-fill the result bytes
-                 * and set DONE here, in IRQ context. The driver's
-                 * next MB_POLL sees DONE, calls MB_GETRES for the
-                 * pre-filled bytes, and the handshake completes
-                 * without ever needing Nextor_Service() to run.
-                 * Status byte gets DONE+RX_AVAIL.
-                 */
-                if (w != NEXTOR_CMD_READ && w != NEXTOR_CMD_WRITE) {
-                    g_nextor_mbox.arg_n = 0U;
-                    g_nextor_mbox.have_cmd = 1U;
-                    g_nx_cmd_count++;   /* mailbox activity trace */
-                    /* Inline "fast path" for the four no-arg commands
-                     * that always return immediately and are used by
-                     * the kernel's binding / runtime probe sequence.
-                     * Other no-arg codes (none yet) would fall through
-                     * to Nextor_Service() in the main loop. */
-                    volatile uint8_t *fast_rx =
-                        (volatile uint8_t *)NEXTOR_RX_BUF;
-                    switch (w) {
-                    case NEXTOR_CMD_HANDSHAKE:
-                        fast_rx[0] = 'R'; fast_rx[1] = 'N';
-                        fast_rx[2] = 'X'; fast_rx[3] = '2';
-                        fast_rx[4] = NEXTOR_FW_VERSION;
-                        g_nextor_mbox.rx_n = 5U;
-                        break;
-                    case NEXTOR_CMD_STATUS:
-                    case NEXTOR_CMD_STAPEEK: {
-                        uint8_t b = 0U;
-                        if (g_nextor_mbox.media_ok) {
-                            b = g_nextor_mbox.change_latch ? 2U : 1U;
-                            if (w == NEXTOR_CMD_STATUS) {
-                                g_nextor_mbox.change_latch = 0U;
-                            }
-                        }
-                        fast_rx[0] = b;
-                        g_nextor_mbox.rx_n = 1U;
-                        break;
-                    }
-                    case NEXTOR_CMD_CAPACITY: {
-                        /* Mark valid so the main-loop path skips SCSI
-                         * bus chatter; we already have cached values
-                         * from the last full ReadCapacity (or 0 if
-                         * not yet). The driver only needs a sane
-                         * answer to the FIRST CAPACITY query to bind
-                         * and then will run real I/O. */
-                        uint32_t blocks = g_nextor_mbox.cap_blocks;
-                        uint32_t bsize  = g_nextor_mbox.cap_size
-                                           ? g_nextor_mbox.cap_size
-                                           : NEXTOR_SECTOR_SIZE;
-                        fast_rx[0] = (uint8_t)(blocks);
-                        fast_rx[1] = (uint8_t)(blocks >> 8);
-                        fast_rx[2] = (uint8_t)(blocks >> 16);
-                        fast_rx[3] = (uint8_t)(blocks >> 24);
-                        fast_rx[4] = (uint8_t)(bsize);
-                        fast_rx[5] = (uint8_t)(bsize >> 8);
-                        fast_rx[6] = (uint8_t)(bsize >> 16);
-                        fast_rx[7] = (uint8_t)(bsize >> 24);
-                        g_nextor_mbox.rx_n = 8U;
-                        break;
-                    }
-                    case NEXTOR_CMD_ABORT:
-                    default:
-                        /* ABORT or unknown: no result bytes, just DONE. */
-                        break;
-                    }
-                    /* Compose STATUS with DONE and (if RX bytes)
-                     * RX_AVAIL, then assert DONE so the driver's
-                     * very next MB_POLL sees it. */
-                    g_nextor_mbox.status =
-                        NEXTOR_ST_READY | NEXTOR_ST_DONE |
-                        (g_nextor_mbox.rx_n ? NEXTOR_ST_RXAVL : 0);
-                    /* Reset have_cmd so the next command is accepted
-                     * (the dedup was for re-triggers; this isn't). */
-                    g_nextor_mbox.have_cmd = 0U;
-                }
-            }
-        } else if (address == NEXTOR_MB_DATA) {
-            /* Arg / data push. */
-            if (g_nextor_mbox.state == NEXTOR_ARGS && g_nextor_mbox.arg_n != 0U) {
-                /* LBA bytes arrive little-endian; accumulate LSB-first
-                 * by shifting the whole LBA right each time. */
-                g_nextor_mbox.lba = (g_nextor_mbox.lba >> 8)
-                                  | ((uint32_t)w << 24);
-                g_nextor_mbox.arg_n--;
-                if (g_nextor_mbox.arg_n == 0U) {
-                    if (g_nextor_mbox.cmd == NEXTOR_CMD_WRITE) {
-                        g_nextor_mbox.state = NEXTOR_WRITE_XFER;
-                        g_nextor_mbox.tx_n = 0U;
-                    } else {
-                        g_nextor_mbox.have_cmd = 1U;
-                        g_nextor_mbox.status &= (uint8_t)~NEXTOR_ST_DONE;
-                        g_nx_cmd_count++;   /* mailbox activity */
-                    }
-                }
-            } else if (g_nextor_mbox.state == NEXTOR_WRITE_XFER) {
-                /* WRITE data: collect 512 bytes into the PSRAM TX
-                 * buffer, then hand over to the service. */
-                *(volatile uint8_t *)(NEXTOR_TX_BUF + g_nextor_mbox.tx_n) = w;
-                g_nextor_mbox.tx_n++;
-                if (g_nextor_mbox.tx_n == NEXTOR_SECTOR_SIZE) {
-                    g_nextor_mbox.have_cmd = 1U;
-                    g_nextor_mbox.status &= (uint8_t)~NEXTOR_ST_DONE;
-                }
-            }
-            /* Stray DATA writes (no command in flight) are dropped. */
-        } else if (address >= 0x8000U) {
-            /* Mapper window write (pages 2/3): the kernel writes its
-             * DOS work segments here. Capture the target address now
-             * (the data byte was latched above); the PSRAM write
-             * happens after the bus cycle ends, below. */
-            const uint8_t preg = (address < 0xC000U)
-                               ? g_nx_mapper.page_reg[2]
-                               : g_nx_mapper.page_reg[3];
-            const uint32_t seg = (uint32_t)(preg & NEXTOR_MAPPER_SEG_MASK);
-            mw_addr = g_nx_mapper.ram_base + (seg << 14)
-                    + (uint32_t)(address - 0x8000U);
-        }
-        /* Other writes (0x7FF2..0x7FFF etc): ignore. */
+        Sunrise_IDE_WriteByte (address, w);
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        if (mw_addr != 0U) {
-            /* Deferred mapper-RAM write: the bus cycle is over
-             * (SLTSL high), so the ~30-cycle PSRAM write cannot
-             * race the next Z80 cycle (~350 MCU cycles away). */
-            *(volatile uint8_t *)mw_addr = w;
-        }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
 
-    /* Neither RD nor WR asserted - spurious; release. */
+    /* Neither RD nor WR - spurious; release. */
     EXTI->INTFR = EXTI_INTENR_MR0;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
-}
-
-/* ------------------------------------------------------------------ */
-/* MSX memory-mapper I/O decoder (/IORQ, shared EXTI lines 9:5, VTF     */
-/* slot 1). The Nextor kernel adopts the cart as its primary mapper     */
-/* by driving I/O ports 0xFC..0xFF with `out` (page registers) and      */
-/* serving mapper RAM at pages 2/3 through this cart (handled by the    */
-/* NEXTOR EXTI0 handler). Protocol per the kernel's TEST_MAPPER_SLOT:   */
-/* only register WRITES and page-2/3 memory cycles are exercised; the   */
-/* register read-back (`in`) is implemented for completeness - real     */
-/* mappers return partial bits, returning the full byte matches         */
-/* openMSX's "largest" mode and is accepted by the kernel.              */
-/*                                                                      */
-/* This IRQ fires on EVERY I/O cycle of the MSX (PSG/VDP/PPI traffic    */
-/* included): the common case must bail in a handful of instructions.   */
-/* ------------------------------------------------------------------ */
-
-void Cart_EXTI95_IORQ_Handler (void) {
-    /* Clear whichever of lines 5-9 fired (we only act on line 8). */
-    EXTI->INTFR = (EXTI->INTFR & 0x3E0U);
-
-    /* Inert outside the Nextor mapper: bail fast - this IRQ fires on
-     * every I/O cycle of the MSX. */
-    if (g_mapper != CART_MAP_NEXTOR || g_nx_mapper.armed == 0U) {
-        return;
-    }
-
-    /* The I/O port number lives on A0..A7. Only the mapper's four
-     * register ports belong to us; everything else is owned by the
-     * machine's own devices (PSG/VDP/PPI) - do not drive. */
-    const uint16_t port = (uint16_t)(GPIOD->INDR & 0xFFU);
-    if (port < 0xFCU) {
-        return;
-    }
-
-    uint32_t ctrl = GPIOE->INDR;
-    /* RD/WR lag IORQ by a gate delay - poll until one settles, or
-     * bail if IORQ rises first (cycle over). Same discipline as the
-     * memory handlers. */
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_IORQ_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            return;
-        }
-    }
-
-    const uint8_t idx = (uint8_t)(port - 0xFCU);
-    if ((ctrl & CART_WR_MASK) == 0U) {
-        /* OUT: latch the page register (full byte; the memory path
-         * masks with NEXTOR_MAPPER_SEG_MASK so high values mirror
-         * low segments exactly like real hardware). */
-        const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
-        g_nx_mapper.page_reg[idx] = w;
-    } else if ((ctrl & CART_RD_MASK) == 0U) {
-        /* IN: register read-back (the kernel does not rely on it;
-         * returning the latched byte matches the "largest" mapper
-         * read-back behaviour). */
-        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
-                     | ((uint32_t)g_nx_mapper.page_reg[idx] << 8);
-        GPIOB->CFGHR = CART_BUS_ON;
-    }
-    /* Spin until IORQ rises (cycle end), then release the bus. */
-    while ((GPIOE->INDR & CART_IORQ_MASK) == 0U) { }
     GPIOB->CFGHR = CART_BUS_OFF;
 }
 

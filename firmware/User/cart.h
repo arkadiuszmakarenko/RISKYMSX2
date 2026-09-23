@@ -23,7 +23,18 @@
 #define CART_RD_MASK      0x0002U  /* PE1  ~RD */
 #define CART_WR_MASK      0x0004U  /* PE2  ~WR */
 #define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
-#define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)    */
+#define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)
+                                    * currently unused: the Sunrise IDE
+                                    * mapper decodes the IDE register /
+                                    * data window purely by address, not
+                                    * by qualifying ~IORQ. The bit is
+                                    * still wired on the cart edge (PE8)
+                                    * but the EXTI8 IORQ decoder was
+                                    * removed together with the legacy
+                                    * ASCII16 memory-mapper protocol
+                                    * (the new Sunrise IDE kernel
+                                    * doesn't adopt the cart as a
+                                    * primary mapper). */
 
 /* Data bus drive config for GPIOB CFGHR (pins 8..15).
  * 0x3 nibble = 50MHz push-pull output, 0x4 nibble = floating input. */
@@ -128,14 +139,20 @@ typedef enum {
                                   * workflow - swap away via the menu to
                                   * the FLASH mapper if the user prefers
                                   * the existing mailbox-driven loader. */
-    CART_MAP_NEXTOR     = 13,  /* Nextor kernel cart: serves the embedded
-     * Nextor 3.0 kernel ROM (nextor_rom[], .cartrom) through an
-     * ASCII16-style banked window at page 1 (0x4000-0x7FFF; the bank
-     * number is written to 0x6000). The 0x7FF0..0x7FF7 window is the
-     * Nextor mailbox (MSXSoftware/NextorDriver/driver.asm <->
-     * nextor.c Nextor_Service). Flash-served: no PSRAM image. Reached
-     * via the terminal menu's N key (handle_list_key ->
-     * soft_reset_into_cart(CART_MAP_NEXTOR)). */
+    CART_MAP_SUNRIDE    = 13,  /* Sunrise IDE emulation: serves the
+                                  * embedded Nextor Sunrise IDE ROM
+                                  * (nextor_rom[]) at 0x4000..0x7FFF
+                                  * through the Carnivore2-style 0x4104
+                                  * bank-switch + IDE enable control
+                                  * register, with the 0x7C00..0x7EFF
+                                  * window punched out as the ATA task
+                                  * file + 16-bit data register. The IDE
+                                  * state machine + USB backing store
+                                  * live in sunrise_ide.c. Flash-served:
+                                  * no PSRAM image. Reached via the
+                                  * terminal menu's N key (handle_list
+                                  * _key -> soft_reset_into_cart
+                                  * (CART_MAP_SUNRIDE)). */
     CART_MAP_MAX        = 14,
 } Cart_Mapper;
 
@@ -176,17 +193,12 @@ uint32_t Cart_GetWrCycles (void);
  * Returns the same value as Cart_SetMapper(). */
 int  Cart_SetMapper_Safe (Cart_Mapper m);
 
-/* MSX memory-mapper I/O decoder (shared EXTI lines 9:5 IRQ, VTF slot
- * 1). Decodes the mapper's register ports 0xFC..0xFF: `out` latches
- * the page register, `in` returns it (register read-back) - this is
- * what lets the Nextor kernel adopt the cart as its primary mapper
- * (the kernel drives the registers with `out` and serves mapper RAM
- * at pages 2/3 via the NEXTOR EXTI0 handler). Fires on EVERY I/O
- * cycle of the MSX: bails immediately for any other port and is fully
- * inert outside the NEXTOR mapper. See nextor.h for the mapper state
- * and docs/NEXTOR_PLAN.md for the detection protocol. */
-void Cart_EXTI95_IORQ_Handler (void) __attribute__((noinline,
-                                                    interrupt("WCH-Interrupt-fast")));
+/* MSX memory-mapper I/O decoder: REMOVED. The Sunrise IDE kernel does
+ * not adopt the cart as a primary memory mapper (it serves its own
+ * mapper internally and uses the IDE register window as its I/O
+ * surface). The legacy ASCII16+mailbox NEXTOR mapper that did need
+ * 0xFC..0xFF decoding is gone. If a future mapper needs the protocol
+ * the EXTI95 handler should be reinstated in cart.c::Init_Cart. */
 
 /* Get the base address of the cart image window in PSRAM. Always
  * PSRAM_CART_BASE. Kept for API symmetry with the previous SRAM/PSRAM

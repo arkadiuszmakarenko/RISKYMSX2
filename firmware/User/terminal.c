@@ -507,7 +507,7 @@ static void soft_reset_into_cart (Cart_Mapper m) {
          * RAM-resident the swap can no longer poison executing code,
          * so this race now has huge margins instead of being a
          * knife-edge. */
-        Delay_Ms (30U);
+        Delay_Ms (20U);
         if (g_term_mbox.out_n != 0U) {
             printf ("TERM: WARNING FIFO not drained (out_n=%u at swap "
                     "time) - MSX has not read the 0x03 yet, it may "
@@ -526,7 +526,7 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * (~250 ms) - shorter budgets made some games (e.g. Metal Gear 2,
      * Konami-SCC with a large INIT) fail to boot. Tune via the
      * constant below if a title needs more. */
-    Delay_Ms (250U);
+    Delay_Ms (800U);
 }
 
 void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
@@ -717,23 +717,30 @@ static void handle_list_key (uint8_t key) {
         (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
         return;
     } else if (key == 'N' || key == 'n') {
-        /* Boot the flash-served Nextor kernel (docs/NEXTOR_PLAN.md
-         * D2b, terminal-menu variant). Uses EXACTLY the proven game-
-         * launch dance (soft_reset_into_cart): push the launch byte,
-         * the MSX-side terminal's rom_start runs rst 0 from MSX RAM,
-         * and the BIOS re-probe finds the armed cart - here the
-         * Nextor kernel's 'AB' at 0x4000 (nextor_rom bank 0).
+        /* Boot the flash-served Nextor Sunrise IDE kernel (Carnivore2
+         * mapper, IDE window 0x7C00..0x7EFF backed by the USBHS host
+         * via sunrise_ide.c). Uses EXACTLY the proven game-launch
+         * dance (soft_reset_into_cart): push the launch byte, the
+         * MSX-side terminal's rom_start runs rst 0 from MSX RAM, and
+         * the BIOS re-probe finds the armed cart - here the Sunrise
+         * kernel's 'AB' at 0x4000 (nextor_rom bank 0 of the
+         * MSXSoftware/Nextor/nextor_sunrise.bin ROM).
          * Physical F1 cannot be sniffed through the menu's CHGET
          * forwarding (the BIOS turns F1 into its KEY string), so the
          * menu accepts the letter N; the footer hints it. */
-        printf ("TERM: N -> NEXTOR\r\n");
+        printf ("TERM: N -> SUNRIDE\r\n");
         clear_screen ();
-        out_str (" Booting NEXTOR...");
+        out_str (" Booting Nextor (Sunrise IDE)...");
         newline ();
         /* Let the MSX print the launch text before the 0x03 byte and
-         * the mapper swap (same discipline as Terminal_BootCart). */
+         * the mapper swap (same discipline as Terminal_BootCart).
+         * CRITICAL: keep the soft_reset_into_cart sequence exactly
+         * as for game ROMs - the Sunrise kernel's init has the same
+         * "MSX slot probe 0x4000 within ~20 ms of RST 0" timing, so
+         * the 30 ms swap window in soft_reset_into_cart is what
+         * avoids the boot hang regression. */
         term_wait_drain (600U);
-        soft_reset_into_cart (CART_MAP_NEXTOR);
+        soft_reset_into_cart (CART_MAP_SUNRIDE);
         return;
     }
     /* redraw cursor + arrow on the line we landed on (in-page row) */
