@@ -17,7 +17,7 @@ Area                                    Addr        Size        Decimal Bytes (A
      00000001  l__DATA                         
      00000008  l__HEADER2                      
      00000010  l__HEADER0                      
-     000000CC  l__HEADER1                      
+     000000C4  l__HEADER1                      
      00000200  s__CODE                         
      00008000  s__DATA                         
 
@@ -44,7 +44,7 @@ Hexadecimal  [32-Bits]
 
 Area                                    Addr        Size        Decimal Bytes (Attributes)
 --------------------------------        ----        ----        ------- ----- ------------
-_HEADER1                            00000000    000000CC =         204. bytes (ABS,CON)
+_HEADER1                            00000000    000000C4 =         196. bytes (ABS,CON)
 
       Value  Global                              Global Defined In Module
       -----  --------------------------------   ------------------------

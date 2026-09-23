@@ -29,11 +29,12 @@
 ;                           present", 0 = "no stick yet")
 ;
 ; Boot flow:
-;   1. INIT moves the post-init body to RAM at 0xE000. The body length is
-;      a fixed constant (BODY_SIZE = 213 bytes, matching the v303 ROM).
-;   2. INIT probes GRPH-key. If GRPH is held, send 0x04 on 0x7FFE -> the
-;      firmware swaps to the user cart and reboots the MSX into the game.
-;   3. Otherwise, set 32-column screen, palette, sprite cursor, then loop:
+;   1. INIT copies the post-init body to RAM at 0xE000. The body length
+;      is a fixed constant (BODY_SIZE bytes). The terminal is ALWAYS
+;      the boot cart: no GRPH probe at boot, GRAPH does nothing until
+;      the menu is running. To reach Nextor, pick it from the menu
+;      (key N) instead of holding GRAPH during power-on.
+;   2. Set 32-column screen, palette, sprite cursor, then loop:
 ;      read 0x7FFF, print whatever the firmware puts there, poll keyboard
 ;      and forward each keystroke on 0x7FFD.
 ;-------------------------------------------------------------------------------
@@ -72,15 +73,12 @@
         ;; printing, so we run from RAM.
         .org    0x4010
 init:
-        ;; Probe GRPH key. If held, return to the BIOS so the MSX
-        ;; drops to BASIC / old loader (no terminal menu visible).
-        ;; If NOT held, copy the body to MSX RAM and enter the
-        ;; terminal menu.
-        ld      a, #6
-        call    0x0141                  ; GTSIZE - row 6 of matrix
-        and     #0x04                   ; GRPH = bit 2 of row 6
-        ret     nz                       ; held -> BIOS continues slot probe
-        ;; GRPH not held: continue with body copy + run
+        ;; Always boot the terminal menu: copy the body to MSX RAM
+        ;; and run it. No GRPH probe at boot - CALL #141 (GTSIZE) is
+        ;; model-dependent (Panasonic returns the GRPH bit, some
+        ;; clones always return 0x04), so GRAPH-based boot gating is
+        ;; unreliable. The menu is the single, predictable entry
+        ;; point; Nextor is reached from the menu (key N).
         ld      hl, #body              ; source in ROM
         ld      de, #0xE000            ; destination in MSX RAM
         ld      bc, #BODY_SIZE         ; byte count
