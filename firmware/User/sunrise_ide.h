@@ -242,6 +242,13 @@ typedef struct {
 
     /* Error tracking. */
     uint8_t  last_cmd_status;    /* 0 = OK, 1 = error (sets ATA_STATUS_ERR) */
+
+    /* Diagnostic counters (incremented in IRQ context, read in main loop). */
+    volatile uint32_t stat_drains;        /* PIO sectors fully drained */
+    volatile uint32_t stat_atacmds;       /* ATA command writes (0x7E07) */
+    volatile uint32_t stat_tf_writes;     /* task-file register writes */
+    volatile uint32_t stat_status_reads;  /* STATUS register reads (0x7E07) */
+    volatile uint8_t  stat_last_cmd;      /* last ATA command byte */
 } Sunrise_IDE;
 
 /* ========================================================================
@@ -265,6 +272,10 @@ uint8_t Sunrise_IDE_ReadByte (uint16_t address);
 /* Write handler: applies a cart write from the MSX. Same constraints
  * as the read handler. */
 void Sunrise_IDE_WriteByte (uint16_t address, uint8_t value);
+
+/* Read-only accessor for the live state struct (diagnostic counters,
+ * USB lifecycle, etc.). Used by the main-loop status printer. */
+const Sunrise_IDE *Sunrise_IDE_GetState (void);
 
 #ifdef __cplusplus
 }

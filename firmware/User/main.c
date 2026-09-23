@@ -106,6 +106,42 @@ int main (void) {
         Sunrise_IDE_Service ();
         Loader_Service ();
         Terminal_Service ();
+
+        /* ATA status line. Print only when counters change so the
+         * log isn't flooded. The counters are incremented in IRQ
+         * context (cart bus handler) and read here in main-loop
+         * context. */
+        static uint32_t last_cmds = 0, last_tf = 0, last_st = 0;
+        static uint32_t last_dr = 0;
+        static uint8_t  last_last_cmd = 0xFF;
+        const Sunrise_IDE *s = Sunrise_IDE_GetState ();
+        if (s->stat_atacmds      != last_cmds  ||
+            s->stat_tf_writes    != last_tf    ||
+            s->stat_status_reads != last_st    ||
+            s->stat_drains       != last_dr    ||
+            s->stat_last_cmd     != last_last_cmd) {
+            last_cmds  = s->stat_atacmds;
+            last_tf    = s->stat_tf_writes;
+            last_st    = s->stat_status_reads;
+            last_dr    = s->stat_drains;
+            last_last_cmd = s->stat_last_cmd;
+            printf ("ATA: cmds=%lu tf=%lu st=%lu dr=%lu last=0x%02X "
+                    "usb=%u st_reg=0x%02X cyl=0x%02X%02X bi=%u "
+                    "buf[99]=0x%02X idb=0x%02X\r\n",
+                    (unsigned long)s->stat_atacmds,
+                    (unsigned long)s->stat_tf_writes,
+                    (unsigned long)s->stat_status_reads,
+                    (unsigned long)s->stat_drains,
+                    (unsigned)s->stat_last_cmd,
+                    (unsigned)s->usb_state,
+                    (unsigned)s->reg_status,
+                    (unsigned)s->reg_cylinder_high,
+                    (unsigned)s->reg_cylinder_low,
+                    (unsigned)s->buffer_index,
+                    (unsigned)s->sector_buffer[99],
+                    (unsigned)s->identify_buf[99]);
+        }
+
         __asm__ volatile ("wfi");
     }
 }

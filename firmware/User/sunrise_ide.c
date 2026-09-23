@@ -209,13 +209,18 @@ static int usb_state_step (void) {
         return 1;
 
     case SUNRISE_IDE_USB_ENUM:
-        /* USBH_PreDeal handles attach / detach / re-enum. Returns
-         * 0 once a device is up. */
-        if (USBH_PreDeal () == 0) {
-            s_ide.usb_state = SUNRISE_IDE_USB_INQUIRY;
-            return 1;
-        }
-        return 0;
+        /* Skip USBH_PreDeal entirely. Its change-bit gate
+         * (PORT_STATUS_CHG & PORT_CONNECT) only fires on a fresh
+         * attach-edge. The terminal already enumerated the device
+         * via its own disk_initialize path; USBH_PreDeal from this
+         * code path returns ROOT_DEV_FAILED=DEF_DEFAULT (0xFF)
+         * forever because the change bit was ACK'd long ago. Going
+         * straight to INQUIRY (which talks directly to the bulk
+         * endpoints) lets SCSI succeed on a device that's already
+         * up. If the device isn't enumerated, the SCSI command will
+         * return non-zero and we retry. */
+        s_ide.usb_state = SUNRISE_IDE_USB_INQUIRY;
+        return 1;
 
     case SUNRISE_IDE_USB_INQUIRY:
         if (usb_do_inquiry () == 0) {
@@ -338,8 +343,17 @@ static void build_identify_data (void) {
      *                kernel reads this for capability detection) */
     store_le16 (&s_ide.identify_buf[49 * 2], 0x0300U);
 
-    /* Total sectors (LBA28) - word 60..61. */
-    store_le32 (&s_ide.identify_buf[60 * 2], s_ide.block_count);
+    /* Total sectors (LBA28) - word 60..61. Cap to 512MB (1M sectors)
+     * in the IDENTIFY response to prevent the Nextor kernel from
+     * over-allocating RAM on large USB sticks. The actual READ path
+     * uses the real block_count for range checking, so the full
+     * capacity is still accessible — the kernel just sees a smaller
+     * geometry for buffer allocation purposes. */
+    uint32_t reported_sectors = s_ide.block_count;
+    if (reported_sectors > 0x000FFFFFU) {
+        reported_sectors = 0x000FFFFFU;  /* 512MB cap for IDENTIFY */
+    }
+    store_le32 (&s_ide.identify_buf[60 * 2], reported_sectors);
 
     /* Multiword DMA / command sets - leave 0 (PIO mode only). The
      * kernel handles this fine. */
@@ -361,6 +375,12 @@ static void ide_execute_command (uint8_t cmd) {
     case ATA_CMD_DEVICE_RESET:
     case ATA_CMD_DEVICE_DIAG:
         ide_on_device_reset ();
+        /* STATUS=0x7F is the PRECHECK FAIL path in the driver.
+         * Use DRDY (0x40) as the normal post-reset status.
+         * CYL_LO/CYL_HI = 0x00 for the PRECHECK success path. */
+        ide_set_status (ATA_STATUS_DRDY);
+        s_ide.reg_cylinder_low = 0x00U;
+        s_ide.reg_cylinder_high = 0x00U;
         break;
 
     case ATA_CMD_READ_SECTORS:
@@ -468,18 +488,21 @@ static void ide_on_identify (void) {
         build_identify_data ();
     }
     /* Copy the IDENTIFY response into the sector buffer and arm the
-     * data register for draining. Identified as a single-sector
-     * PIO-IN: sectors_remaining stays 0 so the read path treats this
-     * like a single-sector read (transitions to IDLE after 512 bytes,
-     * does NOT mutate the LBA registers - we never want to touch them
-     * for IDENTIFY). */
+     * data register for draining. The Nextor Sunrise driver's
+     * PRECHECK routine (0x4440) reads 100 bytes from 0x7C00, then
+     * checks STATUS: if STATUS==0x7F that's the FAIL path (SCF+RET).
+     * The SUCCESS path requires STATUS != 0x7F, CYL_LO=0x00,
+     * CYL_HI=0x00, and byte at buffer offset 0x63 bit 1 set.
+     * Use DRDY (0x40) as the normal post-command status. */
     memcpy (s_ide.sector_buffer, s_ide.identify_buf, 512U);
     s_ide.state = SUNRISE_IDE_STATE_READY;
     s_ide.buffer_index = 0U;
     s_ide.buffer_length = 512U;
     s_ide.sectors_remaining = 0U;
-    ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
-                    ATA_STATUS_DRQ);
+    ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DRQ);
+    /* CYL_LO and CYL_HI must be 0x00 for the PRECHECK success path. */
+    s_ide.reg_cylinder_low = 0x00U;
+    s_ide.reg_cylinder_high = 0x00U;
 }
 
 static void ide_on_device_reset (void) {
@@ -523,7 +546,9 @@ uint8_t Sunrise_IDE_ReadByte (uint16_t address) {
         case ATA_REG_CYLINDER_LOW:   return s_ide.reg_cylinder_low;
         case ATA_REG_CYLINDER_HIGH:  return s_ide.reg_cylinder_high;
         case ATA_REG_DEVICE_HEAD:    return s_ide.reg_device_head;
-        case ATA_REG_STATUS:         return s_ide.reg_status;
+        case ATA_REG_STATUS:
+            s_ide.stat_status_reads++;
+            return s_ide.reg_status;
         default:                     return 0xFFU;  /* padding reads 0xFF */
         }
     }
@@ -542,6 +567,23 @@ uint8_t Sunrise_IDE_ReadByte (uint16_t address) {
         if (s_ide.state == SUNRISE_IDE_STATE_READY &&
             s_ide.buffer_index < s_ide.buffer_length) {
             v = s_ide.sector_buffer[s_ide.buffer_index];
+        } else if (s_ide.state == SUNRISE_IDE_STATE_IDLE) {
+            /* Sunrise IDE PRECHECK mode: when the device is idle and
+             * no PIO transfer is in progress, the data register
+             * (0x7C00..) returns the IDENTIFY-shaped device
+             * signature. The Nextor Sunrise driver reads ~100 bytes
+             * from 0x7C00 during PRECHECK to detect this signature.
+             * Return identify_buf directly; buffer_index is
+             * irrelevant here since this read is not part of a PIO
+             * drain. */
+            if (s_ide.identify_built == 0U) {
+                build_identify_data ();
+            }
+            const uint16_t idx =
+                (uint16_t)(address - SUNRIDE_IDE_DATA_BASE);
+            if (idx < 512U) {
+                v = s_ide.identify_buf[idx];
+            }
         }
         /* Advance on every read regardless of address parity. */
         s_ide.buffer_index = (uint16_t)(s_ide.buffer_index + 1U);
@@ -549,6 +591,7 @@ uint8_t Sunrise_IDE_ReadByte (uint16_t address) {
             /* Sector fully drained. If multi-sector and more sectors
              * remaining, kick off the next USB read (BSY=1, DRQ=0);
              * otherwise transition to IDLE (BSY=0, DRQ=0, DRDY=1). */
+            s_ide.stat_drains++;
             if (s_ide.sectors_remaining > 1U) {
                 s_ide.sectors_remaining--;
                 ide_advance_lba ();
@@ -616,20 +659,27 @@ void Sunrise_IDE_WriteByte (uint16_t address, uint8_t value) {
         case ATA_REG_SECTOR_COUNT:
             /* 0x00 means 256 sectors per ATA spec. */
             s_ide.reg_sector_count = value;
+            s_ide.stat_tf_writes++;
             return;
         case ATA_REG_SECTOR_NUMBER:
             s_ide.reg_sector_number = value;
+            s_ide.stat_tf_writes++;
             return;
         case ATA_REG_CYLINDER_LOW:
             s_ide.reg_cylinder_low = value;
+            s_ide.stat_tf_writes++;
             return;
         case ATA_REG_CYLINDER_HIGH:
             s_ide.reg_cylinder_high = value;
+            s_ide.stat_tf_writes++;
             return;
         case ATA_REG_DEVICE_HEAD:
             s_ide.reg_device_head = value;
+            s_ide.stat_tf_writes++;
             return;
         case ATA_REG_STATUS:          /* write = command */
+            s_ide.stat_atacmds++;
+            s_ide.stat_last_cmd = value;
             ide_execute_command (value);
             return;
         case ATA_REG_DEVICE_CTRL:
@@ -638,7 +688,23 @@ void Sunrise_IDE_WriteByte (uint16_t address, uint8_t value) {
                 /* Software reset - mirror the device behaviour. */
                 ide_set_signature ();
                 s_ide.state = SUNRISE_IDE_STATE_IDLE;
-                ide_set_status (ATA_SIG_STATUS);
+                /* STATUS=0x7F is the PRECHECK FAIL path in the driver.
+                 * Use DRDY (0x40) as normal. The driver's wait loop
+                 * checks AND 0xC0 == 0x40 (DRDY set, BSY clear). */
+                ide_set_status (ATA_STATUS_DRDY);
+                /* CYL_LO/CYL_HI = 0x00 for PRECHECK success path. */
+                s_ide.reg_cylinder_low = 0x00U;
+                s_ide.reg_cylinder_high = 0x00U;
+                /* Pre-arm data register with IDENTIFY data for the
+                 * PRECHECK LDIR (100 bytes from 0x7C00). */
+                if (s_ide.identify_built == 0U) {
+                    build_identify_data ();
+                }
+                memcpy (s_ide.sector_buffer, s_ide.identify_buf, 512U);
+                s_ide.buffer_index = 0U;
+                s_ide.buffer_length = 512U;
+                s_ide.sectors_remaining = 0U;
+                s_ide.state = SUNRISE_IDE_STATE_READY;
             }
             return;
         default:
@@ -679,4 +745,11 @@ static void store_le32 (uint8_t *p, uint32_t v) {
     p[1] = (uint8_t)((v >> 8) & 0xFFU);
     p[2] = (uint8_t)((v >> 16) & 0xFFU);
     p[3] = (uint8_t)((v >> 24) & 0xFFU);
+}
+
+/* Read-only accessor for the live state struct. Used by the main
+ * loop's status printer - IRQ-side code must NOT call this (the
+ * struct is volatile and can be modified underfoot). */
+const Sunrise_IDE *Sunrise_IDE_GetState (void) {
+    return &s_ide;
 }
