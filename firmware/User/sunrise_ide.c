@@ -153,24 +153,31 @@ void Sunrise_IDE_Service (void) {
     if (s_ide.state == SUNRISE_IDE_STATE_READ_BUSY &&
         s_ide.lba_pending != 0U) {
         const uint32_t lba = ide_get_lba ();
-        uint8_t rc = 0U;
-        if (lba < s_ide.block_count) {
-            rc = usb_scsi_read_sector (lba, s_ide.sector_buffer,
-                                       s_ide.block_size);
-        } else {
-            rc = 1U;   /* out-of-range - treat as SCSI error */
+        uint8_t rc = 1U;
+        /* Retry the SCSI read up to 3 times. Some USB sticks
+         * occasionally fail a READ(10) on the first attempt but
+         * succeed on retry. Without this, the driver sees ATA ERR
+         * and the kernel reports "Disk I/O error". */
+        for (int attempt = 0; attempt < 3 && rc != 0U; attempt++) {
+            if (lba < s_ide.block_count) {
+                rc = usb_scsi_read_sector (lba, s_ide.sector_buffer,
+                                           s_ide.block_size);
+            } else {
+                break;  /* out-of-range, no point retrying */
+            }
         }
         s_ide.lba_pending = 0U;
         s_ide.buffer_index = 0U;
         if (rc != 0U) {
-            /* SCSI failed: assert ERR + ABRT, leave buffer as-is.
-             * The kernel will see ERR on its next status poll and
-             * abort the command rather than looping on stale data. */
+            /* SCSI failed: assert ERR + ABRT + DF (Drive Fault).
+             * The driver checks bit 5 (DF) via AND 0x20 to detect
+             * errors, NOT bit 0 (ERR). Without DF set, the driver
+             * thinks the read succeeded and LDIRs stale buffer data. */
             ide_set_error (ATA_ERR_ABRT);
             s_ide.state = SUNRISE_IDE_STATE_IDLE;
             s_ide.sectors_remaining = 0U;
             ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
-                            ATA_STATUS_ERR);
+                            ATA_STATUS_ERR | ATA_STATUS_DF);
         } else {
             s_ide.state = SUNRISE_IDE_STATE_READY;
             ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |

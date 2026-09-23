@@ -142,6 +142,12 @@ int main (void) {
                     (unsigned)s->identify_buf[99]);
         }
 
-        __asm__ volatile ("wfi");
+        /* No WFI — when the Sunrise IDE driver is polling STATUS in
+         * a tight loop, each cart read generates an EXTI0 interrupt.
+         * WFI wakes on the interrupt but the ISR overhead + WFI
+         * re-entry latency can be too slow for the driver's BSY
+         * timeout. Spin instead so Sunrise_IDE_Service runs
+         * immediately after the ISR returns. */
+        __asm__ volatile ("nop");
     }
 }
