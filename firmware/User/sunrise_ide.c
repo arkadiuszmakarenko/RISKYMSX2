@@ -4,7 +4,26 @@
  * Ported from PicoVerse 2040's sunrise_ide.c (cristianoag/msx-picoverse-
  * public). The cart-window decoder (control register, bit-reverse, IDE
  * gating) lives in cart.c::Cart_EXTI0_Sunride_Handler; this file owns
- * the ATA state machine and the USB backing-store bridge.
+ * the ATA state machine and the FILE backing store.
+ *
+ * REWORK: the IDE bus is no longer backed by direct SCSI access to the
+ * USB stick (that path proved unreliable on real hardware). Instead a
+ * fixed-size disk image is kept in a FAT file called nextor.img in the
+ * root of the stick, accessed through the well-tested FATFS glue
+ * (usb_disk.c + ff.c + diskio.c). Geometry is HARD-CODED below - the
+ * file size itself is irrelevant; the firmware extends the file with
+ * zeros on first mount and the IDENTIFY response always reports the
+ * same capacity.
+ *
+ * Threading model (real hardware: the MSX drives the cart bus from
+ * EXTI0 interrupts):
+ *   - IRQ context (CartExti handler): Sunrise_IDE_ReadByte /
+ *     Sunrise_IDE_WriteByte only. No FatFs, no printf, no blocking.
+ *   - Main loop: Sunrise_IDE_Service does ALL file I/O (mount, open,
+ *     extend, f_lseek/f_read/f_write/f_sync for in-flight transfers).
+ *     The MSX polls STATUS during this, so BSY must be held until the
+ *     file operation completes - exactly how a slow real IDE drive
+ *     behaves.
  *
  * See sunrise_ide.h for the cart memory map and overall design.
  */
@@ -18,6 +37,40 @@
 #pragma GCC optimize("Os")
 
 /* ========================================================================
+ * Disk geometry - HARD-CODED, imaginary drive
+ * ======================================================================
+ *
+ * The whole point of this rework: sizes are NOT probed from the stick
+ * or from the file. The emulated drive is always exactly
+ * ATA_DISK_SECTORS sectors of 512 bytes, addressed with LBA28 (LBA48
+ * commands are accepted but any address beyond the capacity fails
+ * with IDNF - the capacity is far below 2^28 sectors). The image file
+ * nextor.img is zero-extended to exactly this size on first mount;
+ * a larger existing file is truncated to it.
+ *
+ * 32 MiB was chosen because it is FAT16-happy and fast to create, but
+ * you can bump ATA_DISK_SECTORS freely - nothing else depends on the
+ * value (IDENTIFY, LBA range checks and file size all derive from it).
+ */
+
+#define SUNRISE_IMG_PATH       "0:/nextor.img"
+
+#define ATA_DISK_SECTORS       65536UL   /* 32 MiB (LBA28 space) */
+#define ATA_DISK_BYTES         (ATA_DISK_SECTORS * 512UL)
+
+/* IDENTIFY CHS geometry - the standard ">8 GB" fake geometry every
+ * modern drive reports. Nextor only uses LBA mode; this exists so
+ * generic ATA tools see something sane. */
+#define ATA_IDENT_CYLINDERS    16383U
+#define ATA_IDENT_HEADS        16U
+#define ATA_IDENT_SPT          63U
+
+/* Zero-extension budget per main-loop pass (keeps the console and
+ * the terminal IRQ service responsive during the one-time image
+ * expansion; 16 KiB/pass finishes 32 MiB in ~2K passes). */
+#define ATA_IMG_EXTEND_CHUNK   16384U
+
+/* ========================================================================
  * Module state
  * ====================================================================== */
 
@@ -25,6 +78,19 @@
  * cart IRQ handler is the only consumer and it just reads / writes a
  * few fields per cycle, no DMA, no large tables). */
 static Sunrise_IDE s_ide;
+
+/* FatFs handle for the image file. Used from main-loop context ONLY
+ * (Sunrise_IDE_Service); the IRQ handlers never touch it. */
+static FIL     s_img;
+static uint8_t s_img_open;
+
+/* Zero-extension cursor (offset into the image already zero-filled). */
+static uint32_t s_ext_off;
+/* One-shot debug throttle so a failing mount doesn't flood the log. */
+static uint8_t  s_open_printed;
+
+/* Scratch buffer for the zero-extension write (bss). */
+static uint8_t s_zeros[ATA_IMG_EXTEND_CHUNK];
 
 /* Embedded Nextor kernel image (128 KiB max, served from flash).
  * The actual bytes are produced by tools/rom2c.py from the kernel
@@ -43,18 +109,19 @@ static uint32_t ide_get_lba (void);
 static void ide_set_lba (uint32_t lba);
 static void ide_advance_lba (void);
 static void ide_execute_command (uint8_t cmd);
-static void ide_on_read_sectors (void);
-static void ide_on_write_sectors (void);
+static void ide_on_read_sectors (uint8_t ext);
+static void ide_on_write_sectors (uint8_t ext);
+static void ide_on_read_verify (uint8_t ext);
 static void ide_on_identify (void);
 static void ide_on_device_reset (void);
 static void ide_on_init_dev_params (void);
-static void ide_on_set_features (void);
+static void ide_on_set_features (uint8_t features);
+static void ide_on_read_buffer (void);
+static void ide_start_file_error (void);
 static void build_identify_data (void);
+static int  usb_state_step (void);
 static void store_le16 (uint8_t *p, uint16_t v);
 static void store_le32 (uint8_t *p, uint32_t v);
-static int usb_state_step (void);
-static int usb_do_inquiry (void);
-static int usb_do_capacity (void);
 
 /* ========================================================================
  * Lifecycle / state setup
@@ -71,6 +138,11 @@ void Sunrise_IDE_Init (void) {
     s_ide.segment       = 0U;
     s_ide.ide_enabled   = 1U;
     s_ide.sectors_remaining = 0U;
+    s_ide.usb_state     = SUNRISE_IDE_USB_INIT;
+    /* IDENTIFY data is now fully static (fixed geometry) so build it
+     * once here - the PRECHECK path reads it from the IDLE data
+     * register and there is no USB capacity probe step anymore. */
+    build_identify_data ();
     ide_set_signature ();
 }
 
@@ -81,12 +153,18 @@ static void ide_set_signature (void) {
     s_ide.reg_cylinder_high  = ATA_SIG_CYLINDER_HIGH;
     s_ide.reg_device_head    = ATA_SIG_DEVICE_HEAD;
     s_ide.reg_status         = ATA_SIG_STATUS;
+    /* Also clear the LBA48 shadow regs so an EXT command right after
+     * a reset does not inherit stale previous-content bytes. */
+    s_ide.hob                = 0U;
+    s_ide.sh_sector_count    = 0U;
+    s_ide.sh_sector_number   = 0U;
+    s_ide.sh_cylinder_low    = 0U;
+    s_ide.sh_cylinder_high   = 0U;
 }
 
 static void ide_set_status (uint8_t status) {
-    /* Bits 0..6 are R/W from the device side; bit 7 (BSY) is also
-     * settable. Never clear bits the device is asserting - this is a
-     * latch, not an OR-with-zero. */
+    /* Straight latch - never clear bits the device is asserting;
+     * this is a latch, not an OR-with-zero. */
     s_ide.reg_status = status;
 }
 
@@ -119,65 +197,100 @@ static void ide_set_lba (uint32_t lba) {
 
 static void ide_advance_lba (void) {
     const uint32_t lba = ide_get_lba ();
-    if (lba + 1U < s_ide.block_count) {
+    if (lba + 1U < ATA_DISK_SECTORS) {
         ide_set_lba (lba + 1U);
     } else {
         /* Past the end of disk: leave LBA unchanged, the next read
-         * will return 0xFF and the kernel will see IDNF. The kernel
-         * counts sectors via reg_sector_count and stops before the
-         * LBA rolls over the edge. */
+         * will return IDNF. The kernel counts sectors via
+         * reg_sector_count and stops before the LBA rolls over the
+         * edge. */
     }
 }
 
 /* ========================================================================
- * Main-loop service: drive the USB lifecycle + IDE state machine.
+ * File backend helpers (main-loop context ONLY)
+ * ====================================================================== */
+
+/* Drop back to the MOUNT step (e.g. FatFs reports a disk error - the
+ * stick may have been pulled). Any open file handle is closed first. */
+static void file_backend_reset (void) {
+    if (s_img_open) {
+        (void)f_close (&s_img);
+        s_img_open = 0U;
+    }
+    s_ext_off = 0U;
+    s_ide.usb_state = SUNRISE_IDE_USB_ENUM;
+}
+
+static uint8_t img_read_sector (uint32_t lba) {
+    UINT br = 0U;
+    FRESULT fr;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        fr = f_lseek (&s_img, (FSIZE_t)lba * 512U);
+        if (fr != FR_OK) continue;
+        fr = f_read (&s_img, s_ide.sector_buffer, 512U, &br);
+        if (fr == FR_OK && br == 512U) return 0U;
+    }
+    printf ("SUNRIDE: read lba=%lu failed fr=%u br=%u\r\n",
+            (unsigned long)lba, (unsigned)fr, (unsigned)br);
+    return 1U;
+}
+
+static uint8_t img_write_sector (uint32_t lba) {
+    UINT bw = 0U;
+    FRESULT fr;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        fr = f_lseek (&s_img, (FSIZE_t)lba * 512U);
+        if (fr != FR_OK) continue;
+        fr = f_write (&s_img, s_ide.sector_buffer, 512U, &bw);
+        if (fr == FR_OK && bw == 512U) return 0U;
+    }
+    printf ("SUNRIDE: write lba=%lu failed fr=%u bw=%u\r\n",
+            (unsigned long)lba, (unsigned)fr, (unsigned)bw);
+    return 1U;
+}
+
+/* ========================================================================
+ * Main-loop service: drive the file lifecycle + IDE state machine.
  *
  * Called from main()'s main loop. Cannot block on EXTI0 (no spin
- * loops). USBH_PreDeal + usb_scsi_* are blocking per the USBHS host
- * API, so this call may take tens of milliseconds during enumeration
- * but the MSX is reset at that point - we're booting the kernel.
+ * loops on the bus side) - but FatFs calls ARE blocking here, which
+ * is fine: the MSX-side driver polls STATUS (IRQ-served) and only
+ * proceeds when BSY drops, exactly as with a slow real IDE drive.
  * ====================================================================== */
 
 void Sunrise_IDE_Service (void) {
-    /* USB lifecycle: each pass either advances to the next state or
-     * stays put. usb_state_step returns 1 if state advanced. */
+    /* File backend lifecycle: each pass either advances to the next
+     * state or stays put (usb_state_step returns 1 if it advanced). */
     (void)usb_state_step ();
 
+    if (s_ide.usb_state != SUNRISE_IDE_USB_READY) {
+        /* Image not mounted - nothing else to do this pass. */
+        return;
+    }
+
     /* In-flight READ SECTORS: if lba_pending is set, the IRQ handler
-     * just queued a USB read (ide_on_read_sectors or the multi-sector
-     * advance in Sunrise_IDE_ReadByte). Issue the SCSI read here -
-     * blocking, but the MSX's PIO loop is polling BSY/DRQ so the
-     * kernel sees BSY drop only after this returns. usb_scsi_read_sector
-     * typically completes in 1-2 ms for a high-speed stick; the kernel
-     * will poll status and see DRQ on the next read of 0x7E07. */
+     * just queued a file read (ide_on_read_sectors or the
+     * multi-sector advance in Sunrise_IDE_ReadByte). Perform the
+     * FatFs read here - blocking, but the MSX polls BSY/DRQ in a
+     * tight interrupt-driven loop, so the kernel sees BSY drop only
+     * after this returns.*/
     if (s_ide.state == SUNRISE_IDE_STATE_READ_BUSY &&
         s_ide.lba_pending != 0U) {
         const uint32_t lba = ide_get_lba ();
         uint8_t rc = 1U;
-        /* Retry the SCSI read up to 3 times. Some USB sticks
-         * occasionally fail a READ(10) on the first attempt but
-         * succeed on retry. Without this, the driver sees ATA ERR
-         * and the kernel reports "Disk I/O error". */
-        for (int attempt = 0; attempt < 3 && rc != 0U; attempt++) {
-            if (lba < s_ide.block_count) {
-                rc = usb_scsi_read_sector (lba, s_ide.sector_buffer,
-                                           s_ide.block_size);
-            } else {
-                break;  /* out-of-range, no point retrying */
-            }
+        if (lba < ATA_DISK_SECTORS) {
+            rc = img_read_sector (lba);
         }
         s_ide.lba_pending = 0U;
         s_ide.buffer_index = 0U;
         if (rc != 0U) {
-            /* SCSI failed: assert ERR + ABRT + DF (Drive Fault).
-             * The driver checks bit 5 (DF) via AND 0x20 to detect
-             * errors, NOT bit 0 (ERR). Without DF set, the driver
-             * thinks the read succeeded and LDIRs stale buffer data. */
-            ide_set_error (ATA_ERR_ABRT);
-            s_ide.state = SUNRISE_IDE_STATE_IDLE;
-            s_ide.sectors_remaining = 0U;
-            ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
-                            ATA_STATUS_ERR | ATA_STATUS_DF);
+            /* File read failed: assert ERR + ABRT + DF (Drive
+             * Fault). The driver checks bit 5 (DF) via AND 0x20 to
+             * detect errors, NOT bit 0 (ERR). Without DF set, the
+             * driver thinks the read succeeded and LDIRs stale
+             * buffer data. */
+            ide_start_file_error ();
         } else {
             s_ide.state = SUNRISE_IDE_STATE_READY;
             ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
@@ -187,66 +300,162 @@ void Sunrise_IDE_Service (void) {
 
     /* In-flight WRITE SECTORS: drain remaining data into the buffer
      * until the MSX has finished the 512-byte PIO write, then commit
-     * to USB. */
-    if (s_ide.state == SUNRISE_IDE_STATE_WRITE_BUSY) {
-        if (s_ide.buffer_index >= s_ide.buffer_length) {
-            /* All bytes received from the MSX. Issue the USB write. */
-            if (s_ide.block_count > 0U) {
-                const uint32_t lba = ide_get_lba ();
-                if (lba < s_ide.block_count) {
-                    (void)usb_scsi_write_sector (lba,
-                                                 s_ide.sector_buffer,
-                                                 s_ide.block_size);
-                }
+     * to the image file. */
+    if (s_ide.state == SUNRISE_IDE_STATE_WRITE_BUSY &&
+        s_ide.buffer_index >= s_ide.buffer_length) {
+        uint8_t ok = 1U;
+        if (s_ide.sectors_remaining > 0U) {
+            const uint32_t lba = ide_get_lba ();
+            if (lba < ATA_DISK_SECTORS) {
+                ok = (img_write_sector (lba) == 0U);
+            } else {
+                ok = 0U;
             }
-            ide_advance_lba ();
+        }
+        if (!ok) {
+            ide_start_file_error ();
+            (void)f_sync (&s_img);   /* commit whatever did land */
+            return;
+        }
+        ide_advance_lba ();
+        if (s_ide.sectors_remaining > 1U) {
+            /* More sectors in this transfer: decrement, arm the
+             * buffer for the next PIO burst and keep DRQ asserted
+             * (spec-correct for WRITE MULTIPLE; for plain WRITE
+             * SECTORS the driver re-reads STATUS and waits for DRQ
+             * anyway). */
+            s_ide.sectors_remaining--;
+            s_ide.buffer_index = 0U;
+            /* stay SUNRISE_IDE_STATE_WRITE_BUSY, DRQ stays set */
+        } else {
+            /* Transfer complete: flush the FAT chain / data to the
+             * stick so a power cycle can't corrupt the cluster chain
+             * of patches the kernel wrote a moment ago. */
+            (void)f_sync (&s_img);
             s_ide.state = SUNRISE_IDE_STATE_IDLE;
+            s_ide.sectors_remaining = 0U;
             ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
         }
     }
 }
 
+static void ide_start_file_error (void) {
+    ide_set_error (ATA_ERR_ABRT);
+    s_ide.state = SUNRISE_IDE_STATE_IDLE;
+    s_ide.sectors_remaining = 0U;
+    ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                    ATA_STATUS_ERR | ATA_STATUS_DF);
+}
+
+/* ========================================================================
+ * File-backend lifecycle state machine
+ * ====================================================================== */
+
 static int usb_state_step (void) {
     switch (s_ide.usb_state) {
     case SUNRISE_IDE_USB_INIT:
         /* Nothing to do - the host stack was already initialised by
-         * USB_Initialization() from main(). Move to enum and let the
-         * host stack detect a device if one is attached. */
+         * USB_Initialization() from main(). Move to MOUNT and let
+         * USB_TryEnsureMounted (which itself runs the full enum +
+         * f_mount retry ladder) do the work. */
         s_ide.usb_state = SUNRISE_IDE_USB_ENUM;
         return 1;
 
     case SUNRISE_IDE_USB_ENUM:
-        /* Skip USBH_PreDeal entirely. Its change-bit gate
-         * (PORT_STATUS_CHG & PORT_CONNECT) only fires on a fresh
-         * attach-edge. The terminal already enumerated the device
-         * via its own disk_initialize path; USBH_PreDeal from this
-         * code path returns ROOT_DEV_FAILED=DEF_DEFAULT (0xFF)
-         * forever because the change bit was ACK'd long ago. Going
-         * straight to INQUIRY (which talks directly to the bulk
-         * endpoints) lets SCSI succeed on a device that's already
-         * up. If the device isn't enumerated, the SCSI command will
-         * return non-zero and we retry. */
-        s_ide.usb_state = SUNRISE_IDE_USB_INQUIRY;
+        /* MOUNT: poll the root hub, enumerate the stick and mount
+         * the FAT volume (all inside USB_TryEnsureMounted, with
+         * retries). Only move on when it reports DEF_SUCCESS. */
+        if (USB_TryEnsureMounted () != DEF_SUCCESS) {
+            return 0;   /* stay in ENUM, retry next pass */
+        }
+        s_ide.usb_state = SUNRISE_IDE_USB_OPEN;
         return 1;
 
-    case SUNRISE_IDE_USB_INQUIRY:
-        if (usb_do_inquiry () == 0) {
-            s_ide.usb_state = SUNRISE_IDE_USB_CAPACITY;
-            return 1;
+    case SUNRISE_IDE_USB_OPEN:
+        /* Open (or create) the fixed-name image file. */
+        {
+            FRESULT fr = f_open (&s_img, SUNRISE_IMG_PATH,
+                                 FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
+            if (fr != FR_OK) {
+                if (s_open_printed == 0U) {
+                    printf ("SUNRIDE: f_open('%s') failed (%u)\r\n",
+                            SUNRISE_IMG_PATH, (unsigned)fr);
+                    s_open_printed = 1U;
+                }
+                /* The volume may have gone away; retry from ENUM. */
+                file_backend_reset ();
+                return 1;
+            }
+            s_img_open = 1U;
+            s_open_printed = 0U;
+            s_ext_off = 0U;
+            s_ide.usb_state = SUNRISE_IDE_USB_EXTEND;
+            printf ("SUNRIDE: image '%s' opened (size=%lu, need %lu)\r\n",
+                    SUNRISE_IMG_PATH, (unsigned long)f_size (&s_img),
+                    (unsigned long)ATA_DISK_BYTES);
         }
-        return 0;
+        return 1;
 
-    case SUNRISE_IDE_USB_CAPACITY:
-        if (usb_do_capacity () == 0) {
-            build_identify_data ();
-            s_ide.usb_state = SUNRISE_IDE_USB_READY;
-            return 1;
+    case SUNRISE_IDE_USB_EXTEND:
+        /* Force the file to exactly ATA_DISK_BYTES: zero-fill
+         * sequentially from the current end (positions never exceed
+         * EOF, so no undefined gap-fill behaviour), or truncate an
+         * oversized file. Chunked per main-loop pass so the firmware
+         * stays responsive while a fresh image is created. */
+        {
+            const uint32_t fsize = (uint32_t)f_size (&s_img);
+            if (fsize == ATA_DISK_BYTES) {
+                s_ide.usb_state = SUNRISE_IDE_USB_READY;
+                printf ("SUNRIDE: image ready (%lu bytes)\r\n",
+                        (unsigned long)ATA_DISK_BYTES);
+                return 1;
+            }
+            if (fsize > ATA_DISK_BYTES) {
+                /* Oversized image: truncate to the hard-coded size. */
+                FRESULT fr = f_lseek (&s_img, ATA_DISK_BYTES);
+                if (fr == FR_OK) fr = f_truncate (&s_img);
+                if (fr != FR_OK) {
+                    printf ("SUNRIDE: f_truncate failed (%u)\r\n",
+                            (unsigned)fr);
+                    file_backend_reset ();
+                    return 1;
+                }
+                (void)f_sync (&s_img);
+                s_ide.usb_state = SUNRISE_IDE_USB_READY;
+                printf ("SUNRIDE: image truncated to %lu bytes\r\n",
+                        (unsigned long)ATA_DISK_BYTES);
+                return 1;
+            }
+            /* Undersized: zero-extend with a 16 KiB chunk this pass. */
+            memset (s_zeros, 0, sizeof (s_zeros));
+            FRESULT fr = f_lseek (&s_img, s_ext_off);
+            if (fr != FR_OK) {
+                printf ("SUNRIDE: extend f_lseek failed (%u)\r\n",
+                        (unsigned)fr);
+                file_backend_reset ();
+                return 1;
+            }
+            UINT bw = 0U;
+            fr = f_write (&s_img, s_zeros, sizeof (s_zeros), &bw);
+            if (fr != FR_OK || bw == 0U) {
+                printf ("SUNRIDE: extend f_write failed (%u, bw=%u)\r\n",
+                        (unsigned)fr, (unsigned)bw);
+                file_backend_reset ();
+                return 1;
+            }
+            s_ext_off += bw;
+            if (s_ext_off >= ATA_DISK_BYTES) {
+                (void)f_sync (&s_img);
+                s_ide.usb_state = SUNRISE_IDE_USB_READY;
+                printf ("SUNRIDE: image extended to %lu bytes - ready\r\n",
+                        (unsigned long)ATA_DISK_BYTES);
+            }
         }
-        return 0;
+        return 1;
 
     case SUNRISE_IDE_USB_READY:
-        /* Stay here - the IDE state machine (in ide_execute_command +
-         * Sunrise_IDE_Service) handles individual READ/WRITE
+        /* Stay here - the ATA command layer + Sunrise_IDE_Service's
+         * pending-transfer logic handle individual READ/WRITE
          * commands from here on. */
         return 0;
 
@@ -256,54 +465,17 @@ static int usb_state_step (void) {
     }
 }
 
-static int usb_do_inquiry (void) {
-    uint8_t res = usb_scsi_inquiry (s_ide.inquiry_buf,
-                                    sizeof (s_ide.inquiry_buf));
-    if (res != 0) {
-        printf ("SUNRIDE: INQUIRY failed (res=%u) - retrying\r\n", res);
-        return -1;
-    }
-    printf ("SUNRIDE: INQUIRY ok - vendor='%.8s' product='%.16s' "
-            "rev='%.4s'\r\n",
-            (char *)&s_ide.inquiry_buf[8],
-            (char *)&s_ide.inquiry_buf[16],
-            (char *)&s_ide.inquiry_buf[32]);
-    return 0;
-}
-
-static int usb_do_capacity (void) {
-    if (usb_scsi_read_capacity (&s_ide.block_count,
-                                &s_ide.block_size) != 0) {
-        printf ("SUNRIDE: READ CAPACITY failed - retrying\r\n");
-        return -1;
-    }
-    /* Some sticks return block_size != 512. Normalise to 512 - the
-     * kernel only speaks 512-byte sectors and any other size would
-     * corrupt the LBA math. */
-    if (s_ide.block_size != 512U) {
-        if (s_ide.block_size == 0U) s_ide.block_size = 512U;
-        const uint32_t bsz = s_ide.block_size;
-        s_ide.block_count =
-            (uint32_t)(((uint64_t)s_ide.block_count * bsz) / 512U);
-        s_ide.block_size = 512U;
-    }
-    /* LBA28 caps at (1<<28)-2 on some kernels - cap at block_count. */
-    if (s_ide.block_count > 0x0FFFFFFFU) {
-        s_ide.block_count = 0x0FFFFFFFU;
-    }
-    printf ("SUNRIDE: READ CAPACITY ok - block_count=%lu block_size=%lu\r\n",
-            (unsigned long)s_ide.block_count,
-            (unsigned long)s_ide.block_size);
-    return 0;
-}
-
 /* ========================================================================
  * build_identify_data - 512-byte ATA IDENTIFY DEVICE response.
  *
- * Generate enough of the response for the Nextor Sunrise IDE driver to
- * recognise the device and start LBA I/O. Model / serial come from the
- * USB INQUIRY strings (or a default). CHS geometry + LBA capacity
- * come from s_ide.block_count (sourced from READ CAPACITY).
+ * Fully static: the model / serial strings and the CHS geometry /
+ * LBA capacity all come from the hard-coded constants at the top of
+ * this file. The Nextor Sunrise driver's PRECHECK routine (0x4440)
+ * reads 100 bytes from 0x7C00 and requires byte at offset 0x63
+ * (word 49 high byte) to have bit 1 set -> word 49 = 0x0300 carries
+ * both the LBA bit (bit 9) and the "DMA supported" bit the kernel
+ * probes for (our READ/WRITE DMA commands are accepted and executed
+ * as PIO, so the claim is honest).
  * ====================================================================== */
 
 static void build_identify_data (void) {
@@ -314,56 +486,82 @@ static void build_identify_data (void) {
      *   bit 7  = 1  : removable media (matches USB stick semantics) */
     store_le16 (&s_ide.identify_buf[0], 0x0080U);
 
-    /* Serial number (words 10..19, 20 ASCII chars). "RISKYMSX2        "
-     * is the default; the INQUIRY response doesn't carry a serial so
-     * we just identify as the firmware. */
+    /* Default CHS geometry (words 1, 3, 6). */
+    store_le16 (&s_ide.identify_buf[1 * 2], (uint16_t)ATA_IDENT_CYLINDERS);
+    store_le16 (&s_ide.identify_buf[3 * 2], (uint16_t)ATA_IDENT_HEADS);
+    store_le16 (&s_ide.identify_buf[6 * 2], (uint16_t)ATA_IDENT_SPT);
+
+    /* Serial number (words 10..19, 20 ASCII chars, byte-swapped
+     * pairs per ATA convention). */
     {
-        const char *serial = "RISKYMSX2        ";
+        const char *serial = "RISKYMSX2IMG00000000";
         for (int i = 0; i < 20; i++) {
-            store_le16 (&s_ide.identify_buf[20 + i * 2],
-                        (uint16_t)serial[i]);
+            store_le16 (&s_ide.identify_buf[20 + i * 2], (uint16_t)serial[i]);
         }
     }
 
-    /* Model / firmware revision (words 27..46). Use INQUIRY vendor
-     * (8 bytes) + product (16 bytes) + "    " (4 bytes) reversed -
-     * ATA stores words byte-swapped (little-endian), so we copy
-     * 2-byte-at-a-time with each pair swapped. */
+    /* Firmware revision (words 23..26, 8 ASCII chars). */
     {
-        uint8_t model[40];
-        memset (model, ' ', sizeof (model));
-        memcpy (&model[0],  &s_ide.inquiry_buf[8],  8);
-        memcpy (&model[8],  &s_ide.inquiry_buf[16], 16);
-        memcpy (&model[24], &s_ide.inquiry_buf[32], 4);
-        /* Pad to 40 bytes. */
-        for (int i = 0; i < 40; i += 2) {
-            const uint8_t a = model[i];
-            const uint8_t b = model[i + 1];
-            store_le16 (&s_ide.identify_buf[54 + i],
-                        (uint16_t)((b << 8) | a));
+        const char *rev = "1.0    ";
+        for (int i = 0; i < 8; i++) {
+            store_le16 (&s_ide.identify_buf[23 * 2 + i * 2], (uint16_t)rev[i]);
         }
     }
+
+    /* Model number (words 27..46, 40 ASCII chars). ATA stores words
+     * byte-swapped (little-endian), so we copy 2 bytes at a time with
+     * each pair swapped (same layout as the serial above). */
+    {
+        const char *model = "RISKYMSX2 ATA IMAGEDISK            ";
+        for (int i = 0; i < 40; i += 2) {
+            store_le16 (&s_ide.identify_buf[27 * 2 + i],
+                        (uint16_t)((uint8_t)model[i] |
+                                   ((uint16_t)(uint8_t)model[i + 1] << 8)));
+        }
+    }
+
+    /* Word 47: max sectors per Multiple transfer, valid flag 0x80. */
+    store_le16 (&s_ide.identify_buf[47 * 2], 0x8010U);
 
     /* Capabilities (word 49):
      *   bit 9 = 1  : LBA addressing supported
-     *   bit 8 = 1  : DMA supported (we don't actually do DMA but the
-     *                kernel reads this for capability detection) */
+     *   bit 8 = 1  : DMA supported (READ/WRITE DMA are executed as
+     *                PIO by the emulation, so the claim is honest) */
     store_le16 (&s_ide.identify_buf[49 * 2], 0x0300U);
 
-    /* Total sectors (LBA28) - word 60..61. Cap to 512MB (1M sectors)
-     * in the IDENTIFY response to prevent the Nextor kernel from
-     * over-allocating RAM on large USB sticks. The actual READ path
-     * uses the real block_count for range checking, so the full
-     * capacity is still accessible — the kernel just sees a smaller
-     * geometry for buffer allocation purposes. */
-    uint32_t reported_sectors = s_ide.block_count;
-    if (reported_sectors > 0x000FFFFFU) {
-        reported_sectors = 0x000FFFFFU;  /* 512MB cap for IDENTIFY */
-    }
-    store_le32 (&s_ide.identify_buf[60 * 2], reported_sectors);
+    /* Word 50: capabilities 2 (reserved). Word 51/52: PIO timing. */
+    store_le16 (&s_ide.identify_buf[51 * 2], 0x0200U);
 
-    /* Multiword DMA / command sets - leave 0 (PIO mode only). The
-     * kernel handles this fine. */
+    /* Word 59: multiple-transfer setting valid flag + current setting. */
+    store_le16 (&s_ide.identify_buf[59 * 2],
+                (uint16_t)(0x0100U | (uint16_t)s_ide.multi_count));
+
+    /* Total user sectors (LBA28) - words 60..61. */
+    store_le32 (&s_ide.identify_buf[60 * 2], ATA_DISK_SECTORS);
+
+    /* Word 64: PIO modes supported (mode 3). */
+    store_le16 (&s_ide.identify_buf[64 * 2], 0x0001U);
+
+    /* Word 75: queue depth 1. Word 80: major version (ATA-3..5). */
+    store_le16 (&s_ide.identify_buf[80 * 2], 0x00FCU);
+
+    /* Word 82/83/84: command sets supported.
+     *   82: bit 3 power mgmt, bit 5 write cache, bit 6 look-ahead,
+     *       bit 14 device reset cmd, bit 15 = 1 (tag)
+     *   83: bit 10 LBA48, bit 13 flush cache, bit 14 = 1 (tag)
+     *   84: bit 14 = 1 (tag) */
+    store_le16 (&s_ide.identify_buf[82 * 2], 0xC068U);
+    store_le16 (&s_ide.identify_buf[83 * 2], 0x6408U);
+    store_le16 (&s_ide.identify_buf[84 * 2], 0x4000U);
+
+    /* Word 85/86/87: enabled mirrors of 82..84 (write cache and
+     * look-ahead enabled, LBA48 + flush enabled). */
+    store_le16 (&s_ide.identify_buf[85 * 2], 0x0060U);
+    store_le16 (&s_ide.identify_buf[86 * 2], 0x6408U);
+    store_le16 (&s_ide.identify_buf[87 * 2], 0x4000U);
+
+    /* Words 100..103: 48-bit max user LBA (= sectors - 1). */
+    store_le32 (&s_ide.identify_buf[100 * 2], ATA_DISK_SECTORS - 1U);
 
     s_ide.identify_built = 1U;
 }
@@ -373,12 +571,30 @@ static void build_identify_data (void) {
  * ====================================================================== */
 
 static void ide_execute_command (uint8_t cmd) {
-    /* Default state: command accepted, BSY cleared, DRDY + DSC set.
-     * Specific commands override the status (e.g. EXECUTE DEVICE
-     * DIAGNOSTIC puts the signature back). */
+    /* Features register (host writes 0x7E01 before SET FEATURES or
+     * SMART; the write handler latches it into reg_error). Capture
+     * BEFORE the default "error = 0" below. */
+    const uint8_t features = s_ide.reg_error;
+
+    /* Default state: command accepted, error cleared, BSY cleared,
+     * DRDY + DSC set. Specific commands override (READ/WRITE arm
+     * DRQ/BSY; unsupported ones set ERR|ABRT). */
     ide_set_error (0U);
 
+    /* Recalibrate (legacy 0x10..0x1F range): no-op, succeed. */
+    if (cmd >= ATA_CMD_RECALIBRATE && cmd <= ATA_CMD_RECALIBRATE_MAX) {
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
+        return;
+    }
+
     switch (cmd) {
+    case ATA_CMD_NOP:
+        /* NOP per ATA-5: abort, set ERR|ABRT, clear BSY. */
+        ide_set_error (ATA_ERR_ABRT);
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                        ATA_STATUS_ERR);
+        break;
+
     case ATA_CMD_DEVICE_RESET:
     case ATA_CMD_DEVICE_DIAG:
         ide_on_device_reset ();
@@ -390,14 +606,42 @@ static void ide_execute_command (uint8_t cmd) {
         s_ide.reg_cylinder_high = 0x00U;
         break;
 
-    case ATA_CMD_READ_SECTORS:
-    case ATA_CMD_READ_MULTI:
-        ide_on_read_sectors ();
+    /* --- PIO data-in commands (single + no-retry + multi + EXT +
+     *     "DMA" variants, all executed as PIO 512-byte transfers) - */
+    case ATA_CMD_READ_SECTORS:       /* 0x20 */
+    case ATA_CMD_READ_SECTORS_NR:    /* 0x21 */
+    case ATA_CMD_READ_SECTORS_EXT:   /* 0x24 (LBA48) */
+    case ATA_CMD_READ_DMA_EXT:       /* 0x25 (LBA48) */
+    case ATA_CMD_READ_MULTI:         /* 0xC4 */
+    case ATA_CMD_READ_MULTI_EXT:     /* 0x29 (LBA48) */
+    case ATA_CMD_READ_DMA:           /* 0xC8 */
+    case ATA_CMD_READ_DMA_NR:        /* 0xC9 */
+        ide_on_read_sectors ((cmd == ATA_CMD_READ_SECTORS_EXT ||
+                              cmd == ATA_CMD_READ_DMA_EXT ||
+                              cmd == ATA_CMD_READ_MULTI_EXT) ? 1U : 0U);
         break;
 
-    case ATA_CMD_WRITE_SECTORS:
-    case ATA_CMD_WRITE_MULTI:
-        ide_on_write_sectors ();
+    /* --- PIO write commands (same family as reads) --------------- */
+    case ATA_CMD_WRITE_SECTORS:      /* 0x30 */
+    case ATA_CMD_WRITE_SECTORS_NR:   /* 0x31 */
+    case ATA_CMD_WRITE_SECTORS_EXT:  /* 0x34 (LBA48) */
+    case ATA_CMD_WRITE_DMA_EXT:      /* 0x35 (LBA48) */
+    case ATA_CMD_WRITE_MULTI:        /* 0xC5 */
+    case ATA_CMD_WRITE_MULTI_EXT:    /* 0x39 (LBA48) */
+    case ATA_CMD_WRITE_DMA:          /* 0xCA */
+    case ATA_CMD_WRITE_DMA_NR:       /* 0xCB */
+    case ATA_CMD_WRITE_VERIFY:       /* 0x3C - write, then "verify" =
+                                      * rewrite; we treat it as write */
+        ide_on_write_sectors ((cmd == ATA_CMD_WRITE_SECTORS_EXT ||
+                               cmd == ATA_CMD_WRITE_DMA_EXT ||
+                               cmd == ATA_CMD_WRITE_MULTI_EXT) ? 1U : 0U);
+        break;
+
+    /* --- Verify-only commands (bounds check, no transfer) -------- */
+    case ATA_CMD_READ_VERIFY:        /* 0x40 */
+    case ATA_CMD_READ_VERIFY_NR:     /* 0x41 */
+    case ATA_CMD_READ_VERIFY_EXT:    /* 0x42 (LBA48) */
+        ide_on_read_verify ((cmd == ATA_CMD_READ_VERIFY_EXT) ? 1U : 0U);
         break;
 
     case ATA_CMD_IDENTIFY:
@@ -409,24 +653,124 @@ static void ide_execute_command (uint8_t cmd) {
         break;
 
     case ATA_CMD_SET_FEATURES:
-        ide_on_set_features ();
+        ide_on_set_features (features);
+        break;
+
+    case ATA_CMD_SET_MULTI:
+        /* SET MULTIPLE MODE: block per READ/WRITE MULTIPLE. Valid
+         * counts are 1..256 (0 invalid); we cap the practical count
+         * to 16 (anything above just further batches the same
+         * per-sector PIO loop). */
+        {
+            const uint8_t sc = s_ide.reg_sector_count;
+            if (sc == 0U) {
+                ide_set_error (ATA_ERR_ABRT);
+                ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                                ATA_STATUS_ERR);
+            } else {
+                s_ide.multi_count = sc;
+                /* Update IDENTIFY word 59 (valid flag + setting). */
+                store_le16 (&s_ide.identify_buf[59 * 2],
+                            (uint16_t)(0x0100U | (uint16_t)sc));
+                ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
+            }
+        }
+        break;
+
+    case ATA_CMD_READ_BUFFER:
+        /* READ BUFFER: PIO-read 512 zero bytes, sector-count ignored
+         * (single-sector semantics). */
+        ide_on_read_buffer ();
+        break;
+
+    case ATA_CMD_WRITE_BUFFER:
+        /* WRITE BUFFER: accept one sector of data and discard (no
+         * backing store concept for the buffer). */
+        s_ide.state = SUNRISE_IDE_STATE_WRITE_BUSY;
+        s_ide.buffer_index = 0U;
+        s_ide.buffer_length = 512U;
+        s_ide.sectors_remaining = 0U;   /* commit path: nothing to write */
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                        ATA_STATUS_DRQ);
+        break;
+
+    case ATA_CMD_SEEK:
+    case ATA_CMD_RECALIBRATE:
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
         break;
 
     case ATA_CMD_STANDBY_IMMEDIATE:
     case ATA_CMD_IDLE_IMMEDIATE:
-        /* No-op: drive is always "active" - just return OK. */
+    case ATA_CMD_STANDBY:
+    case ATA_CMD_IDLE:
+    case ATA_CMD_MEDIA_LOCK:
+    case ATA_CMD_MEDIA_UNLOCK:
+    case ATA_CMD_MEDIA_EJECT:
+    case ATA_CMD_DEV_CONFIG_FREEZE:
+    case ATA_CMD_SECURITY_FREEZE:
+        /* No-op power / media / security posture commands: the drive
+         * is always "active", never locked. Just return OK. */
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
+        break;
+
+    case ATA_CMD_CHECK_POWER_MODE:
+        /* Power state goes in the sector-count register. We are
+         * always active/idle -> 0xFF. */
+        s_ide.reg_sector_count = 0xFFU;
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
+        break;
+
+    case ATA_CMD_SLEEP:
+        /* SLEEP mode - nothing to actually power down. Per spec the
+         * device stays in sleep until reset; we acknowledge with
+         * DRDY and keep serving (a real kernel will reset us). */
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
+        break;
+
+    case ATA_CMD_FLUSH_CACHE:
+    case ATA_CMD_FLUSH_CACHE_EXT:
+        /* Make FatFs push cached sectors to the stick. */
+        if (s_img_open) {
+            (void)f_sync (&s_img);
+        }
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
+        break;
+
+    case ATA_CMD_GET_MEDIA_STATUS:
+        /* Media present, no door, no change. Clear error per spec. */
+        ide_set_error (0U);
         ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
         break;
 
     case ATA_CMD_PACKET:
-        /* ATAPI not supported - signal ABRT. */
+    case ATA_CMD_IDENTIFY_PACKET:
+    case ATA_CMD_SMART:
+    case ATA_CMD_SECURITY_SET_PW:
+    case ATA_CMD_SECURITY_UNLOCK:
+    case ATA_CMD_SECURITY_ERASE_PRE:
+    case ATA_CMD_SECURITY_ERASE:
+    case ATA_CMD_SECURITY_DISABLE:
+    case ATA_CMD_SET_MAX:
+        /* Not supported (ATAPI packet / SMART / security features).
+         * None of these are claimed in the IDENTIFY response, and
+         * ERR|ABRT is the spec-correct response for them. */
+        ide_set_error (ATA_ERR_ABRT);
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                        ATA_STATUS_ERR);
+        break;
+
+    case ATA_CMD_READ_LONG:
+    case ATA_CMD_READ_LONG_NR:
+    case ATA_CMD_WRITE_LONG:
+    case ATA_CMD_WRITE_LONG_NR:
+        /* Obsolete ATA-1 LONG commands (512 + ECC bytes): abort. */
         ide_set_error (ATA_ERR_ABRT);
         ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
                         ATA_STATUS_ERR);
         break;
 
     default:
-        /* Unknown command: signal ABRT per ATA spec. */
+        /* Unknown / reserved opcode: signal ABRT per ATA spec. */
         ide_set_error (ATA_ERR_ABRT);
         ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
                         ATA_STATUS_ERR);
@@ -434,31 +778,57 @@ static void ide_execute_command (uint8_t cmd) {
     }
 }
 
-static void ide_on_read_sectors (void) {
-    /* The kernel sets sector_count to the number of sectors it wants
-     * (typically 1, but can be up to 256 with the 0x00 = 256 rule).
-     * Start the first USB read; subsequent sectors are triggered
-     * implicitly as the data register is drained. */
-    if (s_ide.block_count == 0U) {
-        /* USB stack not ready yet - signal error. The kernel will
-         * retry on its own timer. */
+/* Shared xfer-start validation: returns 0 and fills *lba / *count on
+ * success; returns 1 and sets ERR|IDNF (or ERR|ABRT when the file
+ * backend is not ready) otherwise. `ext` selects LBA48 semantics
+ * (16-bit count from the HOB shadow + current regs; addresses beyond
+ * our 28-bit capacity are rejected). */
+static uint8_t ide_get_transfer (uint8_t ext, uint32_t *lba,
+                                 uint32_t *count) {
+    if (s_ide.usb_state != SUNRISE_IDE_USB_READY || !s_img_open) {
         ide_set_error (ATA_ERR_ABRT);
         ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
                         ATA_STATUS_ERR);
-        return;
+        return 1U;
     }
-    const uint32_t lba = ide_get_lba ();
-    if (lba >= s_ide.block_count) {
+    *lba = ide_get_lba ();
+    if (ext) {
+        /* LBA48: the high-order 24 bits live in the HOB shadow
+         * registers. Our disk is way below 2^28 sectors, so any
+         * nonzero high address byte is out of range. (A zero 16-bit
+         * sector count is NOT an error - it expands to 65536 below.) */
+        if (s_ide.sh_cylinder_low || s_ide.sh_cylinder_high ||
+            s_ide.sh_sector_number) {
+            ide_set_error (ATA_ERR_IDNF);
+            ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                            ATA_STATUS_ERR);
+            return 1U;
+        }
+        uint32_t c = ((uint32_t)s_ide.sh_sector_count << 8) |
+                     s_ide.reg_sector_count;
+        if (c == 0U) c = 65536U;   /* 0x0000 = 65536 per LBA48 spec */
+        *count = c;
+    } else {
+        *count = s_ide.reg_sector_count ? (uint32_t)s_ide.reg_sector_count
+                                        : 256U;
+    }
+    if (*lba >= ATA_DISK_SECTORS ||
+        *count > (ATA_DISK_SECTORS - *lba)) {
         ide_set_error (ATA_ERR_IDNF);
         ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
                         ATA_STATUS_ERR);
+        return 1U;
+    }
+    return 0U;
+}
+
+static void ide_on_read_sectors (uint8_t ext) {
+    uint32_t lba, count;
+    if (ide_get_transfer (ext, &lba, &count) != 0U) {
         return;
     }
-    /* Mirror sector_count into our private counter. 0x00 == 256
-     * sectors per ATA spec - encode that as 256 in sectors_remaining. */
-    s_ide.sectors_remaining =
-        (uint16_t)((s_ide.reg_sector_count == 0U)
-                   ? 256U : (uint16_t)s_ide.reg_sector_count);
+    /* Errors above already set status; success path: */
+    s_ide.sectors_remaining = count;
     s_ide.state = SUNRISE_IDE_STATE_READ_BUSY;
     s_ide.buffer_index = 0U;
     s_ide.buffer_length = 512U;
@@ -466,28 +836,48 @@ static void ide_on_read_sectors (void) {
     ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC | ATA_STATUS_BSY);
 }
 
-static void ide_on_write_sectors (void) {
-    if (s_ide.block_count == 0U) {
-        ide_set_error (ATA_ERR_ABRT);
-        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
-                        ATA_STATUS_ERR);
+static void ide_on_write_sectors (uint8_t ext) {
+    uint32_t lba, count;
+    if (ide_get_transfer (ext, &lba, &count) != 0U) {
         return;
     }
-    const uint32_t lba = ide_get_lba ();
-    if (lba >= s_ide.block_count) {
-        ide_set_error (ATA_ERR_IDNF);
-        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
-                        ATA_STATUS_ERR);
-        return;
-    }
-    s_ide.sectors_remaining =
-        (uint16_t)((s_ide.reg_sector_count == 0U)
-                   ? 256U : (uint16_t)s_ide.reg_sector_count);
+    s_ide.sectors_remaining = count;
     s_ide.state = SUNRISE_IDE_STATE_WRITE_BUSY;
     s_ide.buffer_index = 0U;
     s_ide.buffer_length = 512U;
     ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
                     ATA_STATUS_DRQ);
+}
+
+static void ide_on_read_verify (uint8_t ext) {
+    uint32_t lba, count;
+    if (ide_get_transfer (ext, &lba, &count) != 0U) {
+        return;
+    }
+    if (lba + count > ATA_DISK_SECTORS) {
+        ide_set_error (ATA_ERR_IDNF);
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                        ATA_STATUS_ERR);
+        return;
+    }
+    /* Verify = the data is there (the image read path body proves
+     * range validity); nothing to transfer. */
+    ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
+}
+
+static void ide_on_read_buffer (void) {
+    if (s_ide.usb_state != SUNRISE_IDE_USB_READY || !s_img_open) {
+        ide_set_error (ATA_ERR_ABRT);
+        ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC |
+                        ATA_STATUS_ERR);
+        return;
+    }
+    memset (s_ide.sector_buffer, 0, 512U);
+    s_ide.state = SUNRISE_IDE_STATE_READY;
+    s_ide.buffer_index = 0U;
+    s_ide.buffer_length = 512U;
+    s_ide.sectors_remaining = 0U;
+    ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DRQ);
 }
 
 static void ide_on_identify (void) {
@@ -528,16 +918,19 @@ static void ide_on_init_dev_params (void) {
     ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
 }
 
-static void ide_on_set_features (void) {
-    /* Subcommand in reg_error. Most are no-ops for us (write cache,
-     * read look-ahead, etc.). Always succeed. */
+static void ide_on_set_features (uint8_t sub) {
+    /* Subcommand in the features register (latched in reg_error on
+     * write). Everything we advertise in IDENTIFY (transfer modes,
+     * write cache, look-ahead...) is accepted as a no-op; the IDE
+     * enable is virtual, so there is nothing to actually configure. */
+    (void)sub;
     ide_set_status (ATA_STATUS_DRDY | ATA_STATUS_DSC);
 }
 
 /* ========================================================================
  * Cart-side handlers - called from Cart_EXTI0_Sunride_Handler.
  *
- * IRQ context. No blocking calls, no printf, no long loops.
+ * IRQ context. No blocking calls, no printf, no FatFs calls.
  * ====================================================================== */
 
 uint8_t Sunrise_IDE_ReadByte (uint16_t address) {
@@ -596,10 +989,11 @@ uint8_t Sunrise_IDE_ReadByte (uint16_t address) {
         s_ide.buffer_index = (uint16_t)(s_ide.buffer_index + 1U);
         if (s_ide.buffer_index >= s_ide.buffer_length) {
             /* Sector fully drained. If multi-sector and more sectors
-             * remaining, kick off the next USB read (BSY=1, DRQ=0);
+             * remaining, kick off the next file read (BSY=1, DRQ=0);
              * otherwise transition to IDLE (BSY=0, DRQ=0, DRDY=1). */
             s_ide.stat_drains++;
-            if (s_ide.sectors_remaining > 1U) {
+            if (s_ide.state == SUNRISE_IDE_STATE_READY &&
+                s_ide.sectors_remaining > 1U) {
                 s_ide.sectors_remaining--;
                 ide_advance_lba ();
                 s_ide.state = SUNRISE_IDE_STATE_READ_BUSY;
@@ -659,25 +1053,33 @@ void Sunrise_IDE_WriteByte (uint16_t address, uint8_t value) {
         address >= SUNRIDE_IDE_REG_BASE &&
         address <= SUNRIDE_IDE_REG_END) {
         const uint8_t off = (uint8_t)(address & 0x0FU);
+        /* HOB selects the "previous content" (shadow) register on
+         * task-file writes when LBA48 software is driving us. */
+        const uint8_t hob = s_ide.hob;
         switch (off) {
         case ATA_REG_ERROR:           /* write = features */
-            /* Features is rarely checked by the kernel; update silently. */
+            /* Latch features for SET FEATURES / SMART dispatch. */
+            s_ide.reg_error = value;
+            s_ide.stat_tf_writes++;
             return;
         case ATA_REG_SECTOR_COUNT:
-            /* 0x00 means 256 sectors per ATA spec. */
-            s_ide.reg_sector_count = value;
+            if (hob) s_ide.sh_sector_count = value;
+            else     s_ide.reg_sector_count = value;
             s_ide.stat_tf_writes++;
             return;
         case ATA_REG_SECTOR_NUMBER:
-            s_ide.reg_sector_number = value;
+            if (hob) s_ide.sh_sector_number = value;
+            else     s_ide.reg_sector_number = value;
             s_ide.stat_tf_writes++;
             return;
         case ATA_REG_CYLINDER_LOW:
-            s_ide.reg_cylinder_low = value;
+            if (hob) s_ide.sh_cylinder_low = value;
+            else     s_ide.reg_cylinder_low = value;
             s_ide.stat_tf_writes++;
             return;
         case ATA_REG_CYLINDER_HIGH:
-            s_ide.reg_cylinder_high = value;
+            if (hob) s_ide.sh_cylinder_high = value;
+            else     s_ide.reg_cylinder_high = value;
             s_ide.stat_tf_writes++;
             return;
         case ATA_REG_DEVICE_HEAD:
@@ -691,10 +1093,12 @@ void Sunrise_IDE_WriteByte (uint16_t address, uint8_t value) {
             return;
         case ATA_REG_DEVICE_CTRL:
             s_ide.reg_device_ctrl = value;
+            s_ide.hob = (uint8_t)(value & ATA_DEVCTRL_HOB);
             if (value & ATA_DEVCTRL_SRST) {
                 /* Software reset - mirror the device behaviour. */
                 ide_set_signature ();
                 s_ide.state = SUNRISE_IDE_STATE_IDLE;
+                s_ide.sectors_remaining = 0U;
                 /* STATUS=0x7F is the PRECHECK FAIL path in the driver.
                  * Use DRDY (0x40) as normal. The driver's wait loop
                  * checks AND 0xC0 == 0x40 (DRDY set, BSY clear). */
@@ -710,7 +1114,6 @@ void Sunrise_IDE_WriteByte (uint16_t address, uint8_t value) {
                 memcpy (s_ide.sector_buffer, s_ide.identify_buf, 512U);
                 s_ide.buffer_index = 0U;
                 s_ide.buffer_length = 512U;
-                s_ide.sectors_remaining = 0U;
                 s_ide.state = SUNRISE_IDE_STATE_READY;
             }
             return;
@@ -731,7 +1134,7 @@ void Sunrise_IDE_WriteByte (uint16_t address, uint8_t value) {
         s_ide.buffer_index = (uint16_t)(s_ide.buffer_index + 1U);
         /* buffer_index / buffer_length check happens in
          * Sunrise_IDE_Service (main-loop context) - that fires
-         * the USB write once all bytes are in. */
+         * the image-file write once all bytes are in. */
         return;
     }
 
@@ -756,7 +1159,7 @@ static void store_le32 (uint8_t *p, uint32_t v) {
 
 /* Read-only accessor for the live state struct. Used by the main
  * loop's status printer - IRQ-side code must NOT call this (the
- * struct is volatile and can be modified underfoot). */
+ * struct can be modified underfoot). */
 const Sunrise_IDE *Sunrise_IDE_GetState (void) {
     return &s_ide;
 }
