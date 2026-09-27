@@ -59,7 +59,15 @@ extern "C" {
  * the handler (one AND + compare) and handed to nextor.c, which
  * interprets the individual registers. The six registers below are the
  * ones driver.asm defines; 0x7FF6..0x7FFF are decoded by the handler
- * but unused by the protocol. */
+ * but unused by the protocol.
+ *
+ * The register index is therefore a straight 1:1 with the low address
+ * byte, and the window test has to keep A0..A3. That is safe because
+ * A0 and A1 really are on the bus: the bank registers in cart.c are
+ * compared exactly (0x6000, 0x7000, and 0x77FF which pins A0..A7
+ * individually), and bank switching works, so the low address bits
+ * arrive intact. A 4-byte-stride layout would tolerate their absence
+ * but is not needed and would break the existing window test. */
 #define NEXTOR_MBOX_BASE          0x7FF0U
 #define NEXTOR_MBOX_END           0x7FF5U
 
@@ -71,6 +79,11 @@ extern "C" {
 #define NEXTOR_MBOX_RXCNT_HI      0x03U
 #define NEXTOR_MBOX_ERR           0x04U   /* R: last error code         */
 #define NEXTOR_MBOX_VER           0x05U   /* R: firmware version byte   */
+
+/* Decode a cart address to a register index. Reached only for addresses
+ * inside the window, so no further range check is needed. */
+#define NEXTOR_MBOX_REG(address) \
+    ((uint8_t)((uint16_t)(address) - NEXTOR_MBOX_BASE))
 
 /* STATUS bits (bit7 MSB first - the driver tests them as a byte). */
 #define NEXTOR_STAT_READY         0x80U   /* firmware alive            */
