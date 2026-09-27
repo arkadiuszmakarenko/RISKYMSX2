@@ -516,10 +516,15 @@ static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
     FRESULT fr;
     UINT    br = 0U;
 
+    printf("[nx] img_read_sector LBA=%u\r\n", (unsigned)lba);
+
     if (img_ensure() == 0U) {
+        printf("[nx] img_read_sector: no image\r\n");
         return 0U;
     }
     if (lba >= s_img.sectors) {
+        printf("[nx] img_read_sector: LBA %u >= %u sectors\r\n",
+               (unsigned)lba, (unsigned)s_img.sectors);
         return 0U;                       /* past the end of the image */
     }
 
@@ -537,6 +542,69 @@ static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
         img_set_present(0U);
         return 0U;
     }
+
+    /* The NEXTOR.DSK from the releases is a partition image with a
+     * non-zero hidden sectors field (0x10180000 at BPB offset 0x1C).
+     * When served as a floppy, the kernel caches this BPB and uses it
+     * for all cluster-to-sector math. Patch hidden sectors to 0 on the
+     * fly so the MSX sees a valid floppy BPB.
+     *
+     * Note: the 16-bit total sectors at 0x13 is 1440 (non-zero), so the
+     * 32-bit total sectors field at 0x20 is NOT PRESENT in this BPB - the
+     * FAT12 extended boot record (Volume ID, label, etc.) starts there
+     * instead. Do NOT touch 0x20-0x23. */
+    if (lba == 0U) {
+        /* Hidden sectors = 0 (offset 0x1C, 4 bytes LE) */
+        dst[0x1C] = 0;
+        dst[0x1D] = 0;
+        dst[0x1E] = 0;
+        dst[0x1F] = 0;
+        printf("[nx] patched boot sector hidden=0\r\n");
+    }
+
+    /* The vendor NEXTOR.DSK is a *tools disk*, not a boot disk.
+     * NEXTOR.SYS and NEXTORJ.SYS have attribute 0x20 (archive only),
+     * but a bootable system file needs attribute 0x21 (system) or
+     * 0x27 (system+hidden). Patch the directory entry attribute on
+     * the fly when serving root directory sectors (LBA 7-13). */
+    if (lba >= 7U && lba <= 13U) {
+        /* Root directory: 112 entries, 32 bytes each, 7 sectors.
+         * Scan for "NEXTOR  SYS" and "NEXTORJ SYS" and set attr=0x27. */
+        for (uint16_t off = 0; off < 512; off += 32) {
+            if (dst[off] == 0x00) break;           /* end of directory */
+            if (dst[off] == 0xE5) continue;        /* deleted */
+            if ((dst[off + 11] & 0x08) != 0) continue; /* volume label */
+
+            /* Check name "NEXTOR  SYS" (8+3, space-padded) */
+            if (dst[off + 0] == 'N' && dst[off + 1] == 'E' &&
+                dst[off + 2] == 'X' && dst[off + 3] == 'T' &&
+                dst[off + 4] == 'O' && dst[off + 5] == 'R' &&
+                dst[off + 6] == ' ' && dst[off + 7] == ' ' &&
+                dst[off + 8] == 'S' && dst[off + 9] == 'Y' &&
+                dst[off + 10] == 'S') {
+                if (dst[off + 11] != 0x27) {
+                    dst[off + 11] = 0x27;  /* system+hidden+archive */
+                    printf("[nx] patched NEXTOR.SYS attr=0x27 at LBA %u off %u\r\n",
+                           (unsigned)lba, (unsigned)off);
+                }
+            }
+            /* Check name "NEXTORJ SYS" */
+            if (dst[off + 0] == 'N' && dst[off + 1] == 'E' &&
+                dst[off + 2] == 'X' && dst[off + 3] == 'T' &&
+                dst[off + 4] == 'O' && dst[off + 5] == 'R' &&
+                dst[off + 6] == 'J' && dst[off + 7] == ' ' &&
+                dst[off + 8] == 'S' && dst[off + 9] == 'Y' &&
+                dst[off + 10] == 'S') {
+                if (dst[off + 11] != 0x27) {
+                    dst[off + 11] = 0x27;  /* system+hidden+archive */
+                    printf("[nx] patched NEXTORJ.SYS attr=0x27 at LBA %u off %u\r\n",
+                           (unsigned)lba, (unsigned)off);
+                }
+            }
+        }
+    }
+
+    printf("[nx] img_read_sector LBA=%u OK\r\n", (unsigned)lba);
     return 1U;
 }
 
@@ -817,7 +885,12 @@ void Nextor_Service (void) {
         /* One sector straight into the result FIFO. The buffer is
          * exactly one sector long, so a read can never overrun it, and
          * the driver drains it as soon as DONE appears. */
-        if (img_read_sector (arg_lba (), s_mb.res) == 0U) {
+        uint32_t lba = arg_lba();
+        printf("[nx] CMD_READ LBA=%u (cluster=%u sector_in_cluster=%u)\r\n",
+               (unsigned)lba,
+               (unsigned)(lba >= 14 ? (lba - 14) / 2 + 2 : 0),
+               (unsigned)(lba >= 14 ? (lba - 14) % 2 : 0));
+        if (img_read_sector (lba, s_mb.res) == 0U) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
             break;
         }

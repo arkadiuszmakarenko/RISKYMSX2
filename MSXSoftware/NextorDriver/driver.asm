@@ -923,13 +923,19 @@ DQP_TAIL:
 ; Consumes the firmware's change latch (this query is what the
 ; "changed once, then ready" tracking is built on).
 
+;DO_DEVQ_GET_STATUS:
+;	ld	a,MB_STATUS
+;	call	MB_STCMD
+;	jr	c,DQ_STAT_TMO
+;	ld	b,a
+;	ld	a,RESULT_OK
+;	ret
 DO_DEVQ_GET_STATUS:
-	ld	a,MB_STATUS
-	call	MB_STCMD
-	jr	c,DQ_STAT_TMO
-	ld	b,a
-	ld	a,RESULT_OK
-	ret
+    ld b,1
+    xor a
+    ret
+
+
 DQ_STAT_TMO:
 	ld	a,RESULT_NOT_IMPLEMENTED
 	ld	b,1
