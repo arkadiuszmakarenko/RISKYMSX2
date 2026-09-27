@@ -25,6 +25,26 @@
  * Bus-cycle routing and the ASCII16K bank decode live in
  * cart.c::Cart_EXTI0_Nextor_Handler; everything behind the mailbox
  * (command dispatch, result FIFO, disk access) lives in nextor.c.
+ *
+ * ---------------------------------------------------------------------------
+ * What device 1 is
+ * ---------------------------------------------------------------------------
+ * Device 1 is NOT the raw USB stick. It is a fixed, read-only 720 KiB
+ * MSX-DOS disk image (.dsk, a bare FAT12 2DD floppy image: 1440 x 512
+ * byte sectors, no partition table) that the firmware reads out of the
+ * stick through FatFs and hands to the kernel one sector at a time. The
+ * driver flags it as a floppy disk drive, so the kernel maps a drive
+ * straight onto its sector 0 instead of scanning for partitions it does
+ * not have.
+ *
+ * The file name and the geometry are hardcoded on purpose - one image,
+ * one file, read only - and live in nextor.c (NEXTOR_IMG_*). Nothing
+ * else in the firmware has to change to swap disks: write a new .dsk
+ * under that name and reboot.
+ *
+ * Exposing the raw stick as a second, writable device is a later step.
+ * The command bytes below already keep room for it: the mailbox numbers
+ * are the wire protocol, not the device table.
  */
 
 #ifndef __NEXTOR_H
@@ -96,13 +116,19 @@ extern "C" {
 #define NEXTOR_ERR_NO_MEDIA       0x01U
 #define NEXTOR_ERR_IO             0x02U
 #define NEXTOR_ERR_TIMEOUT        0x03U
+/* Device 1 is a read-only image, so a write is refused rather than
+ * silently dropped. The driver never gets this far (it rejects writes
+ * locally with .WPROT, which is a DOS error and not a mailbox round
+ * trip); the code exists so a CMD_WRITE that arrives anyway gets a
+ * truthful answer instead of DONE with an empty result. */
+#define NEXTOR_ERR_READONLY       0x04U
 
 /* Command bytes written to NEXTOR_MBOX_CMD. */
 #define NEXTOR_CMD_HANDSHAKE      0x00U
 #define NEXTOR_CMD_CAPACITY       0x01U
 #define NEXTOR_CMD_STATUS         0x02U
 #define NEXTOR_CMD_READ           0x03U
-#define NEXTOR_CMD_WRITE          0x04U
+#define NEXTOR_CMD_WRITE          0x04U   /* always refused: read-only device */
 #define NEXTOR_CMD_ABORT          0x05U
 #define NEXTOR_CMD_STAPEEK        0x06U
 #define NEXTOR_CMD_MAX            0x07U

@@ -24,10 +24,14 @@
 ;
 ;   0x00 HANDSHAKE   -> 5 bytes: "RNX2" + fw version byte
 ;   0x01 CAPACITY    -> 8 bytes: block count LE(4) + block size LE(4)
-;   0x02 STATUS      -> 1 byte: 0 no media / 1 ready / 2 media changed
+;   0x02 STATUS      -> 1 byte: 0 no image / 1 ready / 2 image changed
 ;                               (CONSUMES the firmware's change latch)
 ;   0x03 READ        <- LBA LE(4)  -> 512 bytes sector data
-;   0x04 WRITE       <- LBA LE(4) + 512 bytes -> DONE after SCSI WRITE(10)
+;   0x04 WRITE       <- LBA LE(4) + 512 bytes -> never issued: device 1 is
+;                               read-only, so the driver answers .WPROT
+;                               and never writes a command byte. Defined
+;                               for completeness: the wire number the
+;                               firmware refuses with ERR_READONLY.
 ;   0x05 ABORT       -> nothing
 ;   0x06 STAPEEK     -> 1 byte: like STATUS but does NOT consume the
 ;                               change latch (device availability query)
@@ -47,9 +51,11 @@
 ; to be consumed into registers (MB_RESULT_IS / MB_RD4) or into a buffer
 ; the kernel supplies in RAM.
 ;
-; Device model (docs/NEXTOR_PLAN.md D4): device 1 = the USB stick as one
-; block device (raw sectors, MBR included - the kernel owns partitioning).
-; 512-byte sectors, removable medium.
+; Device model (docs/NEXTOR_PLAN.md D4): device 1 = ONE fixed, read-only
+; 720K floppy image (NEXTOR.DSK) served sector by sector from a file on
+; the USB stick. 1440 x 512-byte sectors, flagged to the kernel as a
+; floppy disk drive and as read-only; there is no partition table, and
+; the floppy flag is what tells the kernel so (see DQP_TAIL).
 ;
 ; Z80 rules respected:
 ;   - documented opcodes only (pairs with a .NO_UNDOC. kernel variant);
@@ -731,10 +737,11 @@ DO_DEVQ_STR_NI:
 ; Buffer layout (12 bytes):
 ;   +0 (1)  device type: 0 = block device
 ;   +1 (2)  sector size LE: always 512, medium or not
-;   +3 (4)  total sectors LE (from firmware SCSI READ CAPACITY;
-;           0 when the firmware has no medium / no capacity yet)
-;   +7 (1)  flags: bit0 = removable; bit3 = 0 (automapping allowed)
-;   +8..11  cylinders(2)/heads(1)/sectors-per-track(1) = 0
+;   +3 (4)  total sectors LE (from firmware CMD_CAPACITY over the
+;           image file; 0 when there is no image / no capacity yet)
+;   +7 (1)  flags: bit1 = read-only, bit2 = floppy disk drive
+;           (bit0 removable and bit3 no-automapping both clear)
+;   +8..11  cylinders(2)/heads(1)/sectors-per-track(1) = 80/2/9
 ;
 ; Bytes +0..+2 and +7 are written by the shared DQP_HDR / DQP_TAIL pair,
 ; so the medium and no-medium answers cannot drift apart. They must not:
@@ -764,8 +771,9 @@ DQP_FILL:
 	call	MB_POLL
 	jr	c,DQP_TMO
 	;DONE is not the same as success. The firmware sets ERR together
-	;with DONE whenever the command failed - and with no disk backend
-	;it fails every time - and an empty result FIFO pops 0xFF, not 0.
+	;with DONE whenever the command failed - which is what it does
+	;when the image file is not there - and an empty result FIFO pops
+	;0xFF, not 0.
 	;So without this test the four pops below return FF FF FF FF and
 	;the driver hands the kernel a 4294967295-sector disk built out of
 	;one's-complement noise. (The sector count is the one field the
@@ -839,36 +847,12 @@ DQP_HDR:
 ;    did exactly that, and the result was a drive the kernel counted
 ;    but never assigned: no A: at all.
 ;
-;    It is also wrong on the merits, and that is the reason to prefer
-;    512 rather than merely to satisfy the two screens above. Sector
-;    size describes the device, not the medium: the flash is addressed
-;    in 512-byte logical sectors whether or not a card is in it, so
-;    512 is not a guess, it is the known value. (The SDK's "not
-;    available" escape hatch is for devices that genuinely have no
-;    fixed block size; the sibling field, the sector COUNT at +3, is
-;    the one that legitimately goes to 0 here - and the SDK provides
-;    that encoding for exactly this case.)
-;
-;    Most importantly the answer must not depend on the medium.
-;    DQP_FILL reports 512 once a card is in. If this path reported
-;    anything else, A: would exist only while a card was inserted, and
-;    the removable-media behaviour the rest of this file is built
-;    around - keep the drive, offer a disk-change prompt - would be
-;    unreachable in practice.
-;
-;    Zero sectors plus the removable flag is a state the kernel has an
-;    explicit path for. partit.mac:1128-1136: when the partition scan
-;    fails because the device is not ready AND bit 0 of +7 says
-;    removable, the kernel records it as the fallback device and
-;    attaches it to the drive with no partition, assigning one on
-;    first access when the card appears. So this block is not just
-;    tolerated, it is the input that selects the right behaviour.
-;
 ;    RESULT_NOT_IMPLEMENTED is NOT used here: the kernel reads it as
 ;    "block device, 512 byte sectors, unknown total, flags 0" (device
 ;    query 2 in the SDK template driver), and that substituted default
-;    cannot set the removable bit - so it would lose the drive instead
-;    of keeping it, which is the opposite of the intent.
+;    cannot set the floppy bit - so a missing NEXTOR.DSK would silently
+;    turn this into a partition-scanning device and lose the drive
+;    instead of keeping it.
 DQP_NOMEDIA:
 	call	DQP_HDR
 	xor	a
@@ -881,15 +865,55 @@ DQP_NCLEAR:
 
 ;--- Shared tail: the flags and geometry bytes, then RESULT_OK. Reached
 ;    with HL = buffer+7.
+;
+;    +7 flags = 06h. Two bits matter here, and getting the second one
+;    wrong is what made every file access fail with a disk I/O error
+;    while every mailbox command in the log came back clean:
+;
+;      bit 2 (floppy disk drive)  MUST be set. Device 1 is a bare
+;        FAT12 floppy image: sector 0 is a boot sector, and there is no
+;        partition table anywhere in it. The kernel's automapper only
+;        skips the partition scan - and only then maps the drive to
+;        absolute sector 0 - for a device flagged as a floppy
+;        (bank4/partit.mac:1054-1092: bit 2 -> bit 6 of the internal
+;        flags, and bit 6 jumps straight to AA_DO_ASSIGN with first
+;        sector 0). With the bit clear, F_GPART runs, finds no valid
+;        partition, and the drive ends up unusable. The old value 01h
+;        (removable, not floppy) sent every read down that path.
+;
+;      bit 1 (read only)  is set because that is the truth: the
+;        firmware refuses CMD_WRITE. Reporting it here means the kernel
+;        can answer "write protected" itself, and READ_WRITE returns
+;        .WPROT without ever touching the bus.
+;
+;      bit 0 (removable) is deliberately CLEAR. The image does not come
+;        and go the way a card does: it is one file on the stick, and
+;        the old 01h was what fed the removable-media fallback in
+;        partit.mac:1128-1136 (no partitions, assigned on first access).
+;        That path is the wrong one now - the floppy path is both
+;        correct and simpler. A side effect worth knowing: with bit 0
+;        clear the drive no longer gets the "Insert disk" prompt on
+;        every access.
+;
+;      bit 3 (no automapping) stays clear so the device is still
+;        automapped at boot.
+;
+;    +8..+11 is the 720K geometry, 80/2/9 = 1440 sectors, matching the
+;    fixed sector count this driver reports. The kernel does not read
+;    these fields (guide 4.6.2: only partitioning tools do), but zeros
+;    would be a lie about a device that has a real geometry, and the
+;    numbers cost 8 bytes. Little-endian, like the sector size above.
 DQP_TAIL:
-	ld	(hl),01h	;+7 flags: bit0 removable, bit3 = 0 (allow automapping)
+	ld	(hl),06h	;+7 flags: bit1 read-only + bit2 floppy
 	inc	hl
-	xor	a
-	ld	b,4		;+8..11 cylinders(2)+heads(1)+sectors-per-track(1)=0
-DQP_ZERO:
+	ld	(hl),50h	;+8 cylinders LE low  = 80
+	inc	hl
+	xor	a		;+9 cylinders LE high = 0
 	ld	(hl),a
 	inc	hl
-	djnz	DQP_ZERO
+	ld	(hl),2		;+10 heads = 2
+	inc	hl
+	ld	(hl),9		;+11 sectors per track = 9
 	xor	a		;RESULT_OK
 	ret
 
@@ -933,8 +957,22 @@ DQ_AVAIL_DONE:
 	ret
 
 
-; Device queries 5-7: floppy-only; we are not a floppy.
-
+; Device queries 5-7: the format-related ones, which only make sense for
+; a floppy disk drive that can actually be formatted.
+;
+; The device IS flagged as a floppy (DQP_TAIL bit 2) but it is read-only,
+; so there is nothing to offer. RESULT_NOT_IMPLEMENTED is the documented
+; answer for "this device is not formattable" (guide 4.6.5/4.6.6: "for
+; floppy disks if the driver doesn't support formatting it should always
+; return RESULT_NOT_IMPLEMENTED"), and it is what all three queries are
+; required to answer together - query 5 and 6 are a pair, so leaving 5
+; unimplemented and answering 6 would be the inconsistent one.
+;
+; Consequence: CALL FORMAT (BASIC) and COMMAND3.COM's FORMAT still list
+; the drive with the kernel's default single/double side choices, and the
+; format itself then fails on query 6. The user-visible result is an
+; error rather than a silent "formatted", which is the honest outcome
+; for a disk whose sectors live in a file that is never written.
 DO_DEVQ_GET_FORMAT_CHOICES:
 DO_DEVQ_DO_FORMAT:
 DO_DEVQ_STOP_MOTOR:
@@ -1131,57 +1169,27 @@ RW1_RDR:
 
 ;--- RW_ONE_WRITE: transfer one sector (write).
 ;    Same register contract as RW_ONE_READ.
-
+;
+;    This device is read-only, so there is no transfer: return .WPROT
+;    straight away, without a media check and without CMD_WRITE.
+;
+;    The old version of this routine issued MB_STATUS, pushed the LBA
+;    and then 512 data bytes at MBOX_DATA, and only found out at the end
+;    that the firmware had refused all of it. That cost 517 cart-bus
+;    cycles per sector, each one an EXTI0 interrupt on the firmware side,
+;    to be told the answer the device's own +7 flag bit 1 already gives
+;    the kernel. It also leaked the sector: the 4 LBA bytes went out
+;    before the refusal was known, leaving a half-finished command in
+;    the mailbox collector.
+;
+;    .WPROT is the right code rather than .NRDY or .DISK: the guide
+;    (4.9.4) says to return the DOS error that describes the failure,
+;    and the kernel already uses .WPROT to report "Write protected disk"
+;    for exactly this case.
 RW_ONE_WRITE:
 	push	bc		;preserve the remaining-count register
-
-	ld	a,MB_STATUS
-	call	MB_STCMD
-	jp	c,RW1_TMO
-	or	a
-	jp	z,RW1_NRDY
-
-	;Send CMD_WRITE + the 4 LBA bytes.
-
-	exx
-	push	de
-	pop	hl
-	ld	a,MB_WRITE
-	ld	(MBOX_CMD),a
-	ld	a,(hl)
-	ld	(MBOX_DATA),a
-	inc	hl
-	ld	a,(hl)
-	ld	(MBOX_DATA),a
-	inc	hl
-	ld	a,(hl)
-	ld	(MBOX_DATA),a
-	inc	hl
-	ld	a,(hl)
-	ld	(MBOX_DATA),a
-	exx
-
-	;Push 512 bytes from (IX) to DATA.
-
-	ld	bc,512
-RW1_WDR:
-	ld	a,(ix+0)
-	inc	ix
-	ld	(MBOX_DATA),a
-	dec	bc
-	ld	a,b
-	or	c
-	jr	nz,RW1_WDR
-
-	;Wait for the firmware to complete the SCSI write.
-
-	call	MB_POLL
-	jp	c,RW1_TMO
-	ld	a,(MBOX_STAT)
-	bit	5,a
-	jp	nz,RW1_ERR
-	pop	bc		;restore remaining count
-	xor	a
+	ld	a,.WPROT
+	pop	bc
 	ret
 
 ;--- Shared one-sector error tails (BC was pushed by the helper).
@@ -1214,10 +1222,10 @@ RW1_NRDY2:
 	.stresc on
 
 MSG_DRIVER_NAME:	db	"RISKY MSX 2",0
-MSG_DEVICE_NAME:	db	"USB storage",0
+MSG_DEVICE_NAME:	db	"720K disk image",0
 
 INIT_MSG:		db	"\r\nRISKY MSX 2 driver\r\n"
-			db	"RISKY MSX 2 block device\r\n"
+			db	"RISKY MSX 2 read-only 720K floppy image\r\n"
 			db	"Hello world from driver\r\n",0
 
 ;--- Init-phase verdicts. MSG_FW_OK is printed only after the mailbox

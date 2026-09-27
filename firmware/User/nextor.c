@@ -74,26 +74,57 @@
  * byte instead of once per poll.
  *
  * ---------------------------------------------------------------------------
- * Not implemented yet
+ * Device 1 = one fixed, read-only 720 KiB .dsk image
  * ---------------------------------------------------------------------------
- * There is still no disk backend, so the answers below are what a
- * firmware with no medium attached would report. HANDSHAKE, STATUS and
- * STAPEEK are answered from firmware state alone and are therefore
- * already correct; CAPACITY, READ and WRITE report NO_MEDIA, which is
- * the honest answer until the USB/SCSI path is wired in. The bank-
- * switching half of the mapper is complete, so the kernel ROM boots and
- * its driver runs, and the log below is the tool for watching exactly
- * which command the kernel wants next.
+ * The disk behind device 1 is an MSX-DOS floppy image file on the USB
+ * stick: 1440 sectors of 512 bytes, FAT12, no partition table, boot
+ * sector at LBA 0. The driver flags the device as a floppy disk drive
+ * (device query 2, flag bit 2), which is what makes the kernel map a
+ * drive onto sector 0 directly rather than hunting for partitions.
+ *
+ * Reads are served from the file itself - f_lseek + f_read into the
+ * result FIFO - with the handle kept open across commands, so a sector
+ * costs one seek and one 512-byte read and no path parsing. A failed
+ * FatFS call drops the handle: the stick may have been pulled mid
+ * session, and the next command then re-probes, which is also how the
+ * image comes back after a re-plug.
+ *
+ * The obvious next optimisation, and deliberately not done here: cache
+ * the whole 737280-byte image in PSRAM at Nextor_Init and serve reads
+ * from there. It is not done here because the 1-2 s it takes to stream
+ * the image off the stick would have to happen while the Z80 is already
+ * polling, and reads out of the file are already faster than the Z80
+ * can drain the result FIFO.
+ *
+ * Where the probing happens, and why it is split in two:
+ *
+ *   request path  CAPACITY and READ call img_ensure() and will mount
+ *                 the volume if it has to. That can be slow while a
+ *                 stick is still enumerating, and slower than the
+ *                 driver's ~0.8 s command budget, so it is not done
+ *                 from a command that is cheap to answer otherwise.
+ *   main loop     img_poll() keeps the image probed from
+ *                 Nextor_Service while no request is in flight, so by
+ *                 the time the kernel asks its first question the file
+ *                 is normally already open and the answer is immediate.
+ *   STATUS never probes at all - it reports what the firmware currently
+ *                 knows, because the kernel polls status far more often
+ *                 than it asks for real work.
+ * ---------------------------------------------------------------------------
  */
 
 #include "nextor.h"
+#include "usb_disk.h"
+#include "ff.h"
 #include <stdio.h>
 
 /* ========================================================================
  * Wire contract
  * ====================================================================== */
 
-/* driver.asm: "512-byte sectors, removable medium." */
+/* driver.asm: "512-byte sectors, read-only floppy image, 1440 sectors."
+ * The result FIFO is exactly one sector, so this is both the driver's
+ * sector size and the largest answer a single command can produce. */
 #define NEXTOR_SECTOR_SIZE   512U
 
 /* Largest argument burst: WRITE = LBA(4) + one sector. */
@@ -187,19 +218,91 @@ static struct {
 #define NEXTOR_CMD_NONE    NEXTOR_CMD_MAX
 
 /* ========================================================================
- * 1. Lifecycle
+ * 1a. The image behind device 1.
+ *
+ * A fixed, read-only 720 KiB MSX-DOS disk image held in a file on the
+ * USB stick. One file name, one geometry, no writing, no hot-swap
+ * handling beyond "re-probe if a read fails": the point is that the
+ * kernel gets a plain, always-the-same disk, not a second block device.
+ *
+ * Why a file and not the raw stick: the image is what MSX-DOS actually
+ * wants to boot (FAT12, a boot sector at LBA 0), and it keeps the
+ * driver's device model to one read-only floppy-flavored block device
+ * with a fixed size. Turning the raw stick into a second, writable
+ * device is a follow-up; nothing in this file prevents it, the state
+ * here is just per-medium.
+ *
+ * Everything below is deliberately tiny and stateless-looking because
+ * the driver is a ROM driver with no RAM of its own: all the mutable
+ * bookkeeping (handle, sector count, change latch) lives here on the
+ * firmware side, where it can actually be written to.
  * ====================================================================== */
+
+/* Short (8.3) names on purpose. The stick in use stores long file names
+ * as VFAT entries and f_open() resolves them unreliably here; the
+ * loader and terminal hit exactly this and both work off the SFN.
+ *
+ * NEXTOR.DSK is the stock Nextor tools disk from the Nextor releases: a
+ * bare 737280-byte FAT12 image whose sector 0 is a boot sector. That is
+ * the raw image, NOT a DSK container - no 0x100-byte per-track offset
+ * header - which is why the file has to be exactly 1440 sectors and why
+ * the driver flags the device as a floppy (a bare FAT image has no
+ * partition table for the kernel to find).
+ *
+ * A short candidate list rather than one name, because "the file is
+ * called something else" and "the image is not there" look identical
+ * from the MSX side: no drive, no error, nothing in the log but one
+ * f_open failure. Two names cost 18 bytes of flash and remove the most
+ * likely reason for that. Order matters - the first hit wins. */
+static const char *const s_img_names[] = {
+    "0:/NEXTOR.DSK",
+    "0:/RISKYMSX.DSK",
+};
+#define NEXTOR_IMG_NAME_COUNT (sizeof(s_img_names) / sizeof(s_img_names[0]))
+
+/* 720 KiB = 1440 x 512. The driver takes the sector count from
+ * CMD_CAPACITY rather than hardcoding it, so these two constants are
+ * the single source of truth for the size. */
+#define NEXTOR_IMG_SECTORS    1440U
+#define NEXTOR_IMG_BYTES      (NEXTOR_IMG_SECTORS * NEXTOR_SECTOR_SIZE)
+
+/* Image state. Only the service/main-loop side ever touches this.
+ *
+ *   open     the FIL is open and usable. Kept open across commands on
+ *            purpose: a sector read is then one f_lseek + one f_read,
+ *            with no path parsing and no root-directory walk. A failed
+ *            call closes the handle and lets the next probe reopen it,
+ *            which is also how a re-plugged stick recovers.
+ *   sectors  how many 512-byte sectors the file holds, capped at
+ *            NEXTOR_IMG_SECTORS. 0 means "no image", which the driver
+ *            is told as a zero capacity / no media.
+ *   present  what STATUS last reported, kept so the change latch below
+ *            only fires on an actual transition.
+ *   changed  the media-change latch: set on a transition, consumed by
+ *            STATUS, left alone by STAPEEK (device query 4 must not
+ *            disturb query 3's tracking). */
+static struct {
+    FIL     fp;
+    uint32_t sectors;
+    uint32_t next_probe;  /* ms timestamp of the next allowed probe   */
+    uint8_t  open;
+    uint8_t  present;
+    uint8_t  changed;
+    uint8_t  probed;      /* 1 once a probe has run, so "no image" is
+                           * not reported as a change on every STATUS  */
+    uint8_t  last_fr;     /* FRESULT of the last f_open, for the log   */
+} s_img;
 
 /* ========================================================================
  * 1b. Request timestamps.
  *
- * Why this exists: the Nextor kernel polls a drive it has mapped, and with
- * no disk backend behind CAPACITY the poll never settles - the log fills
- * with an endless CAPACITY/STATUS/STATUS cycle. Whether that is the
- * kernel's intended watchdog (once a second or so) or a tight retry spin
- * (which would peg a CPU and make the machine unusable) is not something
- * the log can show, because a list of lines with no intervals cannot
- * distinguish them. So each line carries the gap since the previous one.
+ * Why this exists: a driver query loop that the firmware cannot satisfy
+ * never settles - the log fills with an endless CAPACITY/STATUS/STATUS
+ * cycle. Whether that is the kernel's intended watchdog (once a second or
+ * so) or a tight retry spin (which would peg a CPU and make the machine
+ * unusable) is not something the log can show, because a list of lines
+ * with no intervals cannot distinguish them. So each line carries the gap
+ * since the previous one.
  *
  * The clock is rdcycle, not SysTick: Delay_Ms() borrows SysTick as a
  * one-shot on every call and leaves it stopped, so there is no free-running
@@ -268,6 +371,182 @@ static uint32_t ms_since_prev (void) {
     return d;
 }
 
+/* Milliseconds on the same scale ms_since_prev() reports in, as an
+ * absolute reading rather than a delta. Used to rate-limit probing.
+ * The multiplication is done in 64 bits because rdcycle() wraps every
+ * ~10 s at 400 MHz and the calibration constant makes the division
+ * widen the range rather than narrow it. */
+static uint32_t ms_now (void) {
+    return (uint32_t)(((uint64_t)rdcycle() * 1000ULL) / (uint64_t)s_cyc_per_ms);
+}
+
+/* ========================================================================
+ * 1c. Image access
+ *
+ * The whole disk backend is these four functions. Everything is a plain
+ * FatFs file read; the only real decisions are (a) how often to probe,
+ * and (b) what to tell the driver when there is no image.
+ * ====================================================================== */
+
+/* Drop the image and forget that we ever had one. */
+static void img_reset (void) {
+    if (s_img.open != 0U) {
+        (void)f_close(&s_img.fp);
+    }
+    s_img.open      = 0U;
+    s_img.sectors   = 0U;
+    s_img.present   = 0U;
+    s_img.changed   = 0U;
+    s_img.probed    = 0U;
+    s_img.last_fr   = 0U;
+    s_img.next_probe = 0U;
+}
+
+/* Note a presence transition and arm the media-change latch. The latch
+ * is what makes device query 3 report "changed" exactly once after the
+ * image appears, which is how the kernel learns a drive has become
+ * usable without being told to look. */
+static void img_set_present (uint8_t now) {
+    if ((s_img.probed != 0U) && (now == s_img.present)) {
+        return;                         /* not a transition */
+    }
+    if (s_img.probed != 0U) {
+        s_img.changed = 1U;
+    }
+    s_img.present = now;
+    s_img.probed  = 1U;
+}
+
+/* Open the image, once. Safe to call from the main loop and from the
+ * service path; it is the only place that touches USB_TryEnsureMounted
+ * and f_open.
+ *
+ * Bounded on purpose. A probe that has to enumerate the stick runs
+ * hundreds of milliseconds of retries, and the driver's MB_POLL gives up
+ * after ~0.8 s - so if a probe ran inside a command the Z80 would time
+ * out and take a read error, which is a worse answer than "no image,
+ * ask again". The service path therefore treats an unprobed image as
+ * absent, and the main loop does the real probing through img_poll. */
+static void img_probe (void) {
+    FRESULT    fr;
+    FSIZE_t    sz;
+    uint32_t   sectors;
+    const char *name;
+    const uint32_t now = ms_now();
+
+    if (s_img.open != 0U) {
+        return;                         /* already have it */
+    }
+    if (s_img.probed != 0U) {
+        /* Rate limit. Without this the main loop's "is it armed?" check
+         * turns into a continuous enumeration retry, which keeps the
+         * stick's SCSI bus busy for no reason. */
+        if ((now - s_img.next_probe) < 2000U) {
+            return;
+        }
+    }
+    s_img.next_probe = now;
+
+    if (USB_TryEnsureMounted() != DEF_SUCCESS) {
+        img_set_present(0U);
+        return;
+    }
+
+    /* Try each candidate in turn. The last FRESULT is the one reported:
+     * FR_NO_FILE for every name is the informative case, and any other
+     * code (a name that is a directory, say) is worth seeing too. */
+    {
+        uint32_t i;
+
+        name = s_img_names[0];
+        for (i = 0U; i < NEXTOR_IMG_NAME_COUNT; i++) {
+            name = s_img_names[i];
+            fr   = f_open(&s_img.fp, name, FA_READ);
+            s_img.last_fr = (uint8_t)fr;
+            if (fr == FR_OK) {
+                break;
+            }
+        }
+    }
+    if (fr != FR_OK) {
+        img_set_present(0U);
+        return;
+    }
+
+    /* A 720 KiB image is the contract; anything shorter is served
+     * truncated (a partly written file still boots what it has) and
+     * anything longer is capped, so the driver never hands the kernel a
+     * sector count the file cannot back. */
+    sz      = f_size(&s_img.fp);
+    sectors = (sz > (FSIZE_t)NEXTOR_IMG_BYTES)
+            ? NEXTOR_IMG_SECTORS
+            : (uint32_t)(sz / (FSIZE_t)NEXTOR_SECTOR_SIZE);
+    if (sectors > NEXTOR_IMG_SECTORS) {
+        sectors = NEXTOR_IMG_SECTORS;
+    }
+
+    s_img.sectors = sectors;
+    s_img.open    = 1U;
+    img_set_present((uint8_t)((sectors != 0U) ? 1U : 0U));
+    printf ("[nx] image '%s' open: %u bytes, %u sectors of %u%s\r\n",
+            name, (unsigned)sz, (unsigned)sectors,
+            (unsigned)NEXTOR_SECTOR_SIZE,
+            (sectors != NEXTOR_IMG_SECTORS) ? " (not a full 720K image)" : "");
+}
+
+/* Make sure an image is available, probing if needed. Returns 1 when the
+ * device has a medium, 0 when it does not. This is the only entry the
+ * command handlers use, so "no image" is one honest answer rather than
+ * a per-command special case. */
+static uint8_t img_ensure (void) {
+    if (s_img.open != 0U) {
+        return (uint8_t)((s_img.sectors != 0U) ? 1U : 0U);
+    }
+    img_probe();
+    return (uint8_t)((s_img.open != 0U && s_img.sectors != 0U) ? 1U : 0U);
+}
+
+/* Read one sector into dst. Returns 1 on success.
+ *
+ * A failed read closes the handle: the stick was probably pulled, and a
+ * handle into a volume that no longer exists fails every subsequent call
+ * with FR_INVALID_OBJECT. Closing makes the next img_ensure() probe
+ * again, which re-enumerates and picks the image back up. */
+static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
+    FRESULT fr;
+    UINT    br = 0U;
+
+    if (img_ensure() == 0U) {
+        return 0U;
+    }
+    if (lba >= s_img.sectors) {
+        return 0U;                       /* past the end of the image */
+    }
+
+    fr = f_lseek(&s_img.fp, (FSIZE_t)lba * (FSIZE_t)NEXTOR_SECTOR_SIZE);
+    if (fr == FR_OK) {
+        fr = f_read(&s_img.fp, dst, NEXTOR_SECTOR_SIZE, &br);
+    }
+    if ((fr != FR_OK) || (br != NEXTOR_SECTOR_SIZE)) {
+        printf ("[nx] image read LBA %u failed (fr=%u, %u bytes) - "
+                "dropping image\r\n",
+                (unsigned)lba, (unsigned)fr, (unsigned)br);
+        (void)f_close(&s_img.fp);
+        s_img.open    = 0U;
+        s_img.sectors = 0U;
+        img_set_present(0U);
+        return 0U;
+    }
+    return 1U;
+}
+
+/* ========================================================================
+ * 2. Lifecycle
+ *
+ * (Back to the mailbox itself. Sections 1a-1c above are the state and
+ * the helpers the lifecycle and the service path share.)
+ * ====================================================================== */
+
 /* Power-on mailbox state. Called from main() at boot and again from
  * Cart_SetMapper() on every swap to CART_MAP_NEXTOR.
  *
@@ -297,6 +576,7 @@ void Nextor_Init (void) {
      * for a mapper swap. */
     s_cyc_per_ms = 0U;
     cyc_calibrate ();
+    img_reset ();
 }
 
 /* LBA argument, little-endian - MB_SEND pushes the driver's (HL) block
@@ -412,6 +692,13 @@ static void log_request (void) {
     if ((cmd == NEXTOR_CMD_READ) || (cmd == NEXTOR_CMD_WRITE)) {
         printf (" lba=0x%08x", (unsigned)arg_lba());
     }
+    if (cmd == NEXTOR_CMD_STATUS) {
+        /* The media byte is the whole point of this command, and a bare
+         * "res=1" in a wall of lines is not readable a hundred lines
+         * later. */
+        printf (" media=%u%s", s_mb.res[0],
+                (s_mb.res[0] == 2U) ? " (changed)" : "");
+    }
     if (err != NEXTOR_ERR_NONE) {
         printf (" -> ERR %u", (unsigned)err);
     }
@@ -433,10 +720,11 @@ static void log_request (void) {
 void Nextor_Service (void) {
     uint8_t cmd;
 
-    /* State-change gate. armed is set exactly once per captured request
-     * and cleared below, so an idle mailbox costs one load and a branch
-     * - no printing, and in particular nothing per STATUS poll. */
+    /* Nothing to answer, so use the time to get the image ready. This is
+     * where the slow half of the disk backend lives (enumeration, mount,
+     * f_open); the command path below deliberately never pays for it. */
     if (s_mb.armed == 0U) {
+        img_probe ();
         return;
     }
     s_mb.armed = 0U;
@@ -463,28 +751,94 @@ void Nextor_Service (void) {
     }
 
     case NEXTOR_CMD_STATUS:
-    case NEXTOR_CMD_STAPEEK:
-        /* 0 = no media. Both report the same thing today because the
-         * media-change latch has no producer yet; STAPEEK must not
-         * consume the latch, which is why there is no consume-on-read
-         * state to clear here. */
-        s_mb.res[0]  = 0U;
+    case NEXTOR_CMD_STAPEEK: {
+        /* 0 = no image, 1 = ready, 2 = ready and changed since the last
+         * STATUS. The latch is what the "changed once, then ready"
+         * tracking in the driver is built on: without it the kernel would
+         * never notice that an image appeared after boot.
+         *
+         * STAPEEK deliberately does not consume it - device query 4 must
+         * not disturb query 3's tracking, or a media check in between two
+         * status requests would swallow the change.
+         *
+         * No probing here (see img_probe): STATUS is polled far more
+         * often than anything else, including by the kernel's own
+         * startup code, and an enumeration retry in the middle of it
+         * would blow the driver's command budget. s_img is kept current
+         * by img_probe() from the main loop, so this is a read of state
+         * that is at most a couple of seconds old. */
+        uint8_t st;
+        if (s_img.sectors == 0U) {
+            st = 0U;                       /* no image attached */
+        } else if (s_img.changed != 0U) {
+            st = 2U;                       /* attached, changed */
+        } else {
+            st = 1U;                       /* attached, unchanged */
+        }
+        if (cmd == NEXTOR_CMD_STATUS) {
+            s_img.changed = 0U;            /* consumed; STAPEEK leaves it */
+        }
+        s_mb.res[0]  = st;
         s_mb.res_end = s_mb.res + 1U;
         break;
+    }
 
     case NEXTOR_CMD_ABORT:
         /* Nothing to abort: no request is ever in flight here, because
          * Nextor_Service answers each one in a single pass. */
         break;
 
-    case NEXTOR_CMD_CAPACITY:
-    case NEXTOR_CMD_READ:
+    case NEXTOR_CMD_CAPACITY: {
+        /* 4-byte block count + 4-byte block size, both little-endian -
+         * the wire shape the driver's DO_DEVQ_GET_PARAMS streams straight
+         * into the kernel's device parameter block.
+         *
+         * No image is reported as an error rather than as a zero
+         * capacity: the driver turns a failed CAPACITY into "0 sectors,
+         * device still exists", which is what makes the kernel keep the
+         * drive and retry later instead of dropping the device. */
+        if (img_ensure () == 0U) {
+            s_mb.err = NEXTOR_ERR_NO_MEDIA;
+            break;
+        }
+        {
+            uint32_t v = s_img.sectors;
+            uint8_t  i;
+            for (i = 0U; i < 4U; i++) {
+                s_mb.res[i]     = (uint8_t)(v >> (8U * i));
+                s_mb.res[4U + i] = (uint8_t)(NEXTOR_SECTOR_SIZE >> (8U * i));
+            }
+        }
+        s_mb.res_end = s_mb.res + 8U;
+        break;
+    }
+
+    case NEXTOR_CMD_READ: {
+        /* One sector straight into the result FIFO. The buffer is
+         * exactly one sector long, so a read can never overrun it, and
+         * the driver drains it as soon as DONE appears. */
+        if (img_read_sector (arg_lba (), s_mb.res) == 0U) {
+            s_mb.err = NEXTOR_ERR_NO_MEDIA;
+            break;
+        }
+        s_mb.res_end = s_mb.res + NEXTOR_SECTOR_SIZE;
+        break;
+    }
+
     case NEXTOR_CMD_WRITE:
+        /* Refused, not ignored. The device is read only, and answering
+         * DONE with an empty FIFO would leave the driver believing the
+         * sector was written. The driver never sends this (it returns
+         * .WPROT locally), so this is the backstop for a stray command. */
+        s_mb.err = NEXTOR_ERR_READONLY;
+        break;
+
     default:
-        /* No disk backend yet. Reporting NO_MEDIA keeps the driver's
-         * error path honest and lets it move on to the next command
-         * instead of wedging in MB_POLL. */
-        s_mb.err = NEXTOR_ERR_NO_MEDIA;
+        /* Unknown command byte. Nextor_WriteByte() parks the collector
+         * for those instead of arming, so reaching here means the byte
+         * was valid but this switch has no case for it - a firmware bug,
+         * not a driver one. */
+        s_mb.err = NEXTOR_ERR_IO;
         break;
     }
 
@@ -493,7 +847,7 @@ void Nextor_Service (void) {
 }
 
 /* ========================================================================
- * 2. Code entries - called from Cart_EXTI0_Nextor_Handler.
+ * 3. Code entries - called from Cart_EXTI0_Nextor_Handler.
  *
  * Both are reached only for addresses in NEXTOR_MBOX_BASE..
  * NEXTOR_MBOX_END, so the register index is just the A2..A4 slot
