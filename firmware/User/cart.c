@@ -2,7 +2,7 @@
 #include "psram.h"
 #include "scc.h"
 #include "loader.h"
-#include "sunrise_ide.h"
+#include "nextor.h"
 #include "terminal.h"
 #include "ch32v4x7.h"
 #include "debug.h"
@@ -58,20 +58,18 @@ void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinli
  * MSX-side terminal program never fetches from 0x4100..0xBFFF. */
 extern const uint8_t terminal_rom[];
 
-/* Embedded Nextor Sunrise IDE kernel ROM (flash-resident, generated
- * from MSXSoftware/Nextor/nextor_sunrise.bin via the Makefile's
- * regenerate_nextor_rom target -> tools/rom2c.py). The Sunrise IDE
- * mapper decoder uses 8 banks x 16 KiB = 128 KiB; bank n of the Z80
- * window is selected by writing (bank|0x80) to 0x4104 (bit-reverse of
- * bits 0..2, IDE-enable in bit 7). See sunrise_ide.c::write_control
- * for the bit-reverse math.
+/* Embedded Nextor kernel ROM (flash-resident, generated from
+ * MSXSoftware/NextorDriver/Nextor-3.0.RISKYMSX2.ROM by the Makefile's
+ * regenerate_nextor_rom target -> tools/rom2c.py). That image is the
+ * Nextor 3.0 kernel plus the RISKYMSX2 disk driver, so it is 128 KiB =
+ * 8 banks x 16 KiB. The mapper is ASCII16K: bank n of the Z80 page-1
+ * window is selected by writing n to 0x6000, and a byte at cart address
+ * A is nextor_rom[(n << 14) + (A & 0x3FFF)]. The driver reaches the
+ * disk only through the mailbox window at 0x7FF0..0x7FF5.
  *
- * If MSXSoftware/Nextor/nextor_sunrise.bin is missing, the Makefile
- * falls back to the hand-written placeholder nextor_rom.c. That
- * placeholder will NOT boot Nextor - the Sunrise IDE mapper decode is
- * useless without a real Sunrise kernel image. The placeholder is
- * only there to keep the build green until the user drops the
- * correct ROM file in place. */
+ * If the ROM is missing the Makefile leaves whatever
+ * User/nextor_rom.c is already in place, so a stale or empty image
+ * compiles but will not boot Nextor. */
 extern const uint8_t  nextor_rom[];
 extern const uint32_t nextor_rom_len;
 extern const uint32_t terminal_rom_len;
@@ -92,10 +90,17 @@ extern const uint32_t terminal_rom_len;
  * mapper select) via the FIFO at 0x7FFF. Kept in flash: the cart
  * flash path is zero-wait, and the boot path benefits from having the
  * terminal ROM live before PSRAM is even initialised. */
-void Cart_EXTI0_Sunride_Handler (void) __attribute__((noinline,
-                                                      interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_Terminal_Handler (void) __attribute__((noinline,
                                                         interrupt("WCH-Interrupt-fast")));
+
+/* Nextor mapper: ASCII16K bank switching (0x6000 / 0x7000 / 0x77FF) over
+ * the embedded kernel ROM in nextor_rom[], with the mailbox window at
+ * 0x7FF0..0x7FF5 punched out of page 1 and routed to nextor.c. Kept in
+ * flash like the FLASH and TERMINAL handlers: the ROM is flash-resident
+ * (zero-wait XIP), so there is nothing to gain by paying the PSRAM cost
+ * of a .ramfunc body. */
+void Cart_EXTI0_Nextor_Handler (void) __attribute__((noinline,
+                                                      interrupt("WCH-Interrupt-fast")));
 
 /* No-mapper fallback: just clears the pending bit and releases the bus.
  * The Z80 reads 0xFF (floating bus). */
@@ -120,7 +125,7 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "KONAMISCC",
     "FLASH",
     "TERMINAL",
-    "SUNRIDE",
+    "NEXTOR",
 };
 
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
@@ -246,7 +251,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         && m != CART_MAP_ROM48k
         && m != CART_MAP_FLASH
         && m != CART_MAP_TERMINAL
-        && m != CART_MAP_SUNRIDE
+        && m != CART_MAP_NEXTOR
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -276,7 +281,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
 
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
-    case CART_MAP_SUNRIDE:    h = (uint32_t)Cart_EXTI0_Sunride_Handler; break;
+    case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
     default:                   return -1;
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
@@ -285,13 +290,14 @@ int Cart_SetMapper (Cart_Mapper m) {
     if (m == CART_MAP_ROM32k || m == CART_MAP_FLASH) {
         Loader_Reset ();
     }
-    /* Sunrise IDE mapper: reset the ATA state machine + PATA device
-     * signature + IDE USB lifecycle so the kernel starts with a clean
-     * engine (no stale LBA / sector buffer / IDENTIFY data from a
-     * previous run, no stale state from a half-completed READ/WRITE).
+    /* Nextor mapper: reset every state element - the bank select, the
+     * ATA register file, the PATA device signature, the sector buffer
+     * and the USB lifecycle - so the kernel starts with a clean engine
+     * (no stale LBA / sector buffer / IDENTIFY data from a previous
+     * run, no stale state from a half-completed READ/WRITE).
      * Safe to call repeatedly. */
-    if (m == CART_MAP_SUNRIDE) {
-        Sunrise_IDE_Init ();
+    if (m == CART_MAP_NEXTOR) {
+        Nextor_Init ();
     }
 
     /* Initial-bank assignment for bank-switching mappers so the first
@@ -366,16 +372,23 @@ int Cart_SetMapper (Cart_Mapper m) {
         /* ASCII 16k: 16 KiB banks at 0x6000 and 0x7000. */
         s_state.bankOffsets[0] = 0x0000U - 0x4000U;
         s_state.bankOffsets[8] = 0x0000U - 0x8000U;
+    } else if (m == CART_MAP_NEXTOR) {
+        /* Nextor is ASCII16K over nextor_rom[]: 16 KiB banks selected by
+         * 0x6000 (page 1) and 0x7000/0x77FF (page 2). Both pages start
+         * on bank 0, so the kernel sees ROM[0x0000..0x3FFF] at 0x4000 the
+         * moment the mapper is installed - no bank-select write needed
+         * before the reset vector is fetched. The bias is stored in the
+         * usual "add to the raw cart address" form:
+         *   nextor_rom + bankOffsets[0] + 0x4000 == nextor_rom + 0
+         *   nextor_rom + bankOffsets[8] + 0x8000 == nextor_rom + 0
+         * The mailbox window at 0x7FF0..0x7FF5 has no bias of its own -
+         * the handler intercepts it by absolute address before the
+         * index is ever computed. */
+        s_state.bankOffsets[0] = 0x0000U - 0x4000U;
+        s_state.bankOffsets[8] = 0x0000U - 0x8000U;
     }
     /* NEO8/NEO16 default to bank 0 for all pages - their writes
-     * compose the 12-bit bank number, no init needed.
-     *
-     * CART_MAP_SUNRIDE does NOT touch bankOffsets[] - the Sunrise IDE
-     * mapper decode lives entirely inside sunrise_ide.c (the cart IRQ
-     * handler just routes the read/write to Sunrise_IDE_ReadByte /
-     * Sunrise_IDE_WriteByte). The bank state is held in the
-     * s_ide.segment byte inside sunrise_ide.c and pre-selected by
-     * Sunrise_IDE_Init() (called above). */
+     * compose the 12-bit bank number, no init needed. */
 
     return 0;
 }
@@ -423,10 +436,10 @@ void Init_Cart (void) {
 
     /* The legacy ASCII16+mailbox NEXTOR mapper used a Cart_EXTI95_IORQ
      * handler on PE8 (/IORQ) to decode ports 0xFC..0xFF and adopt the
-     * cart as the kernel's primary memory mapper. The Sunrise IDE
-     * kernel uses an internal mapper (RAM-backed, not a cart mapper)
-     * so it never touches 0xFC..0xFF; the IDE register / data window
-     * (0x7C00..0x7EFF) is decoded purely by address inside the cart
+     * cart as the kernel's primary memory mapper. The Nextor kernel
+     * booted here uses its own internal mapper (RAM-backed, not a cart
+     * mapper) so it never touches 0xFC..0xFF; bank switching and the
+     * driver mailbox are decoded purely by address inside the cart
      * EXTI0 handler. The IORQ decoder is therefore removed.
      *
      * PE8 is still wired on the cart edge and not used; the EXTI8 path
@@ -474,6 +487,19 @@ void Cart_DriveByteFromPSRAM (uint32_t addr, uint32_t bias) {
      * constant, so the image moves as one block. */
     uint8_t b = *(const volatile uint8_t *)
         (PSRAM_CART_BASE + CART_GAME_BASE + addr + bias);
+    GPIOB->OUTDR = (uint32_t)b << 8;
+    GPIOB->CFGHR = CART_BUS_ON;
+}
+
+/* Drive one byte from a FLASH-resident const array onto GPIOB[15:8] and
+ * turn on the drivers. The flash twin of Cart_DriveByteFromPSRAM: same
+ * ordering contract (read the byte while the bus is STILL TRI-STATED,
+ * then enable the drivers) so a stale OUTDR is never driven during the
+ * load latency. Used by the Nextor mapper, whose ROM is nextor_rom[]
+ * rather than a PSRAM image. */
+static inline __attribute__((always_inline))
+void Cart_DriveByteFromFlash (const uint8_t *rom, uint32_t off) {
+    uint8_t b = (off < nextor_rom_len) ? rom[off] : 0xFFU;
     GPIOB->OUTDR = (uint32_t)b << 8;
     GPIOB->CFGHR = CART_BUS_ON;
 }
@@ -1871,30 +1897,44 @@ void Cart_EXTI0_Terminal_Handler (void) {
     GPIOB->CFGHR = CART_BUS_OFF;
 }
 /* ------------------------------------------------------------------ */
-/* Sunrise IDE mapper handler.                                         */
+/* Nextor mapper handler: ASCII16K + mailbox.                            */
 /*                                                                     */
-/* Cart-window contract (see sunrise_ide.h for the full map):          */
+/* Cart-window contract (see nextor.h for the annotated map):           */
 /*                                                                     */
-/*   0x4000..0x7FFF     : Nextor ROM (nextor_rom[]) - the lower 14      */
-/*                        address bits index into the 16 KiB bank       */
-/*                        selected by the last 0x4104 write.            */
-/*   0x4104 (W)         : control register (bank bit-reversed +        */
-/*                        IDE enable).                                 */
-/*   0x7C00..0x7DFF     : ATA data register (16-bit PIO).              */
-/*   0x7E00..0x7EFF     : ATA task-file register file.                 */
+/*   0x4000..0x7FFF : 16 KiB bank of nextor_rom[], latched by 0x6000   */
+/*   0x6000 (W)     : select bank n for page 1 (value == bank number)   */
+/*   0x8000..0xBFFF : 16 KiB bank of nextor_rom[], latched by 0x7000   */
+/*   0x7000 (W)     : select bank m for page 2                         */
+/*   0x77FF (W)     : alias of 0x7000                                  */
+/*   0x7FF0..0x7FF5 : mailbox -> nextor.c                              */
 /*                                                                     */
-/* The handler defers the register file + sector buffer + LBA math to  */
-/* sunrise_ide.c (Sunrise_IDE_ReadByte / Sunrise_IDE_WriteByte) - both */
-/* are IRQ-safe (no blocking, no printf, no long loops). The handler  */
-/* just routes the bus cycle and drives the data byte on a read.      */
+/* ASCII16K data flow, same as Run16kASCII /                             */
+/* Cart_EXTI0_ASCII16k_Handler, with two differences:                   */
 /*                                                                     */
-/* Kept in flash (not .ramfunc): the IDE register / data accesses are  */
-/* infrequent (the kernel's PIO loop runs 256-512 bytes per LBA, but  */
-/* each iteration is dozens of Z80 cycles) and the cart flash path is  */
-/* zero-wait, so there is no benefit to paying the PSRAM cost.         */
+/*   1. The served bytes come from nextor_rom[] in FLASH, not from a   */
+/*      PSRAM image. bankOffsets[] holds the same "add to the raw cart */
+/*      address" bias the PSRAM mappers use, so                     */
+/*                                                                     */
+/*          off = bias + address                                      */
+/*                                                                     */
+/*      indexes nextor_rom[] directly. bias = (bank << 14) - page      */
+/*      origin, so off = (bank << 14) + (address & 0x3FFF).            */
+/*                                                                     */
+/*   2. The mailbox window is punched out of page 1 BEFORE the index   */
+/*      is computed, so the ROM bytes that happen to live at 0x7FF0    */
+/*      are never visible to the Z80. The mask test covers the whole   */
+/*      0x7FF0..0x7FFF slice (one AND + one compare on the hot path)   */
+/*      while the protocol only uses 0x7FF0..0x7FF5 - decoding the    */
+/*      extra 10 bytes is free and keeps the test to a single branch.   */
+/*                                                                     */
+/* Why not hand-scheduled asm like Cart_EXTI0_ASCII16k_Handler: the     */
+/* mailbox needs a call into nextor.c, and mixing a C call into that    */
+/* asm means spilling t0/t1/ra on a path that is already the rare one.  */
+/* The FLASH and TERMINAL mappers have the same shape (flash + mailbox) */
+/* and are C for the same reason.                                       */
 /* ------------------------------------------------------------------ */
 
-void Cart_EXTI0_Sunride_Handler (void) {
+void Cart_EXTI0_Nextor_Handler (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
 
@@ -1919,20 +1959,47 @@ void Cart_EXTI0_Sunride_Handler (void) {
 
     if ((ctrl & CART_RD_MASK) == 0U) {
         /* READ cycle. */
-        const uint8_t v = Sunrise_IDE_ReadByte (address);
-        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
-                     | ((uint32_t)v << 8);
-        GPIOB->CFGHR = CART_BUS_ON;
+        if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+            /* Mailbox register. nextor.c owns the FIFO and the status
+             * bits; the handler only routes the cycle. */
+            const uint8_t v = Nextor_ReadByte (address);
+            GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                         | ((uint32_t)v << 8);
+            GPIOB->CFGHR = CART_BUS_ON;
+        } else {
+            /* ASCII16K data flow: pick the bias for this page, index
+             * nextor_rom[]. bias is unsigned-wrapped on purpose -
+             * (bank << 14) - 0x4000 for bank 0 is 0xFFFFC000, and
+             * adding address 0x4000 wraps back to exactly 0. */
+            const uint32_t bias = (address < 0x8000U)
+                                ? g_state->bankOffsets[0]
+                                : g_state->bankOffsets[8];
+            Cart_DriveByteFromFlash (nextor_rom, bias + (uint32_t)address);
+        }
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
 
-    /* WRITE cycle. */
+    /* WRITE cycle: WR is low now; data valid on PB8..15. */
     if ((ctrl & CART_WR_MASK) == 0U) {
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
-        Sunrise_IDE_WriteByte (address, w);
+        if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+            /* Mailbox: command byte / argument push. */
+            Nextor_WriteByte (address, w);
+        } else if (address == NEXTOR_BANK_REG_PAGE1) {
+            g_state->bankOffsets[0] = ((uint32_t)w << NEXTOR_BANK_SHIFT)
+                                    - 0x4000U;
+        } else if (address == NEXTOR_BANK_REG_PAGE2 ||
+                   address == NEXTOR_BANK_REG_PAGE2_ALT) {
+            g_state->bankOffsets[8] = ((uint32_t)w << NEXTOR_BANK_SHIFT)
+                                    - 0x8000U;
+        }
+        /* Other writes: ignored. A bank number past the end of the ROM
+         * (w >= 8 for the 128 KiB image) is latched like any other; the
+         * read path's off < nextor_rom_len test then floats those
+         * addresses to 0xFF instead of indexing out of bounds. */
         EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;

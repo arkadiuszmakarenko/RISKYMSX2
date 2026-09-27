@@ -1,7 +1,8 @@
 # Makefile for the RISKYMSX2 Nextor driver + kernel ROM pipeline.
 #
 #   make            build the flashable Nextor ROM (Nextor-3.0.RISKYMSX2.ROM)
-#   make embed      rebuild the ROM AND regenerate firmware/User/nextor_rom.c
+#   make embed      build the ROM, then regenerate firmware/User/nextor_rom.c
+#                   (delegates to the firmware Makefile, the sole writer)
 #   make test       build the ROM and boot-test it in openMSX (C-BIOS; the
 #                   driver's mailbox handshake fails there -> kernel boots
 #                   without the driver = the plan's graceful-degradation test)
@@ -10,12 +11,16 @@
 # Tools: N80 (vendored, needs a .NET runtime; DOTNET_ROLL_FORWARD covers a
 # newer runtime than N80 was built against) and mknexrom (vendored).
 #
+# To build the ROM AND the firmware in one shot, just run `make` in
+# firmware/ - it depends on every *.asm in this directory.
+#
 # Pipeline (docs/NEXTOR_PLAN.md D3):
 #   N80 driver.asm -> driver.bin (exactly 16080 bytes, 0x4100..0x7FCF)
 #   N80 chgbnk.asm -> chgbnk.bin (ASCII16 bank-switch tail, 0x7FD0..0x7FFF)
 #   mknexrom <base.dat> <ROM> /d:driver.bin /m:chgbnk.bin
 #   -> 8 banks x 16 KB = 128 KB ROM (7 kernel banks + driver bank 7)
 #   tools/rom2c.py --nextor -> firmware/User/nextor_rom.c (.cartrom embed)
+#   (run by the firmware Makefile, which owns that output)
 
 NAME      := RISKYMSX2
 ROM       := Nextor-3.0.RISKYMSX2.ROM
@@ -29,23 +34,22 @@ MKNEXROM    := $(VENDOR)/mknexrom
 N80_FLAGS := --no-string-escapes --no-show-banner --verbosity 0 \
              --include-directory $(NEXTOR_SDK)
 
-# Firmware-side embed target (mirrors the RomLoader embed flow: the
-# firmware Makefile depends on this file and re-runs `make -C embed`).
-FW_ROM_C := ../../firmware/User/nextor_rom.c
-ROM2C    := ../../tools/rom2c.py
-
+# NOTE: this Makefile does NOT write firmware/User/nextor_rom.c.
+# The firmware Makefile owns that generated source and regenerates it
+# from $(ROM) as a proper file target, so `make` in firmware/ picks up a
+# driver.asm edit in one pass. Having two Makefiles write the same file
+# made them overwrite each other with different header text, which is
+# what made the embed look non-deterministic.
 export DOTNET_ROLL_FORWARD := Major
 
 .PHONY: all clean embed test
 
 all: $(ROM)
 
-embed: $(ROM) $(FW_ROM_C)
-
-$(FW_ROM_C): $(ROM) $(ROM2C)
-	python3 $(ROM2C) $(ROM) $(FW_ROM_C) \
-	    "Nextor 3.0 beta 1 kernel + RISKYMSX2 USB driver (ASCII16 mapper)" \
-	    --nextor
+# `make embed` now just delegates to the firmware build, which is the
+# only writer of nextor_rom.c.
+embed: $(ROM)
+	$(MAKE) -C ../../firmware User/nextor_rom.c
 
 $(ROM): driver.bin chgbnk.bin
 	@test -f "$(NEXTOR_BASE)" || { \
@@ -67,4 +71,4 @@ test: $(ROM)
 	    -command "after time 15 { screenshot /tmp/opencode/msx/nextor-test.png } ; after time 16 exit"
 
 clean:
-	rm -f driver.bin chgbnk.bin $(ROM) $(FW_ROM_C)
+	rm -f driver.bin chgbnk.bin $(ROM)

@@ -717,30 +717,31 @@ static void handle_list_key (uint8_t key) {
         (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
         return;
     } else if (key == 'N' || key == 'n') {
-        /* Boot the flash-served Nextor Sunrise IDE kernel (Carnivore2
-         * mapper, IDE window 0x7C00..0x7EFF backed by the USBHS host
-         * via sunrise_ide.c). Uses EXACTLY the proven game-launch
-         * dance (soft_reset_into_cart): push the launch byte, the
-         * MSX-side terminal's rom_start runs rst 0 from MSX RAM, and
-         * the BIOS re-probe finds the armed cart - here the Sunrise
-         * kernel's 'AB' at 0x4000 (nextor_rom bank 0 of the
-         * MSXSoftware/Nextor/nextor_sunrise.bin ROM).
+        /* Boot the flash-served Nextor kernel (ASCII16K: 16 KiB banks of
+         * nextor_rom[] at 0x4000..0x7FFF selected by a bank number
+         * written to 0x6000, plus the driver mailbox at
+         * 0x7FF0..0x7FF5 serviced by nextor.c). Uses EXACTLY the
+         * proven game-launch dance (soft_reset_into_cart): push the
+         * launch byte, the MSX-side terminal's rom_start runs rst 0
+         * from MSX RAM, and the BIOS re-probe finds the armed cart -
+         * here the kernel's 'AB' at 0x4000 (nextor_rom bank 0 of the
+         * MSXSoftware/NextorDriver/Nextor-3.0.RISKYMSX2.ROM image).
          * Physical F1 cannot be sniffed through the menu's CHGET
          * forwarding (the BIOS turns F1 into its KEY string), so the
          * menu accepts the letter N; the footer hints it. */
-        printf ("TERM: N -> SUNRIDE\r\n");
+        printf ("TERM: N -> NEXTOR\r\n");
         clear_screen ();
-        out_str (" Booting Nextor (Sunrise IDE)...");
+        out_str (" Booting Nextor...");
         newline ();
         /* Let the MSX print the launch text before the 0x03 byte and
          * the mapper swap (same discipline as Terminal_BootCart).
          * CRITICAL: keep the soft_reset_into_cart sequence exactly
-         * as for game ROMs - the Sunrise kernel's init has the same
+         * as for game ROMs - the Nextor kernel's init has the same
          * "MSX slot probe 0x4000 within ~20 ms of RST 0" timing, so
          * the 30 ms swap window in soft_reset_into_cart is what
          * avoids the boot hang regression. */
         term_wait_drain (600U);
-        soft_reset_into_cart (CART_MAP_SUNRIDE);
+        soft_reset_into_cart (CART_MAP_NEXTOR);
         return;
     }
     /* redraw cursor + arrow on the line we landed on (in-page row) */

@@ -1,5 +1,5 @@
 	.z80
-	title	CHGBNK - Bank Switching Module for the ASCII16 mapper
+	title	CHGBNK - Bank Switching Module for the ASCII8 mapper
 ;
 ;-----------------------------------------------------------------------
 ;
@@ -19,8 +19,6 @@
 ;
 ; Only AF can be modified
 ;
-; *** CODE STRTS HERE ***	CAUTION!!  This must be the first module.
-;
 BNKREG	equ	6000h		;System IC version
 BNKID	equ	40FFh		;Where Bank ID is stored
 
@@ -29,13 +27,22 @@ BNKID	equ	40FFh		;Where Bank ID is stored
 ;bank bit 1 -> register bit 6
 ;bank bit 2 -> register bit 5
 
-	org 7FD0h
+	; The 3 byte header below is consumed by mknexrom (it doesn't end up
+	; in the ROM), so starting 3 bytes early makes the bank switching code
+	; itself assemble exactly at 7FD0h, the address it will run at.
+	org 7FD0h-3
+
+	db	0FFh	;Header for MKNEXROM
+	dw	6000h
 
 CHGBNK:
 
-	ld	(BNKREG),a
+	rlca
+	ld	(6000h),a
+	inc	a
+	ld	(6800h),a
 	ret
 ;
-	defs	(8000h-7FD0h)-($-CHGBNK),0FFh
+	defs	8000h-$,0FFh
 ;
 	end

@@ -173,33 +173,42 @@ INCDIRS        := -IDebug -ICore \
                   -IPeripheral/inc -IStartup
 MSX_SOFTWARE_DIR := $(CURDIR)/../MSXSoftware
 ROM_LOADER_DIR   := $(MSX_SOFTWARE_DIR)/RomLoader
+# Both embedded ROMs are GENERATED SOURCES with real file targets and
+# real prerequisites, so `make` derives them in dependency order. Do not
+# turn these into .PHONY side-effect targets: a phony target that writes
+# a source file has no dependency edge to the .o that consumes it, so
+# under the default -j8 the compile can start before (or during) the
+# regeneration. That race is what made a driver.asm edit need a second
+# `make` to show up - see the nextor_rom.c rule further down.
+#
+# terminal_rom.c reads MSXSoftware/RomLoader/terminal.bin, produced by
+# the terminal.asm build under MSXSoftware/RomLoader/asm/.
 ROM_EMBED_SRCS   := User/terminal_rom.c User/nextor_rom.c
 ROM_EMBED_SRC    := $(ROM_EMBED_SRCS)
-# terminal_rom.c reads
-# MSXSoftware/RomLoader/terminal.bin, which is produced by the
-# terminal.asm build under MSXSoftware/RomLoader/asm/.
-#
-# nextor_rom.c reads MSXSoftware/Nextor/nextor_sunrise.bin (the
-# user-supplied Sunrise IDE Master Only Nextor kernel, e.g. the
-# SunRise_IDE_MO_Nextor-3.0.bin drop from the blueMSX / Sunrise IDE
-# project the Carnivore2 ships). Until that file exists the rule below
-# falls back to the hand-written placeholder in firmware/User/nextor_rom.c
-# - the placeholder keeps the build green but CANNOT boot Nextor
-# (the Sunrise IDE mapper decode finds no 'AB' header in it). Drop the
-# correct ROM file at the path above and rebuild.
-#
-# NOTE: the .bin file is NOT listed in ROM_EMBED_DEPS - missing source
-# files would otherwise abort `make` before our fallback path could
-# run. The regenerate_nextor_rom target checks for file existence and
-# either regenerates or leaves the hand-written stub in place.
 ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/RomLoader/asm/Makefile \
 					$(MSX_SOFTWARE_DIR)/RomLoader/asm/terminal.asm \
 					$(CURDIR)/../tools/rom2c.py
 
-# Nextor kernel path - override with `make NEXTOR_ROM=path/to/your.bin`
-# to use a different kernel build (e.g. a 2.1.4 release instead of the
-# 3.0.x Carnivore2 sunrise drop).
-NEXTOR_ROM_SRC   ?= $(MSX_SOFTWARE_DIR)/Nextor/nextor_sunrise.bin
+# Nextor kernel ROM. Built from the driver sources in
+# MSXSoftware/NextorDriver (N80 -> driver.bin/chgbnk.bin, then
+# mknexrom packs 8 x 16 KiB banks), so editing driver.asm and running
+# `make` here is enough - the ROM is rebuilt first, then re-embedded.
+#
+# Override NEXTOR_ROM to serve a prebuilt image instead. The build rule
+# below is registered ONLY for the default path (see NEXTOR_OWN_ROM):
+# with an override the driver sources must not become prerequisites of
+# someone else's image, or make rebuilds the driver for nothing and then
+# embeds the stale file anyway.
+NEXTOR_DIR     := $(MSX_SOFTWARE_DIR)/NextorDriver
+NEXTOR_ROM     ?= $(NEXTOR_DIR)/Nextor-3.0.RISKYMSX2.ROM
+ROM2C          := $(CURDIR)/../tools/rom2c.py
+NEXTOR_OWN_ROM := $(if $(filter $(NEXTOR_DIR)/Nextor-3.0.RISKYMSX2.ROM,$(NEXTOR_ROM)),yes,no)
+# Every .asm in the driver dir feeds the ROM, so any of them can
+# invalidate it. driver.asm is the driver itself, chgbnk.asm the
+# ASCII16 bank-switch tail; the standalone/ram-driver examples are
+# alternates that are not part of this ROM but must still be able to
+# trigger a rebuild when edited.
+NEXTOR_ASM     := $(wildcard $(NEXTOR_DIR)/*.asm)
 OBJDIR         := obj
 
 # --- Discover sources automatically ------------------------------------------
@@ -278,7 +287,11 @@ endif
 # =============================================================================
 .PHONY: all clean rebuild flash prog size list read erase showsize regenerate_nextor_rom
 
-all: regenerate_nextor_rom $(ELF) $(HEX) $(LST) showsize
+# No phony regenerate prerequisite here on purpose. $(ELF) pulls in
+# obj/User/nextor_rom.o, which pulls in User/nextor_rom.c, which pulls in
+# the ROM and the driver .asm files. Listing the regeneration as a
+# SIBLING of $(ELF) instead made it unordered against the compile.
+all: $(ELF) $(HEX) $(LST) showsize
 	@echo "*** $(PROJECT) build complete ***"
 
 # --- Link --------------------------------------------------------------------
@@ -297,38 +310,55 @@ $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 		--specs=nano.specs --specs=nosys.specs \
 		-o "$@" $(OBJS) $(EXTRA_OBJS) -lm
 
-# Synthetic target that ALWAYS regenerates User/nextor_rom.c from the
-# Nextor kernel image. Marked PHONY so `make` runs the recipe every
-# time without comparing timestamps - the user wants the .bin file to
-# be the source of truth, and the placeholder nextor_rom.c shipped in
-# git should be overwritten on every build.
-#
-# If MSXSoftware/Nextor/nextor_sunrise.bin is missing, the recipe
-# prints a SKIP line and leaves the hand-written placeholder in place
-# so the build still completes (the Sunrise IDE mapper will not boot
-# Nextor with the placeholder, but the rest of the firmware is fine).
+# --- Nextor ROM -> User/nextor_rom.c --------------------------------------
+# Two real file targets, chained by prerequisites. The ROM is rebuilt
+# from the driver .asm files first, then embedded. Because
+# User/nextor_rom.c is an ordinary file target and
+# obj/User/nextor_rom.o depends on it, the build graph guarantees the
+# embed finishes BEFORE the compile starts - in serial and under -jN
+# alike. A single `make` after a driver.asm edit is therefore enough.
+ifeq ($(NEXTOR_OWN_ROM),yes)
+$(NEXTOR_ROM): $(NEXTOR_ASM) $(NEXTOR_DIR)/Makefile
+	@echo "  ROM   $(notdir $@)"
+	@$(MAKE) -C "$(NEXTOR_DIR)"
+else
+# NEXTOR_ROM was overridden: this image is not ours to build, so declare
+# no rule for it at all. `make` then requires the file to already exist
+# and embeds it verbatim. If it is missing the build stops with
+# "No rule to make target '<path>', needed by 'User/nextor_rom.c'"
+# rather than quietly linking a stale kernel.
+endif
+
+# --nextor makes rom2c.py validate the image (AB header at bank 0,
+# NEXTORv3_DRIVER signature + K_SIZE in the last bank) instead of
+# embedding whatever bytes are there. A malformed ROM is a build error
+# here rather than a silent wrong-image boot later.
+User/nextor_rom.c: $(NEXTOR_ROM) $(ROM2C)
+	@echo "  EMBED $(notdir $@)"
+	@python3 "$(ROM2C)" "$(NEXTOR_ROM)" "$@" \
+	    "Nextor 3.0 beta 1 kernel + RISKYMSX2 USB driver (ASCII16 mapper)" \
+	    --nextor
+
+# Kept for compatibility with anyone calling it directly; the real work
+# now happens through the file rules above. Forces a re-embed by
+# invalidating the generated source.
 .PHONY: regenerate_nextor_rom
 regenerate_nextor_rom:
-	@echo "  EMBED nextor_rom.c"
-	@if [ -f "$(NEXTOR_ROM_SRC)" ]; then \
-	    python3 "$(CURDIR)/../tools/rom2c.py" \
-	        "$(NEXTOR_ROM_SRC)" \
-	        "$(CURDIR)/User/nextor_rom.c" \
-	        "Nextor Sunrise IDE kernel (128 KiB)"; \
-	else \
-	    echo "  SKIP nextor_rom.c: $(NEXTOR_ROM_SRC) not found"; \
-	    echo "        Using placeholder - drop the Sunrise IDE Master Only ROM at the path above and rebuild."; \
-	fi
+	@rm -f "$(CURDIR)/User/nextor_rom.c"
+	@$(MAKE) User/nextor_rom.c
 
-$(ROM_EMBED_SRC): $(ROM_EMBED_DEPS)
+# Terminal ROM embed. Named explicitly rather than via
+# `$(ROM_EMBED_SRC):` - a pattern-style rule over both generated sources
+# would also match User/nextor_rom.c and, being defined later, silently
+# override the specific rule above (make only warns). The swallowed
+# recipe's `case` has no nextor branch, so nextor_rom.c would print
+# "EMBED nextor_rom.c" and never actually re-embed.
+User/terminal_rom.c: $(ROM_EMBED_DEPS)
 	@echo "  EMBED $(notdir $@)"
-	@case '$@' in \
-	    User/terminal_rom.c) \
-	        $(MAKE) -C "$(ROM_LOADER_DIR)/asm" && \
-	        python3 "$(CURDIR)/../tools/rom2c.py" \
-	            "$(ROM_LOADER_DIR)/terminal.bin" \
-	            "$@" "MSX terminal ROM" ;; \
-	esac
+	@$(MAKE) -C "$(ROM_LOADER_DIR)/asm" && \
+	python3 "$(ROM2C)" \
+	    "$(ROM_LOADER_DIR)/terminal.bin" \
+	    "$@" "MSX terminal ROM"
 
 $(HEX): $(ELF)
 	@echo "  HEX   $@"

@@ -139,20 +139,20 @@ typedef enum {
                                   * workflow - swap away via the menu to
                                   * the FLASH mapper if the user prefers
                                   * the existing mailbox-driven loader. */
-    CART_MAP_SUNRIDE    = 13,  /* Sunrise IDE emulation: serves the
-                                  * embedded Nextor Sunrise IDE ROM
-                                  * (nextor_rom[]) at 0x4000..0x7FFF
-                                  * through the Carnivore2-style 0x4104
-                                  * bank-switch + IDE enable control
-                                  * register, with the 0x7C00..0x7EFF
-                                  * window punched out as the ATA task
-                                  * file + 16-bit data register. The IDE
-                                  * state machine + USB backing store
-                                  * live in sunrise_ide.c. Flash-served:
-                                  * no PSRAM image. Reached via the
-                                  * terminal menu's N key (handle_list
-                                  * _key -> soft_reset_into_cart
-                                  * (CART_MAP_SUNRIDE)). */
+    CART_MAP_NEXTOR     = 13,  /* Nextor kernel mapper: ASCII16K over the
+ * embedded Nextor 3.0 kernel ROM (nextor_rom[],
+ * flash-resident). The 16 KiB bank visible at 0x4000..0x7FFF
+ * is selected by writing the bank number to 0x6000;
+ * 0x7000/0x77FF do the same for the page-2 window at
+ * 0x8000..0xBFFF. The mailbox window at 0x7FF0..0x7FF5 is
+ * punched out of page 1 in every bank - it is the only path
+ * the kernel's driver (MSXSoftware/NextorDriver/driver.asm)
+ * has to the disk. Bank decode + ROM read path live in
+ * Cart_EXTI0_Nextor_Handler; the mailbox command dispatch
+ * and result FIFO live in nextor.c. Flash served: no PSRAM
+ * image. Reached via the terminal menu's N key
+ * (handle_list_key -> soft_reset_into_cart
+ * (CART_MAP_NEXTOR)). */
     CART_MAP_MAX        = 14,
 } Cart_Mapper;
 

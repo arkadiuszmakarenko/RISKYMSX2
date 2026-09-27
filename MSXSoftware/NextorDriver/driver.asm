@@ -374,8 +374,8 @@ DRIVER_QUERY:
 ; Out: A = RESULT_OK, version in B.C.D = 1.0.0
 
 DO_DRVQ_GET_VERSION:
-	ld	bc,0100h
-	ld	d,0
+	ld	bc,0000h
+	ld	d,1
 	xor	a
 	ret
 
@@ -880,7 +880,7 @@ RW1_NRDY2:
 
 	.stresc on
 
-MSG_DRIVER_NAME:	db	"RISKYMSX2 USB",0
+MSG_DRIVER_NAME:	db	"RISKY MSX 2",0
 MSG_DEVICE_NAME:	db	"USB storage",0
 
 INIT_MSG:		db	"\r\nRISKYMSX2 USB driver\r\n"

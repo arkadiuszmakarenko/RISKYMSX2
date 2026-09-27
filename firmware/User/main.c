@@ -15,7 +15,7 @@
 #include "psram.h"
 #include "scc.h"
 #include "loader.h"
-#include "sunrise_ide.h"
+#include "nextor.h"
 #include "terminal.h"
 #include "usb_disk.h"
 #include "usb_tests.h"
@@ -73,12 +73,12 @@ int main (void) {
     /* USBHS host init. Powers up the controller so it's ready. */
     USB_Initialization ();
 
-    /* Initialise the Sunrise IDE state machine so a swap to
-     * CART_MAP_SUNRIDE from the terminal menu (N key) starts with
-     * a clean ATA register file + PATA device signature. The actual
-     * USB enumeration is driven by Sunrise_IDE_Service() from the
-     * main loop; this only zeroes the in-RAM state struct. */
-    Sunrise_IDE_Init ();
+    /* Initialise the Nextor mapper state so a swap to CART_MAP_NEXTOR
+     * from the terminal menu (N key) starts with a clean bank select +
+     * ATA register file + PATA device signature. The actual USB
+     * enumeration is driven by Nextor_Service() from the main loop;
+     * this only primes the in-RAM state struct. */
+    Nextor_Init ();
 
     printf ("\r\n=== boot complete (terminal mapper active) ===\r\n");
 
@@ -91,63 +91,28 @@ int main (void) {
      * Terminal_Service when the TERMINAL mapper is not installed:
      * it only touches its own volatile fields, which the next cart
      * swap to TERMINAL simply discards. */
-    /* The Sunrise IDE engine is always live in the background: it drives
+    /* The Nextor engine is always live in the background: it drives
      * the USB enumeration, INQUIRY, READ CAPACITY and IDENTIFY state
      * machine once after boot, then idles until the kernel needs a
-     * READ/WRITE. Calling Sunrise_IDE_Service() unconditionally is
-     * cheap and harmless outside the SUNRIDE mapper - the lifecycle
+     * READ/WRITE. Calling Nextor_Service() unconditionally is
+     * cheap and harmless outside the NEXTOR mapper - the lifecycle
      * state machine parks itself in USB_READY, the in-flight
      * READ/WRITE check returns immediately (state == IDLE), and the
-     * only real work it does while SUNRIDE is not installed is a
+     * only real work it does while NEXTOR is not installed is a
      * single USBH_PreDeal() call. Once the user swaps to
-     * CART_MAP_SUNRIDE the kernel has already-enumerated stick data
+     * CART_MAP_NEXTOR the kernel has already-enumerated stick data
      * waiting. */
     for (;;) {
-        Sunrise_IDE_Service ();
+        Nextor_Service ();
         Loader_Service ();
         Terminal_Service ();
 
-        /* ATA status line. Print only when counters change so the
-         * log isn't flooded. The counters are incremented in IRQ
-         * context (cart bus handler) and read here in main-loop
-         * context. */
-        static uint32_t last_cmds = 0, last_tf = 0, last_st = 0;
-        static uint32_t last_dr = 0;
-        static uint8_t  last_last_cmd = 0xFF;
-        const Sunrise_IDE *s = Sunrise_IDE_GetState ();
-        if (s->stat_atacmds      != last_cmds  ||
-            s->stat_tf_writes    != last_tf    ||
-            s->stat_status_reads != last_st    ||
-            s->stat_drains       != last_dr    ||
-            s->stat_last_cmd     != last_last_cmd) {
-            last_cmds  = s->stat_atacmds;
-            last_tf    = s->stat_tf_writes;
-            last_st    = s->stat_status_reads;
-            last_dr    = s->stat_drains;
-            last_last_cmd = s->stat_last_cmd;
-            printf ("ATA: cmds=%lu tf=%lu st=%lu dr=%lu last=0x%02X "
-                    "usb=%u st_reg=0x%02X cyl=0x%02X%02X bi=%u "
-                    "buf[99]=0x%02X idb=0x%02X\r\n",
-                    (unsigned long)s->stat_atacmds,
-                    (unsigned long)s->stat_tf_writes,
-                    (unsigned long)s->stat_status_reads,
-                    (unsigned long)s->stat_drains,
-                    (unsigned)s->stat_last_cmd,
-                    (unsigned)s->usb_state,
-                    (unsigned)s->reg_status,
-                    (unsigned)s->reg_cylinder_high,
-                    (unsigned)s->reg_cylinder_low,
-                    (unsigned)s->buffer_index,
-                    (unsigned)s->sector_buffer[99],
-                    (unsigned)s->identify_buf[99]);
-        }
-
-        /* No WFI — when the Sunrise IDE driver is polling STATUS in
-         * a tight loop, each cart read generates an EXTI0 interrupt.
-         * WFI wakes on the interrupt but the ISR overhead + WFI
-         * re-entry latency can be too slow for the driver's BSY
-         * timeout. Spin instead so Sunrise_IDE_Service runs
-         * immediately after the ISR returns. */
+        /* No WFI — while the Nextor kernel's driver is polling a
+         * register in a tight loop, each cart read generates an EXTI0
+         * interrupt. WFI wakes on the interrupt but the ISR overhead +
+         * WFI re-entry latency can be too slow for the driver's
+         * timeout. Spin instead so Nextor_Service runs immediately
+         * after the ISR returns. */
         __asm__ volatile ("nop");
     }
 }
