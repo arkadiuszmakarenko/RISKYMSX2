@@ -120,42 +120,6 @@ MB_MAGIC1	equ	"N"
 MB_MAGIC2	equ	"X"
 MB_MAGIC3	equ	"2"
 
-;--- VDP frame tick (used by WAIT_FRAMES to time a wait in real seconds)
-;
-; Reading VDP register 0 (status register S#0) from port 098h and testing
-; bit 7 is the standard MSX "one frame elapsed" test. Two properties make
-; it the right clock for a driver query:
-;
-;  - it is pure hardware, so it keeps ticking with Z80 interrupts
-;    disabled. A driver query is not a safe place to wait on an
-;    interrupt: the kernel has not hooked TIMER_INT yet at query 4 (it
-;    only acts on the query 3 flag later, in the driver registration
-;    path), so a timer-based wait there would hang the boot.
-;  - reading S#0 CLEARS the flag, so polling for it to go set again
-;    yields exactly one tick per frame with no edge-detection state.
-;
-; The MSX BIOS runs its 50/60 Hz timer from this same vertical retrace
-; interrupt, so the VDP asserts the flag on every machine the kernel
-; boots on.
-
-VDP_DATA	equ	098h	;VDP data port (read register S#0)
-VDP_ADDR	equ	099h	;VDP address port (register select)
-VDP_ST0_VRETRACE	equ	80h	;S#0 bit 7: vertical retrace flag
-
-; Frames to wait in DO_DRVQ_INIT. 300 frames is 5.0 s on the 60 Hz
-; (NTSC) machines that most MSX hardware is, and 6.0 s on 50 Hz (PAL).
-; The VDP exposes no frame-rate register, so this cannot be made exact
-; for both standards from the driver; drop it to 250 for a true 5 s on
-; PAL. WAIT_FRAMES keeps only DE, so this is a single constant.
-WAIT_INIT_FRAMES	equ	300
-
-; Safety bound on the per-frame poll, in poll iterations. One poll is
-; ~75 T-states, so a 60 Hz frame takes ~795 of them; 4000 is about five
-; frames' worth. If the flag never comes - a VDP that never asserts the
-; vertical retrace flag - the wait is cut short rather than hanging the
-; boot forever.
-WAIT_POLL_BUDGET	equ	4000
-
 ;-----------------------------------------------------------------------------
 ; ROM driver boilerplate
 ;-----------------------------------------------------------------------------
@@ -657,10 +621,6 @@ DO_DRVQ_INIT:
 	call	MB_HANDSHAKE_CHK	;re-verify (queries 3 and 4 run back to back)
 	jr	c,DO_DRVQ_INIT_FAIL
 	pop	de
-	ld	hl,MSG_FW_OK
-	call	PRINT_WITH_DE
-	ld	de,WAIT_INIT_FRAMES	;5 s at 60 Hz; see the constant
-	call	WAIT_FRAMES
 	xor	a		;RESULT_OK
 	ret
 
@@ -1234,61 +1194,14 @@ INIT_MSG:		db	"\r\nRISKY MSX 2 driver\r\n"
 			db	"RISKY MSX 2 read-only 720K floppy image\r\n"
 			db	"Hello world from driver\r\n",0
 
-;--- Init-phase verdicts. MSG_FW_OK is printed only after the mailbox
-;    handshake has actually returned success, so seeing it is real
-;    evidence rather than an optimistic banner.
+;--- Init-phase verdicts. The handshake already prints enough on
+;    success; the FAIL prints below cover what can still go wrong.
 
-MSG_FW_OK:	db	"mailbox OK, holding boot 5s...",0
 MSG_NO_ANSWER:	db	"RISKY MSX 2: no DONE (status never reached Z80)",0
 MSG_BAD_MAGIC:	db	"RISKY MSX 2: bad magic at byte ",0
 MSG_GOT:	db	" got ",0
 MSG_WANT:	db	" want ",0
 MSG_CRLF:	db	13,10,0
-
-;-----------------------------------------------------------------------------
-; Timing
-;-----------------------------------------------------------------------------
-
-;--- WAIT_FRAMES: block until DE vertical blank frames have elapsed.
-;
-;    Input:  DE = number of frames to wait
-;    Trashes: AF, BC, DE, HL
-;
-; Register-only on purpose: this driver is in ROM and requested no
-; page-3 work area (query 3 returns HL=0), so it has nowhere to keep a
-; counter between calls. DE holds the count for the whole wait and HL
-; holds the per-frame poll budget, which is all the state this needs.
-;
-; The budget is in HL and not BC because the VDP port loads need C.
-;
-; The wait is bounded on purpose. A plain "spin until the flag" loop
-; would hang the machine forever on a VDP that never asserts the
-; vertical retrace flag, and a driver that hangs the boot is far worse
-; than one that waits too briefly: WAIT_POLL_BUDGET caps each frame's
-; poll, so a dead frame source costs milliseconds, not the session.
-
-WAIT_FRAMES:
-WAIT_FRAMES_NEXT:
-	ld	hl,WAIT_POLL_BUDGET	;budget, re-armed every frame
-WAIT_FRAMES_POLL:
-	ld	a,0			;select VDP register 0
-	ld	c,VDP_ADDR
-	out	(c),a
-	ld	c,VDP_DATA
-	in	a,(c)			;S#0: the read also clears bit 7
-	and	VDP_ST0_VRETRACE	;set once per frame, at vertical retrace
-	jr	nz,WAIT_FRAMES_TICK
-	dec	hl
-	ld	a,h
-	or	l
-	jr	nz,WAIT_FRAMES_POLL
-	ret				;budget exhausted: frame source is dead
-WAIT_FRAMES_TICK:
-	dec	de
-	ld	a,d
-	or	e
-	jr	nz,WAIT_FRAMES_NEXT
-	ret
 
 ;-----------------------------------------------------------------------------
 ; SDK helpers
