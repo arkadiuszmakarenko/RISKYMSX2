@@ -150,6 +150,13 @@ void Nextor_Init (void);
  * only place blocking disk work is allowed. */
 void Nextor_Service (void);
 
+/* Called by the USB layer when the stick is removed/re-plugged (or the
+ * volume is unmounted for any other reason). Drops the image file
+ * handle and resets the PSRAM cache fill cursor, so the next main-loop
+ * idle pass re-probes and restarts the streaming fill from the (new)
+ * stick's file. Main-loop or service context only - NOT IRQ safe. */
+void Nextor_CacheInvalidate (void);
+
 /* --- Code entries for Cart_EXTI0_Nextor_Handler (IRQ context) ------- */
 
 /* Read entry. The handler calls this ONLY for addresses inside the

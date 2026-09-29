@@ -34,6 +34,7 @@
 #include "usb_disk.h"
 #include "cart.h"
 #include "psram.h"
+#include "nextor.h"
 #include "ch32v4x7.h"
 #include "ch32v4x7_psram.h"
 #include <string.h>
@@ -852,6 +853,15 @@ uint8_t USB_TryEnsureMounted (void) {
                 s_fatfs_mounted = 0U;
                 printf ("USB: stick removed, volume unmounted\r\n");
             }
+            /* The image file's FIL handle and the PSRAM sector cache
+             * both belong to a volume that no longer exists: drop the
+             * handle (any later f_lseek/f_read would fail with
+             * FR_INVALID_OBJECT) and reset the fill cursor so the next
+             * idle pass re-probes and restarts the fill from the
+             * (re-)plugged stick. Guarded by whether the Nextor engine
+             * has ever been primed, so callers before main()'s
+             * Nextor_Init are harmless no-ops. */
+            Nextor_CacheInvalidate ();
             return DEF_ERR_DETECT;
         }
         if (r == DEF_SUCCESS || r == DEF_DEFAULT) break;

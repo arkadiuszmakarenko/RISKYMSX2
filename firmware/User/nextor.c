@@ -266,13 +266,74 @@ static const char *const s_img_names[] = {
 #define NEXTOR_IMG_SECTORS    1440U
 #define NEXTOR_IMG_BYTES      (NEXTOR_IMG_SECTORS * NEXTOR_SECTOR_SIZE)
 
+/* Boot sector + root directory LBA range that is ALWAYS served from
+ * the boot cache, even while the streaming fill is still running:
+ * the kernel's BPB parsing and every directory entry lookup land in
+ * this window, and both are what make the drive "come up" at all.
+ * LBAs outside it are only answerable once the fill has passed them
+ * (img_read_sector's fill_lba check). 7 = the first root-directory
+ * sector for this BPB (1 boot + 2x3 FAT). */
+#define NEXTOR_IMG_BOOT_SECTORS   14U    /* 0..13: boot + 2 FATs + 7 root */
+#define NEXTOR_IMG_ROOT_LBA       7U
+#define NEXTOR_IMG_ROOT_SECTORS   7U
+
+/* --- The PSRAM sector cache -------------------------------------------
+ *
+ * The whole image is mirrored into PSRAM at NEXTOR_CACHE_BASE
+ * (offset 4 MiB, past the cart-image window) and every READ is then
+ * served from PSRAM only. This is the reliability fix in one move:
+ *
+ *   1. The mailbox is answered from the MAIN LOOP. While a request is
+ *      in flight the Z80 sits in MB_POLL - a bounded ~0.8 s - and each
+ *      poll is a cart cycle (EXTI0 IRQ). The old backend answered a
+ *      READ with a USB SCSI round trip INSIDE the service pass: CBW,
+ *      512 bytes of bulk IN, CSW, request-sense on failure, plus FatFs
+ *      f_lseek/f_read bookkeeping. On a slow stick that can exceed the
+ *      MB_POLL budget -> the driver reads a sector's worth of 0xFF
+ *      (the empty-FIFO pattern) or times out (.DISK), the kernel's
+ *      retry stacks up behind a half-drained FIFO, and the machine
+ *      wedges. With the cache, answering a READ is one PSRAM memcpy:
+ *      microseconds, orders of magnitude under the budget.
+ *   2. A stick that stalls mid-file (bad blocks, its own FTL, a USB
+ *      hiccup) used to freeze the whole MSX mid-DOS-operation. Now it
+ *      only slows the FILL: the command path never touches the USB
+ *      stick at all.
+ *   3. The stick can be pulled mid-session with the drive staying
+ *      usable, because the disk the kernel sees is PSRAM, not the
+ *      file.
+ *
+ * The fill is a main-loop activity (img_poll -> img_fill_step): it
+ * streams NEXTOR_FILL_CHUNK sectors per pass from the file into the
+ * cache, never inside a command. STATUS/CAPACITY/etc. are all fast
+ * so the fill makes visible progress between requests; the only slow
+ * answer is a READ that runs ahead of the fill, and those are rare
+ * (boot: the first ~14 sectors; DOS: directory/BPB lookups that all
+ * fall inside the always-cached window).
+ *
+ * Cache-invalidation hook: usb_disk.c drops the volume on any stick
+ * removal (USB_TryEnsureMounted -> DEF_ERR_DETECT) and calls
+ * Nextor_CacheInvalidate(). The next img_poll() restarts the fill
+ * from the new stick's file. The served CONTENT does not change (the
+ * fill always restarts from the file's sector 0), so the media-change
+ * latch stays silent for a refresh - the image is "one fixed disk",
+ * and a mid-fill swap only costs a moment of re-reading.
+ */
+#define NEXTOR_CACHE_BASE     0x80400000UL   /* past the 4 MiB cart window */
+
+/* Streaming fill chunk: sectors per img_poll pass. 16 x 512 B = 8 KB
+ * per pass; the whole image is 90 passes at ~1-2 ms each (PSRAM
+ * write + USB read), so a cold fill completes in well under a second
+ * of idle main-loop time. */
+#define NEXTOR_FILL_CHUNK     16U
+
+/* Fill buffer: internal SRAM, 4-byte aligned for the PSRAM DMA. One
+ * chunk of sectors, nothing more - internal SRAM is only ~135 KB and
+ * every byte of it is contested. */
+static __attribute__ ((aligned (4))) uint8_t s_fill_buf[NEXTOR_FILL_CHUNK * NEXTOR_SECTOR_SIZE];
+
 /* Image state. Only the service/main-loop side ever touches this.
  *
- *   open     the FIL is open and usable. Kept open across commands on
- *            purpose: a sector read is then one f_lseek + one f_read,
- *            with no path parsing and no root-directory walk. A failed
- *            call closes the handle and lets the next probe reopen it,
- *            which is also how a re-plugged stick recovers.
+ *   open     the FIL is open and usable.
  *   sectors  how many 512-byte sectors the file holds, capped at
  *            NEXTOR_IMG_SECTORS. 0 means "no image", which the driver
  *            is told as a zero capacity / no media.
@@ -280,16 +341,28 @@ static const char *const s_img_names[] = {
  *            only fires on an actual transition.
  *   changed  the media-change latch: set on a transition, consumed by
  *            STATUS, left alone by STAPEEK (device query 4 must not
- *            disturb query 3's tracking). */
+ *            disturb query 3's tracking).
+ *   probed   1 once a probe has run, so "no image" is not reported as
+ *            a change on every STATUS.
+ *   fill_lba 0..NEXTOR_IMG_SECTORS: next LBA the streaming fill will
+ *            copy into PSRAM. == NEXTOR_IMG_SECTORS means the cache
+ *            is complete. PSRAM content BELOW fill_lba is valid.
+ *   failed   count of consecutive failed fill reads. The fill backs
+ *            off (does not retry inside the same pass) after a few,
+ *            so a stick that has gone bad costs one short USB error
+ *            cycle per img_poll pass instead of pegging the bus.
+ */
 static struct {
     FIL     fp;
     uint32_t sectors;
     uint32_t next_probe;  /* ms timestamp of the next allowed probe   */
+    uint32_t fill_lba;    /* next sector to stream into PSRAM          */
     uint8_t  open;
     uint8_t  present;
     uint8_t  changed;
     uint8_t  probed;      /* 1 once a probe has run, so "no image" is
                            * not reported as a change on every STATUS  */
+    uint8_t  failed;      /* consecutive fill-read failures            */
     uint8_t  last_fr;     /* FRESULT of the last f_open, for the log   */
 } s_img;
 
@@ -380,6 +453,11 @@ static uint32_t ms_now (void) {
     return (uint32_t)(((uint64_t)rdcycle() * 1000ULL) / (uint64_t)s_cyc_per_ms);
 }
 
+/* ms_now() reading taken in Nextor_Init, used by img_probe's boot
+ * delay. 0 until then (so a host-side unit test that never calls
+ * Nextor_Init is not delayed). */
+static uint32_t s_boot_start_ms;
+
 /* ========================================================================
  * 1c. Image access
  *
@@ -388,18 +466,22 @@ static uint32_t ms_now (void) {
  * and (b) what to tell the driver when there is no image.
  * ====================================================================== */
 
-/* Drop the image and forget that we ever had one. */
+/* Drop the image and forget that we ever had one. Also resets the
+ * fill cursor so a fresh open starts streaming from the file's sector
+ * 0 again. */
 static void img_reset (void) {
     if (s_img.open != 0U) {
         (void)f_close(&s_img.fp);
     }
-    s_img.open      = 0U;
-    s_img.sectors   = 0U;
-    s_img.present   = 0U;
-    s_img.changed   = 0U;
-    s_img.probed    = 0U;
-    s_img.last_fr   = 0U;
+    s_img.open       = 0U;
+    s_img.sectors    = 0U;
+    s_img.present    = 0U;
+    s_img.changed    = 0U;
+    s_img.probed     = 0U;
+    s_img.last_fr    = 0U;
     s_img.next_probe = 0U;
+    s_img.fill_lba   = 0U;
+    s_img.failed     = 0U;
 }
 
 /* Note a presence transition and arm the media-change latch. The latch
@@ -417,31 +499,64 @@ static void img_set_present (uint8_t now) {
     s_img.probed  = 1U;
 }
 
-/* Open the image, once. Safe to call from the main loop and from the
- * service path; it is the only place that touches USB_TryEnsureMounted
- * and f_open.
+/* Prime the boot window (LBAs 0..13) into the PSRAM cache before the
+ * first command can be answered. Defined after img_boot_prime; see the
+ * comment there. */
+static void img_boot_prime (void);
+
+/* Open the image, once, and restart the streaming fill. Safe to call
+ * from the main loop and from the service path; it is the only place
+ * that touches USB_TryEnsureMounted and f_open.
  *
- * Bounded on purpose. A probe that has to enumerate the stick runs
- * hundreds of milliseconds of retries, and the driver's MB_POLL gives up
- * after ~0.8 s - so if a probe ran inside a command the Z80 would time
- * out and take a read error, which is a worse answer than "no image,
- * ask again". The service path therefore treats an unprobed image as
- * absent, and the main loop does the real probing through img_poll. */
+ * THE PROBE GUARD is the reliability fix for the freeze the old backend
+ * shipped with. A probe that has to enumerate the stick runs hundreds
+ * of milliseconds of retries (5 x USBH_PreDeal, each with an internal
+ * bus-reset + descriptor dance, plus f_mount's own 3 tries with 200 ms
+ * delays) - far past the driver's ~0.8 s MB_POLL budget. A probe that
+ * starts from inside CAPACITY/READ (img_ensure -> img_probe) therefore
+ * blows the Z80's command timeout on top of a request the kernel is
+ * actively waiting on: CAPACITY returns .DISK, the drive goes away,
+ * DOS wedges. The rule enforced everywhere below:
+ *
+ *   - img_probe may only run from the main loop, and only while NO
+ *     request is in flight (Nextor_Service's img_poll path).
+ *   - img_ensure NEVER probes. It reports what the firmware knows
+ *     right now. A command that arrives while the image is absent
+ *     gets the honest fast answer (no media) and the kernel retries,
+ *     exactly as its own status machinery expects.
+ *   - the first probe is also delayed until the kernel's boot-time
+ *     command burst has settled (NEXTOR_PROBE_DELAY from boot), so
+ *     the initial CAPACITY/STATUS volley never races the enumeration.
+ */
+#define NEXTOR_PROBE_DELAY_MS  1500U
+
 static void img_probe (void) {
     FRESULT    fr;
     FSIZE_t    sz;
     uint32_t   sectors;
-    const char *name;
+    const char *name = "?";
     const uint32_t now = ms_now();
 
     if (s_img.open != 0U) {
         return;                         /* already have it */
     }
+    /* Boot-delay: the kernel's initial CAPACITY/STATUS volley arrives
+     * within the first seconds after the mapper swap. Running the first
+     * probe (enumeration, f_mount, f_open - hundreds of ms of USB
+     * activity) while that volley is being answered is what used to
+     * wedge CAPACITY. The probe waits out a quiet window instead. The
+     * delay anchor is the boot timestamp taken in Nextor_Init; probes
+     * triggered later (rate-limited retries) pass this check trivially
+     * because ms_now() has long since moved past it. */
+    if (s_boot_start_ms != 0U
+        && (uint32_t)(now - s_boot_start_ms) < NEXTOR_PROBE_DELAY_MS) {
+        return;
+    }
     if (s_img.probed != 0U) {
         /* Rate limit. Without this the main loop's "is it armed?" check
          * turns into a continuous enumeration retry, which keeps the
          * stick's SCSI bus busy for no reason. */
-        if ((now - s_img.next_probe) < 2000U) {
+        if ((uint32_t)(now - s_img.next_probe) < 2000U) {
             return;
         }
     }
@@ -487,87 +602,202 @@ static void img_probe (void) {
 
     s_img.sectors = sectors;
     s_img.open    = 1U;
+    s_img.fill_lba = 0U;
+    s_img.failed   = 0U;
     img_set_present((uint8_t)((sectors != 0U) ? 1U : 0U));
     printf ("[nx] image '%s' open: %u bytes, %u sectors of %u%s\r\n",
             name, (unsigned)sz, (unsigned)sectors,
             (unsigned)NEXTOR_SECTOR_SIZE,
             (sectors != NEXTOR_IMG_SECTORS) ? " (not a full 720K image)" : "");
+
+    /* Prime the boot window synchronously: the very first command the
+     * kernel sends after this (CAPACITY / the first READ of the boot
+     * sector) is answerable immediately. */
+    if (sectors != 0U) {
+        img_boot_prime ();
+    }
 }
 
-/* Make sure an image is available, probing if needed. Returns 1 when the
- * device has a medium, 0 when it does not. This is the only entry the
- * command handlers use, so "no image" is one honest answer rather than
- * a per-command special case. */
-static uint8_t img_ensure (void) {
-    if (s_img.open != 0U) {
-        return (uint8_t)((s_img.sectors != 0U) ? 1U : 0U);
+/* Main-loop fill pump: stream NEXTOR_FILL_CHUNK more sectors from the
+ * image file into the PSRAM cache. Called only from Nextor_Service's
+ * idle path (no request in flight). Advances s_img.fill_lba, which is
+ * simultaneously the "PSRAM below here is valid" marker the READ path
+ * tests. */
+static void img_poll (void) {
+    uint32_t n;
+
+    if (s_img.open == 0U || s_img.fill_lba >= s_img.sectors) {
+        return;                         /* nothing open / fill complete */
     }
-    img_probe();
+    if (s_img.failed >= 3U) {
+        return;                         /* back off until the next pass */
+    }
+
+    n = s_img.sectors - s_img.fill_lba;
+    if (n > NEXTOR_FILL_CHUNK) {
+        n = NEXTOR_FILL_CHUNK;
+    }
+
+    {
+        UINT     br = 0U;
+        FRESULT  fr;
+
+        fr = f_lseek(&s_img.fp,
+                     (FSIZE_t)s_img.fill_lba * (FSIZE_t)NEXTOR_SECTOR_SIZE);
+        if (fr == FR_OK) {
+            fr = f_read(&s_img.fp, s_fill_buf,
+                        (UINT)(n * NEXTOR_SECTOR_SIZE), &br);
+        }
+        if ((fr != FR_OK) || (br == 0U)) {
+            /* USB hiccup or stick pulled mid-fill. Drop the handle so
+             * the next probe re-mounts (same recovery as the old path),
+             * reset the fill to sector 0, and back this pass off. The
+             * CONTENT of the cache never changes on a refresh, so no
+             * media-change latch is needed for a restart. */
+            (void)f_close(&s_img.fp);
+            s_img.open     = 0U;
+            s_img.sectors  = 0U;
+            s_img.fill_lba = 0U;
+            s_img.failed++;
+            img_set_present(0U);
+            printf("[nx] fill stalled at LBA %u (fr=%u) - re-probing\r\n",
+                   (unsigned)s_img.fill_lba, (unsigned)fr);
+            return;
+        }
+
+        /* br bytes landed in s_fill_buf; push them to PSRAM. The copy
+         * length is always a multiple of 4 (sectors x 512). A short
+         * read is impossible for a partial sector on FAT (f_read only
+         * returns short at EOF, and br==0 was handled above), but the
+         * length passed to the DMA must be 4-aligned regardless. */
+        {
+            const uint32_t got = (uint32_t)br;
+            const uint32_t n4  = got & ~3U;
+            volatile uint32_t *dst = (volatile uint32_t *)
+                (NEXTOR_CACHE_BASE
+                 + (uint32_t)s_img.fill_lba * NEXTOR_SECTOR_SIZE);
+            const uint32_t *src = (const uint32_t *)(void *)s_fill_buf;
+            uint32_t w = n4 / 4U;
+            while (w-- != 0U) {
+                *dst++ = *src++;
+            }
+            s_img.fill_lba += got / NEXTOR_SECTOR_SIZE;
+        }
+    }
+    s_img.failed = 0U;
+}
+
+/* Invalidate the PSRAM cache: the stick was removed/re-plugged (or the
+ * volume was unmounted by anyone else), so nothing cached is trustworthy
+ * about the MEDIUM any more. Called from usb_disk.c's disconnect path.
+ *
+ * The served CONTENT does not change on a refresh - the fill always
+ * restarts from the file's sector 0 - so this does NOT arm the
+ * media-change latch: the kernel should not be told its fixed disk
+ * changed just because the stick behind it was re-inserted. The next
+ * img_poll() re-probes and restarts the fill from the new file. */
+void Nextor_CacheInvalidate (void) {
+    if (s_img.open != 0U) {
+        (void)f_close(&s_img.fp);
+        printf("[nx] cache invalid: stick removed\r\n");
+    }
+    s_img.open     = 0U;
+    s_img.sectors  = 0U;
+    s_img.fill_lba = 0U;
+    s_img.failed   = 0U;
+    img_set_present(0U);
+}
+
+/* Report image availability WITHOUT probing. The command handlers use
+ * this; a command that arrives while the image is absent gets the fast,
+ * honest "no media" answer instead of a multi-hundred-ms enumeration
+ * that would blow the driver's MB_POLL budget (see img_probe's guard
+ * note). The main loop's img_poll() is what turns "absent" into
+ * "present" over time. */
+static uint8_t img_ensure (void) {
     return (uint8_t)((s_img.open != 0U && s_img.sectors != 0U) ? 1U : 0U);
 }
 
 /* Read one sector into dst. Returns 1 on success.
  *
- * A failed read closes the handle: the stick was probably pulled, and a
- * handle into a volume that no longer exists fails every subsequent call
- * with FR_INVALID_OBJECT. Closing makes the next img_ensure() probe
- * again, which re-enumerates and picks the image back up. */
+ * SERVED FROM THE PSRAM CACHE ONLY. This runs inside Nextor_Service
+ * with the Z80 spinning in MB_POLL - the whole answer has to be far
+ * under the ~0.8 s command budget, and a PSRAM word-copy is
+ * microseconds. No USB, no FatFs, no printf on this path.
+ *
+ * Two availability rules:
+ *   - LBAs inside the boot window (0..13: boot sector, FATs, root
+ *     directory) are always answerable while an image is open: they
+ *     were copied into PSRAM by the fill's first chunk, before any
+ *     command could have been answered with media present.
+ *   - LBAs at or beyond the fill cursor (fill_lba) are fetched on
+ *     demand from the file (img_fetch_on_demand below), which also
+ *     lands them in the cache.
+ */
+static uint8_t img_fetch_on_demand (uint32_t lba);
+
 static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
-    FRESULT fr;
-    UINT    br = 0U;
-
-    printf("[nx] img_read_sector LBA=%u\r\n", (unsigned)lba);
-
     if (img_ensure() == 0U) {
-        printf("[nx] img_read_sector: no image\r\n");
         return 0U;
     }
     if (lba >= s_img.sectors) {
-        printf("[nx] img_read_sector: LBA %u >= %u sectors\r\n",
-               (unsigned)lba, (unsigned)s_img.sectors);
         return 0U;                       /* past the end of the image */
     }
-
-    fr = f_lseek(&s_img.fp, (FSIZE_t)lba * (FSIZE_t)NEXTOR_SECTOR_SIZE);
-    if (fr == FR_OK) {
-        fr = f_read(&s_img.fp, dst, NEXTOR_SECTOR_SIZE, &br);
+    if (lba >= s_img.fill_lba) {
+        /* Not streamed yet: fetch it from the file on demand. The
+         * background fill streams sequentially from LBA 0, and the
+         * kernel's boot file accesses (NEXTOR.SYS data at LBA 14+,
+         * COMMAND3.COM data at LBA 24+) jump AHEAD of the cursor -
+         * refusing those made every DOS file read fail with "no
+         * media", which fell the boot through to the boot sector's
+         * 'MSXDOS.SYS' retry loop ("Boot error / Press any key").
+         *
+         * A single-sector f_lseek + f_read is a bounded ~2-10 ms USB
+         * round trip, orders of magnitude under the ~0.8 s MB_POLL
+         * budget. The fetched sector also lands in the PSRAM cache at
+         * its offset, so repeats are cache-served (the background fill
+         * later rewrites the same bytes with identical content).
+         *
+         * A long burst of far-ahead reads (COMMAND3.COM load: 54
+         * sequential sectors) is served one USB read per sector; the
+         * fill catches up between them and the on-demand path stops
+         * firing once the cursor passes. No probing, no recovery loop,
+         * no printf on this path - the failure mode of the old backend
+         * was the unbounded probe, not the single-sector fetch. */
+        if (img_fetch_on_demand (lba) == 0U) {
+            return 0U;                  /* stick error: honest failure */
+        }
     }
-    if ((fr != FR_OK) || (br != NEXTOR_SECTOR_SIZE)) {
-        printf ("[nx] image read LBA %u failed (fr=%u, %u bytes) - "
-                "dropping image\r\n",
-                (unsigned)lba, (unsigned)fr, (unsigned)br);
-        (void)f_close(&s_img.fp);
-        s_img.open    = 0U;
-        s_img.sectors = 0U;
-        img_set_present(0U);
-        return 0U;
+
+    {
+        volatile const uint32_t *src = (volatile const uint32_t *)
+            (NEXTOR_CACHE_BASE + (uint32_t)lba * NEXTOR_SECTOR_SIZE);
+        uint32_t       *d4 = (uint32_t *)(void *)dst;
+        uint32_t        w   = NEXTOR_SECTOR_SIZE / 4U;
+        while (w-- != 0U) {
+            *d4++ = *src++;
+        }
     }
 
-    /* The NEXTOR.DSK from the releases is a partition image with a
-     * non-zero hidden sectors field (0x10180000 at BPB offset 0x1C).
-     * When served as a floppy, the kernel caches this BPB and uses it
-     * for all cluster-to-sector math. Patch hidden sectors to 0 on the
-     * fly so the MSX sees a valid floppy BPB.
+    /* BOOT SECTOR PATCHING REMOVED (was: "hidden sectors = 0" at
+     * 0x1C..0x1F). The vendor image's 16-bit hidden field (0x1C..0x1D)
+     * is ALREADY 0; bytes 0x1E..0x1F are the JR opcode of the DOS-2.20
+     * boot block that lives at BOOTAD+1Eh, and zeroing them destroyed
+     * that code on every boot - the sector read back with its loader
+     * jump gone. The image now ships with a correct boot sector (see
+     * make_boot_dsk.py), so nothing is patched here any more.
      *
-     * Note: the 16-bit total sectors at 0x13 is 1440 (non-zero), so the
-     * 32-bit total sectors field at 0x20 is NOT PRESENT in this BPB - the
-     * FAT12 extended boot record (Volume ID, label, etc.) starts there
-     * instead. Do NOT touch 0x20-0x23. */
-    if (lba == 0U) {
-        /* Hidden sectors = 0 (offset 0x1C, 4 bytes LE) */
-        dst[0x1C] = 0;
-        dst[0x1D] = 0;
-        dst[0x1E] = 0;
-        dst[0x1F] = 0;
-        printf("[nx] patched boot sector hidden=0\r\n");
-    }
+     * Kept: the root-directory attribute fix below (NEXTOR.SYS needs
+     * a system attribute for TRY_MSX_DOS's FCB open to accept it).
+     */
 
     /* The vendor NEXTOR.DSK is a *tools disk*, not a boot disk.
      * NEXTOR.SYS and NEXTORJ.SYS have attribute 0x20 (archive only),
      * but a bootable system file needs attribute 0x21 (system) or
      * 0x27 (system+hidden). Patch the directory entry attribute on
      * the fly when serving root directory sectors (LBA 7-13). */
-    if (lba >= 7U && lba <= 13U) {
+    if (lba >= NEXTOR_IMG_ROOT_LBA
+        && lba < NEXTOR_IMG_ROOT_LBA + NEXTOR_IMG_ROOT_SECTORS) {
         /* Root directory: 112 entries, 32 bytes each, 7 sectors.
          * Scan for "NEXTOR  SYS" and "NEXTORJ SYS" and set attr=0x27. */
         for (uint16_t off = 0; off < 512; off += 32) {
@@ -582,11 +812,7 @@ static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
                 dst[off + 6] == ' ' && dst[off + 7] == ' ' &&
                 dst[off + 8] == 'S' && dst[off + 9] == 'Y' &&
                 dst[off + 10] == 'S') {
-                if (dst[off + 11] != 0x27) {
-                    dst[off + 11] = 0x27;  /* system+hidden+archive */
-                    printf("[nx] patched NEXTOR.SYS attr=0x27 at LBA %u off %u\r\n",
-                           (unsigned)lba, (unsigned)off);
-                }
+                dst[off + 11] = 0x27;  /* system+hidden+archive */
             }
             /* Check name "NEXTORJ SYS" */
             if (dst[off + 0] == 'N' && dst[off + 1] == 'E' &&
@@ -595,17 +821,91 @@ static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
                 dst[off + 6] == 'J' && dst[off + 7] == ' ' &&
                 dst[off + 8] == 'S' && dst[off + 9] == 'Y' &&
                 dst[off + 10] == 'S') {
-                if (dst[off + 11] != 0x27) {
-                    dst[off + 11] = 0x27;  /* system+hidden+archive */
-                    printf("[nx] patched NEXTORJ.SYS attr=0x27 at LBA %u off %u\r\n",
-                           (unsigned)lba, (unsigned)off);
-                }
+                dst[off + 11] = 0x27;  /* system+hidden+archive */
             }
         }
     }
-
-    printf("[nx] img_read_sector LBA=%u OK\r\n", (unsigned)lba);
     return 1U;
+}
+
+/* Fetch ONE sector directly from the image file into the PSRAM cache
+ * (and thereby make it servable). Used when a READ arrives ahead of the
+ * background fill cursor - see img_read_sector's ahead-of-fill note.
+ *
+ * Runs in Service's command path: one f_lseek + one f_read + a PSRAM
+ * word-copy, all bounded. The background fill is NOT moved: it keeps its
+ * own cursor and will re-copy this sector later (content identical, so
+ * the rewrite is invisible).
+ *
+ * No f_close on failure here: a transient USB error would drop the whole
+ * image handle and force a full re-probe + re-fill for one hiccup; the
+ * caller answers "no media" for this command and the next one retries.
+ * The background fill handles handle-loss recovery on ITS failures. */
+static uint8_t img_fetch_on_demand (uint32_t lba) {
+    UINT    br = 0U;
+    FRESULT fr;
+
+    if (s_img.open == 0U) {
+        return 0U;
+    }
+    fr = f_lseek(&s_img.fp, (FSIZE_t)lba * (FSIZE_t)NEXTOR_SECTOR_SIZE);
+    if (fr == FR_OK) {
+        fr = f_read(&s_img.fp, s_fill_buf, NEXTOR_SECTOR_SIZE, &br);
+    }
+    if ((fr != FR_OK) || (br != NEXTOR_SECTOR_SIZE)) {
+        /* Real stick failure, not "ahead of cursor": report honestly
+         * and keep the image. If the stick is really gone, the next
+         * fill pass detects it and tears the image down properly. */
+        return 0U;
+    }
+
+    {
+        volatile uint32_t *dst = (volatile uint32_t *)
+            (NEXTOR_CACHE_BASE + (uint32_t)lba * NEXTOR_SECTOR_SIZE);
+        const uint32_t *src = (const uint32_t *)(void *)s_fill_buf;
+        uint32_t w = NEXTOR_SECTOR_SIZE / 4U;
+        while (w-- != 0U) {
+            *dst++ = *src++;
+        }
+    }
+    return 1U;
+}
+
+/* Make sure the boot window (LBAs 0..13) is in the PSRAM cache before
+ * the first command can be answered. Runs synchronously inside
+ * img_probe right after a successful open: it is 7 KiB of reads, well
+ * under a probe's own budget, and it is what makes STATUS/CAPACITY/
+ * the kernel's first READ all answerable immediately. */
+static void img_boot_prime (void) {
+    UINT    br = 0U;
+    FRESULT fr;
+
+    fr = f_lseek(&s_img.fp, 0U);
+    if (fr != FR_OK) {
+        return;
+    }
+    fr = f_read(&s_img.fp, s_fill_buf,
+                (UINT)(NEXTOR_IMG_BOOT_SECTORS * NEXTOR_SECTOR_SIZE), &br);
+    if ((fr != FR_OK)
+        || (br < NEXTOR_IMG_BOOT_SECTORS * NEXTOR_SECTOR_SIZE)) {
+        /* Short boot window: serve what arrived, mark the rest as
+         * beyond the fill cursor. The fill restarts from here. */
+        s_img.fill_lba = br / NEXTOR_SECTOR_SIZE;
+        printf("[nx] boot prime short: %u/%u bytes\r\n",
+               (unsigned)br,
+               (unsigned)(NEXTOR_IMG_BOOT_SECTORS * NEXTOR_SECTOR_SIZE));
+    } else {
+        s_img.fill_lba = NEXTOR_IMG_BOOT_SECTORS;
+    }
+
+    {
+        volatile uint32_t *dst = (volatile uint32_t *)NEXTOR_CACHE_BASE;
+        const uint32_t *src = (const uint32_t *)(void *)s_fill_buf;
+        uint32_t w = ((uint32_t)br & ~3U) / 4U;
+        while (w-- != 0U) {
+            *dst++ = *src++;
+        }
+    }
 }
 
 /* ========================================================================
@@ -644,6 +944,7 @@ void Nextor_Init (void) {
      * for a mapper swap. */
     s_cyc_per_ms = 0U;
     cyc_calibrate ();
+    s_boot_start_ms = ms_now ();
     img_reset ();
 }
 
@@ -733,11 +1034,44 @@ static void trace_dump (void) {
 }
 
 /* One debug line per request, printed only when seq has moved. */
-static void log_request (void) {
-    const uint8_t  cmd = s_mb.cmd;
-    const uint8_t  seq = s_mb.seq;
-    const uint8_t  err = s_mb.err;
-    const uint16_t res = (uint16_t)(s_mb.res_end - s_mb.res_r);
+/* Everything log_request() is going to print, captured in one place.
+ *
+ * The capture has to happen BEFORE res_publish(), not merely at the top
+ * of log_request(). res_publish() sets DONE, and the Z80 - which has been
+ * blocked in MB_POLL for the whole of Service - can return the instant
+ * DONE is visible and start the next burst. The first byte of that burst
+ * runs Nextor_WriteByte(), which resets s_mb.argend and rewrites
+ * s_mb.args[]. So a field read even a few instructions after the publish
+ * describes the NEXT request: `args=` and `lba=` came out as 0, or as a
+ * completely unrelated sector, whenever the Z80 won the race.
+ *
+ * Reading them into locals at the top of log_request() is not enough,
+ * because its own first printf blocks: at 921600 baud a 40-character
+ * line is ~430 us, while the Z80's MB_POLL spins in ~10 us. Anything
+ * read after that first printf is stale. Snapshotting here, while the
+ * Z80 cannot possibly have moved on, removes the race instead of making
+ * it unlikely.
+ *
+ * A single field read is a single load on this core, so the individual
+ * captures cannot tear against each other either. */
+typedef struct {
+    uint8_t  cmd;                       /* s_mb.cmd */
+    uint8_t  seq;                       /* s_mb.seq */
+    uint8_t  err;                       /* s_mb.err */
+    uint16_t nres;                      /* result FIFO length */
+    uint16_t nargs;                     /* argument count of THIS request */
+    uint32_t lba;                       /* arg_lba(), valid for READ/WRITE */
+    uint8_t  media;                     /* s_mb.res[0], the STATUS byte */
+} log_snap;
+
+static void log_request (const log_snap *s) {
+    const uint8_t  cmd  = s->cmd;
+    const uint8_t  seq  = s->seq;
+    const uint8_t  err  = s->err;
+    const uint16_t res  = s->nres;
+    const uint16_t nargs = s->nargs;
+    const uint32_t lba  = s->lba;
+    const uint8_t  media = s->media;
 
     /* One request, one line. If seq moved by more than one, a request
      * was overwritten before Nextor_Service reached it - say so rather
@@ -751,21 +1085,26 @@ static void log_request (void) {
     if (cmd >= NEXTOR_CMD_MAX) {
         printf ("[nx] #%u <invalid cmd 0x%02x> last Z80 writes:\r\n",
                 (unsigned)seq, (unsigned)cmd);
+        /* Deliberately NOT snapshotted: this is the one case where a
+         * burst is still arriving (the sink is parked, so nothing stops
+         * the remaining bytes), and the point of the dump is to show
+         * what the Z80 wrote. Newer writes landing mid-dump are the
+         * interesting ones, not a defect. */
         trace_dump ();
         return;
     }
 
     printf ("[nx] #%u %s args=%u", (unsigned)seq, s_cmd_name[cmd],
-            (unsigned)(s_mb.argend - s_mb.args));
+            (unsigned)nargs);
     if ((cmd == NEXTOR_CMD_READ) || (cmd == NEXTOR_CMD_WRITE)) {
-        printf (" lba=0x%08x", (unsigned)arg_lba());
+        printf (" lba=0x%08x", (unsigned)lba);
     }
     if (cmd == NEXTOR_CMD_STATUS) {
         /* The media byte is the whole point of this command, and a bare
          * "res=1" in a wall of lines is not readable a hundred lines
          * later. */
-        printf (" media=%u%s", s_mb.res[0],
-                (s_mb.res[0] == 2U) ? " (changed)" : "");
+        printf (" media=%u%s", (unsigned)media,
+                (media == 2U) ? " (changed)" : "");
     }
     if (err != NEXTOR_ERR_NONE) {
         printf (" -> ERR %u", (unsigned)err);
@@ -773,11 +1112,10 @@ static void log_request (void) {
     if (res > 0U) {
         printf (" res=%u", (unsigned)res);
     }
-    /* Gap since the previous request. First line reads "+0ms" and the
-     * second reads "+<calibration>ms", which is how long the Z80 took to
-     * get from the driver's banner to its first mailbox request - the
-     * 5 s boot stall plus the screen print, so it doubles as a check on
-     * the stall. */
+    /* Gap since the previous request. The second line reads how long the
+     * Z80 took to get from the driver's banner to its first mailbox
+     * request - the 5 s boot stall plus the screen print, so it doubles
+     * as a check on the stall. */
     printf ("  +%ums\r\n", (unsigned)ms_since_prev());
 }
 
@@ -786,18 +1124,56 @@ static void log_request (void) {
  * happen - the driver is spinning in MB_POLL on the DONE bit for the
  * whole of this function. */
 void Nextor_Service (void) {
-    uint8_t cmd;
-
     /* Nothing to answer, so use the time to get the image ready. This is
-     * where the slow half of the disk backend lives (enumeration, mount,
-     * f_open); the command path below deliberately never pays for it. */
+     * where ALL slow work now lives (enumeration, mount, f_open, and
+     * the streaming cache fill); the command path below never pays for
+     * any of it. */
     if (s_mb.armed == 0U) {
         img_probe ();
+        img_poll ();
         return;
     }
-    s_mb.armed = 0U;
 
-    cmd = s_mb.cmd;
+    /* Take a coherent snapshot of (cmd, args, seq). The Z80 bursts CMD
+     * + args as back-to-back cart writes, every one of which raises
+     * EXTI0 - the handler runs in IRQ context between those cycles
+     * and may complete the burst while THIS code is between the
+     * armed read above and the field reads below. Without the
+     * snapshot we could answer an old request with another
+     * request's LBA - a STATUS immediately followed by a READ (the
+     * DOS FCB layer's pattern) would otherwise read STATUS's stale
+     * args[] while seq said the READ was the one being answered.
+     *
+     * The snapshot is taken with interrupts DISABLED, so IRQ cannot
+     * land between the field reads. seq is the ticket number - IRQ
+     * increments it exactly once per completed burst capture, so a
+     * same-seq snapshot is internally consistent by construction.
+     *
+     * Crucially, this NEVER drops a request. An earlier version
+     * returned without answering when seq moved mid-clear; that
+     * made the Z80 time out and retry, with 0.5-1.5 s stalls on
+     * every STATUS during the kernel's per-sector scan. The window
+     * is closed by disabling IRQ around the field reads: the IRQ
+     * will land the moment we re-enable, see armed=0, and complete
+     * normally on the next pass. */
+    uint8_t cmd;
+    /* Snapshot fields are kept as separate locals because log_request
+     * needs cmd / seq / nargs / lba after the answer path runs and
+     * those fields are no longer stable (IRQ has been re-enabled and
+     * the Z80 is reading the response FIFO). */
+    uint8_t  snap_seq;
+    uint16_t snap_nargs;
+    uint32_t snap_lba;
+    {
+        __disable_irq ();
+        s_mb.armed = 0U;
+        cmd        = s_mb.cmd;
+        snap_seq   = s_mb.seq;
+        snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
+        snap_lba   = arg_lba ();
+        __enable_irq ();
+    }
+
     res_begin ();
 
     switch (cmd) {
@@ -882,14 +1258,11 @@ void Nextor_Service (void) {
     }
 
     case NEXTOR_CMD_READ: {
-        /* One sector straight into the result FIFO. The buffer is
-         * exactly one sector long, so a read can never overrun it, and
-         * the driver drains it as soon as DONE appears. */
+        /* One sector straight out of the PSRAM cache into the result
+         * FIFO. The buffer is exactly one sector long, so a read can
+         * never overrun it, and the driver drains it as soon as DONE
+         * appears. */
         uint32_t lba = arg_lba();
-        printf("[nx] CMD_READ LBA=%u (cluster=%u sector_in_cluster=%u)\r\n",
-               (unsigned)lba,
-               (unsigned)(lba >= 14 ? (lba - 14) / 2 + 2 : 0),
-               (unsigned)(lba >= 14 ? (lba - 14) % 2 : 0));
         if (img_read_sector (lba, s_mb.res) == 0U) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
             break;
@@ -915,8 +1288,30 @@ void Nextor_Service (void) {
         break;
     }
 
-    res_publish ();
-    log_request ();
+    /* Snapshot for the log. The request fields (cmd, seq, nargs, lba)
+     * were captured above, IRQ-protected, before res_begin. The
+     * response fields (err, nres, media) are written only by US
+     * after that snapshot, with IRQ re-enabled - IRQ doesn't touch
+     * them in any way that affects the answer (s_mb.err is read only
+     * by the Z80; s_mb.res[] is popped by the Z80 too, never by
+     * IRQ). The only field IRQ does touch is s_mb.res_r, on pop,
+     * and at most one byte may have been popped between res_publish
+     * and the log call - that is a cosmetic one-byte count error in
+     * the log line, never a correctness issue. */
+    {
+        const log_snap snap = {
+            cmd,
+            snap_seq,
+            s_mb.err,
+            (uint16_t)(s_mb.res_end - s_mb.res_r),
+            snap_nargs,
+            snap_lba,
+            s_mb.res[0]
+        };
+
+        res_publish ();
+        log_request (&snap);
+    }
 }
 
 /* ========================================================================
