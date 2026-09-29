@@ -114,7 +114,8 @@
  */
 
 #include "nextor.h"
-#include "usb_disk.h"
+#include "dsk_image.h"
+#include "ch32v4x7_conf.h"
 #include "ff.h"
 #include <stdio.h>
 
@@ -217,27 +218,6 @@ static struct {
  * indexing s_cmd_args[] out of bounds. */
 #define NEXTOR_CMD_NONE    NEXTOR_CMD_MAX
 
-/* ========================================================================
- * 1a. The image behind device 1.
- *
- * A fixed, read-only 720 KiB MSX-DOS disk image held in a file on the
- * USB stick. One file name, one geometry, no writing, no hot-swap
- * handling beyond "re-probe if a read fails": the point is that the
- * kernel gets a plain, always-the-same disk, not a second block device.
- *
- * Why a file and not the raw stick: the image is what MSX-DOS actually
- * wants to boot (FAT12, a boot sector at LBA 0), and it keeps the
- * driver's device model to one read-only floppy-flavored block device
- * with a fixed size. Turning the raw stick into a second, writable
- * device is a follow-up; nothing in this file prevents it, the state
- * here is just per-medium.
- *
- * Everything below is deliberately tiny and stateless-looking because
- * the driver is a ROM driver with no RAM of its own: all the mutable
- * bookkeeping (handle, sector count, change latch) lives here on the
- * firmware side, where it can actually be written to.
- * ====================================================================== */
-
 /* Short (8.3) names on purpose. The stick in use stores long file names
  * as VFAT entries and f_open() resolves them unreliably here; the
  * loader and terminal hit exactly this and both work off the SFN.
@@ -258,50 +238,6 @@ static const char *const s_img_names[] = {
     "0:/NEXTOR.DSK",
     "0:/RISKYMSX.DSK",
 };
-#define NEXTOR_IMG_NAME_COUNT (sizeof(s_img_names) / sizeof(s_img_names[0]))
-
-/* 720 KiB = 1440 x 512. The driver takes the sector count from
- * CMD_CAPACITY rather than hardcoding it, so these two constants are
- * the single source of truth for the size. */
-#define NEXTOR_IMG_SECTORS    1440U
-#define NEXTOR_IMG_BYTES      (NEXTOR_IMG_SECTORS * NEXTOR_SECTOR_SIZE)
-
-/* Boot sector + root directory LBA range that is ALWAYS served from
- * Direct from FatFs: LBAs come straight from the .dsk file on the USB
- * stick. The kernel's BPB parsing and every directory entry lookup
- * land in this window. 7 = the first root-directory sector for this
- * BPB (1 boot + 2x3 FAT). */
-#define NEXTOR_IMG_ROOT_LBA       7U
-#define NEXTOR_IMG_ROOT_SECTORS   7U
-
-/* Image state. Only the service/main-loop side ever touches this.
- *
- *   open     the FIL is open and usable.
- *   sectors  how many 512-byte sectors the file holds, capped at
- *            NEXTOR_IMG_SECTORS. 0 means "no image", which the driver
- *            is told as a zero capacity / no media.
- *   present  what STATUS last reported, kept so the change latch below
- *            only fires on an actual transition.
- *   changed  the media-change latch: set on a transition, consumed by
- *            STATUS, left alone by STAPEEK (device query 4 must not
- *            disturb query 3's tracking).
- *   probed   1 once a probe has run, so "no image" is not reported as
- *            a change on every STATUS.
- *   failed   count of consecutive failed read commands, kept for
- *            diagnostic log output only.
- */
-static struct {
-    FIL     fp;
-    uint32_t sectors;
-    uint32_t next_probe;  /* ms timestamp of the next allowed probe   */
-    uint8_t  open;
-    uint8_t  present;
-    uint8_t  changed;
-    uint8_t  probed;      /* 1 once a probe has run, so "no image" is
-                           * not reported as a change on every STATUS  */
-    uint8_t  failed;
-    uint8_t  last_fr;     /* FRESULT of the last f_open, for the log   */
-} s_img;
 
 /* ========================================================================
  * 1b. Request timestamps.
@@ -396,268 +332,60 @@ static uint32_t ms_now (void) {
 static uint32_t s_boot_start_ms;
 
 /* ========================================================================
- * 1c. Image access
- *
- * The whole disk backend is these four functions. Everything is a plain
- * FatFs file read; the only real decisions are (a) how often to probe,
- * and (b) what to tell the driver when there is no image.
- * ====================================================================== */
-
-/* Drop the image and forget that we ever had one. Also resets the
- * fill cursor so a fresh open starts streaming from the file's sector
- * 0 again. */
-static void img_reset (void) {
-    if (s_img.open != 0U) {
-        (void)f_close(&s_img.fp);
-    }
-    s_img.open       = 0U;
-    s_img.sectors    = 0U;
-    s_img.present    = 0U;
-    s_img.changed    = 0U;
-    s_img.probed     = 0U;
-    s_img.last_fr    = 0U;
-    s_img.next_probe = 0U;
-    s_img.failed     = 0U;
-}
-
-/* Note a presence transition and arm the media-change latch. The latch
- * is what makes device query 3 report "changed" exactly once after the
- * image appears, which is how the kernel learns a drive has become
- * usable without being told to look. */
-static void img_set_present (uint8_t now) {
-    if ((s_img.probed != 0U) && (now == s_img.present)) {
-        return;                         /* not a transition */
-    }
-    if (s_img.probed != 0U) {
-        s_img.changed = 1U;
-    }
-    s_img.present = now;
-    s_img.probed  = 1U;
-}
-
-/* Open the image, once, and restart the streaming fill. Safe to call
- * from the main loop and from the service path; it is the only place
- * that touches USB_TryEnsureMounted and f_open.
+ * 1b2. Probe policy (kept in nextor.c on purpose; see below).
  *
  * THE PROBE GUARD is the reliability fix for the freeze the old backend
  * shipped with. A probe that has to enumerate the stick runs hundreds
  * of milliseconds of retries (5 x USBH_PreDeal, each with an internal
  * bus-reset + descriptor dance, plus f_mount's own 3 tries with 200 ms
  * delays) - far past the driver's ~0.8 s MB_POLL budget. A probe that
- * starts from inside CAPACITY/READ (img_ensure -> img_probe) therefore
- * blows the Z80's command timeout on top of a request the kernel is
- * actively waiting on: CAPACITY returns .DISK, the drive goes away,
- * DOS wedges. The rule enforced everywhere below:
+ * starts from inside CAPACITY/READ therefore blows the Z80's command
+ * timeout on top of a request the kernel is actively waiting on:
+ * CAPACITY returns .DISK, the drive goes away, DOS wedges. The rule
+ * enforced everywhere:
  *
  *   - img_probe may only run from the main loop, and only while NO
- *     request is in flight (Nextor_Service's img_probe path).
- *   - img_ensure NEVER probes. It reports what the firmware knows
- *     right now. A command that arrives while the image is absent
- *     gets the honest fast answer (no media) and the kernel retries,
- *     exactly as its own status machinery expects.
+ *     request is in flight (Nextor_Service's idle path).
+ *   - the command handlers NEVER probe. They report what the firmware
+ *     knows right now (DskImage_IsPresent). A command that arrives
+ *     while the image is absent gets the honest fast answer (no media)
+ *     and the kernel retries, exactly as its own status machinery
+ *     expects.
  *   - the first probe is also delayed until the kernel's boot-time
- *     command burst has settled (NEXTOR_PROBE_DELAY from boot), so
+ *     command burst has settled (NEXTOR_PROBE_DELAY_MS from boot), so
  *     the initial CAPACITY/STATUS volley never races the enumeration.
- */
-#define NEXTOR_PROBE_DELAY_MS  1500U
+ *
+ * The BPB parse, f_open, and sector reads live in dsk_image.c; this
+ * function only owns the WHEN of probing (Nextor-specific timing
+ * policy) and delegates the HOW to DskImage_Open.
+ * ====================================================================== */
+#define NEXTOR_PROBE_DELAY_MS  200U
 
-static void img_probe (void) {
-    FRESULT    fr;
-    FSIZE_t    sz;
-    uint32_t   sectors;
-    const char *name = "?";
-    const uint32_t now = ms_now();
+static uint32_t s_next_probe;       /* ms timestamp of the next probe */
 
-    if (s_img.open != 0U) {
-        return;                         /* already have it */
+static DskErr img_probe (void) {
+    if (DskImage_IsPresent ()) {
+        return DSK_OK;
     }
-    /* Boot-delay: the kernel's initial CAPACITY/STATUS volley arrives
-     * within the first seconds after the mapper swap. Running the first
-     * probe (enumeration, f_mount, f_open - hundreds of ms of USB
-     * activity) while that volley is being answered is what used to
-     * wedge CAPACITY. The probe waits out a quiet window instead. The
-     * delay anchor is the boot timestamp taken in Nextor_Init; probes
-     * triggered later (rate-limited retries) pass this check trivially
-     * because ms_now() has long since moved past it. */
-    if (s_boot_start_ms != 0U
-        && (uint32_t)(now - s_boot_start_ms) < NEXTOR_PROBE_DELAY_MS) {
-        return;
-    }
-    if (s_img.probed != 0U) {
-        /* Rate limit. Without this the main loop's "is it armed?" check
-         * turns into a continuous enumeration retry, which keeps the
-         * stick's SCSI bus busy for no reason. */
-        if ((uint32_t)(now - s_img.next_probe) < 2000U) {
-            return;
-        }
-    }
-    s_img.next_probe = now;
-
-    if (USB_TryEnsureMounted() != DEF_SUCCESS) {
-        img_set_present(0U);
-        return;
-    }
-
-    /* Try each candidate in turn. The last FRESULT is the one reported:
-     * FR_NO_FILE for every name is the informative case, and any other
-     * code (a name that is a directory, say) is worth seeing too. */
     {
-        uint32_t i;
-
-        name = s_img_names[0];
-        for (i = 0U; i < NEXTOR_IMG_NAME_COUNT; i++) {
-            name = s_img_names[i];
-            fr   = f_open(&s_img.fp, name, FA_READ);
-            s_img.last_fr = (uint8_t)fr;
-            if (fr == FR_OK) {
-                break;
-            }
+        const uint32_t now = ms_now ();
+        /* Boot delay: skip probes until NEXTOR_PROBE_DELAY_MS after the
+         * boot anchor. The first probe lands well inside the kernel's
+         * first CAPACITY burst, which is what used to wedge it. */
+        if (s_boot_start_ms != 0U
+            && (uint32_t)(now - s_boot_start_ms) < NEXTOR_PROBE_DELAY_MS) {
+            return DSK_ERR_NOT_MOUNTED;
         }
-    }
-    if (fr != FR_OK) {
-        img_set_present(0U);
-        return;
-    }
-
-    /* A 720 KiB image is the contract; anything shorter is served
-     * truncated (a partly written file still boots what it has) and
-     * anything longer is capped, so the driver never hands the kernel a
-     * sector count the file cannot back. */
-    sz      = f_size(&s_img.fp);
-    sectors = (sz > (FSIZE_t)NEXTOR_IMG_BYTES)
-            ? NEXTOR_IMG_SECTORS
-            : (uint32_t)(sz / (FSIZE_t)NEXTOR_SECTOR_SIZE);
-    if (sectors > NEXTOR_IMG_SECTORS) {
-        sectors = NEXTOR_IMG_SECTORS;
-    }
-
-    s_img.sectors = sectors;
-    s_img.open    = 1U;
-    s_img.failed   = 0U;
-    img_set_present((uint8_t)((sectors != 0U) ? 1U : 0U));
-    printf ("[nx] image '%s' open: %u bytes, %u sectors of %u%s\r\n",
-            name, (unsigned)sz, (unsigned)sectors,
-            (unsigned)NEXTOR_SECTOR_SIZE,
-            (sectors != NEXTOR_IMG_SECTORS) ? " (not a full 720K image)" : "");
-}
-
-/* Invalidate the image handle: the stick was removed/re-plugged (or the
- * volume was unmounted by anyone else), so the open file handle may be
- * pointing at an unmounted volume. Called from usb_disk.c's disconnect
- * path. The next img_probe() in the main loop reopens the file from
- * the (new) stick.
- *
- * This does NOT arm the media-change latch: the served content does not
- * change on a refresh (the file is always sector 0..NEXTOR_IMG_SECTORS),
- * so the kernel should not be told its fixed disk changed just because
- * the stick behind it was re-inserted. */
-void Nextor_CacheInvalidate (void) {
-    if (s_img.open != 0U) {
-        (void)f_close(&s_img.fp);
-        printf("[nx] image handle closed: stick removed\r\n");
-    }
-    s_img.open     = 0U;
-    s_img.sectors  = 0U;
-    s_img.failed   = 0U;
-    img_set_present(0U);
-}
-
-/* Report image availability WITHOUT probing. The command handlers use
- * this; a command that arrives while the image is absent gets the fast,
- * honest "no media" answer instead of a multi-hundred-ms enumeration
- * that would blow the driver's MB_POLL budget (see img_probe's guard
- * note). The main loop's img_probe() is what turns "absent" into
- * "present" over time. */
-static uint8_t img_ensure (void) {
-    return (uint8_t)((s_img.open != 0U && s_img.sectors != 0U) ? 1U : 0U);
-}
-
-/* Read one sector into dst. Returns 1 on success.
- *
- * SERVED FROM THE PSRAM CACHE ONLY. This runs inside Nextor_Service
- * with the Z80 spinning in MB_POLL - the whole answer has to be far
- * under the ~0.8 s command budget, and a PSRAM word-copy is
- * microseconds. No USB, no FatFs, no printf on this path.
- */
-static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
-    UINT    br = 0U;
-    FRESULT fr;
-
-    if (img_ensure() == 0U) {
-        return 0U;
-    }
-    if (lba >= s_img.sectors) {
-        return 0U;                       /* past the end of the image */
-    }
-
-    /* Direct from FatFs, no PSRAM cache. f_lseek + f_read of one
-     * sector on a healthy stick is ~2-10 ms, well under the ~0.8 s
-     * MB_POLL budget. A slow stick will time out and the Z80 will
-     * retry - that's the same behavior the cache used to mask, but
-     * now visible in the trace instead of hidden. */
-    fr = f_lseek(&s_img.fp, (FSIZE_t)lba * (FSIZE_t)NEXTOR_SECTOR_SIZE);
-    if (fr == FR_OK) {
-        fr = f_read(&s_img.fp, dst, NEXTOR_SECTOR_SIZE, &br);
-    }
-    if ((fr != FR_OK) || (br != NEXTOR_SECTOR_SIZE)) {
-        /* Stick error mid-transfer: report honestly, keep the image
-         * handle open so the next command can retry. The probe path
-         * (img_probe) handles handle-loss recovery. */
-        return 0U;
-    }
-
-    /* BOOT SECTOR PATCHING REMOVED (was: "hidden sectors = 0" at
-     * 0x1C..0x1F). The vendor image's 16-bit hidden field (0x1C..0x1D)
-     * is ALREADY 0; bytes 0x1E..0x1F are the JR opcode of the DOS-2.20
-     * boot block that lives at BOOTAD+1Eh, and zeroing them destroyed
-     * that code on every boot - the sector read back with its loader
-     * jump gone. The image now ships with a correct boot sector (see
-     * make_boot_dsk.py), so nothing is patched here any more.
-     *
-     * Kept: the root-directory attribute fix below (NEXTOR.SYS needs
-     * a system attribute for TRY_MSX_DOS's FCB open to accept it).
-     */
-
-    /* The vendor NEXTOR.DSK is a *tools disk*, not a boot disk.
-     * NEXTOR.SYS and NEXTORJ.SYS have attribute 0x20 (archive only),
-     * but a bootable system file needs attribute 0x21 (system) or
-     * 0x27 (system+hidden). Patch the directory entry attribute on
-     * the fly when serving root directory sectors (LBA 7-13). */
-    if (lba >= NEXTOR_IMG_ROOT_LBA
-        && lba < NEXTOR_IMG_ROOT_LBA + NEXTOR_IMG_ROOT_SECTORS) {
-        /* Root directory: 112 entries, 32 bytes each, 7 sectors.
-         * Scan for "NEXTOR  SYS" and "NEXTORJ SYS" and set attr=0x27. */
-        for (uint16_t off = 0; off < 512; off += 32) {
-            if (dst[off] == 0x00) break;           /* end of directory */
-            if (dst[off] == 0xE5) continue;        /* deleted */
-            if ((dst[off + 11] & 0x08) != 0) continue; /* volume label */
-
-            /* Check name "NEXTOR  SYS" (8+3, space-padded) */
-            if (dst[off + 0] == 'N' && dst[off + 1] == 'E' &&
-                dst[off + 2] == 'X' && dst[off + 3] == 'T' &&
-                dst[off + 4] == 'O' && dst[off + 5] == 'R' &&
-                dst[off + 6] == ' ' && dst[off + 7] == ' ' &&
-                dst[off + 8] == 'S' && dst[off + 9] == 'Y' &&
-                dst[off + 10] == 'S') {
-                dst[off + 11] = 0x27;  /* system+hidden+archive */
-            }
-            /* Check name "NEXTORJ SYS" */
-            if (dst[off + 0] == 'N' && dst[off + 1] == 'E' &&
-                dst[off + 2] == 'X' && dst[off + 3] == 'T' &&
-                dst[off + 4] == 'O' && dst[off + 5] == 'R' &&
-                dst[off + 6] == 'J' && dst[off + 7] == ' ' &&
-                dst[off + 8] == 'S' && dst[off + 9] == 'Y' &&
-                dst[off + 10] == 'S') {
-                dst[off + 11] = 0x27;  /* system+hidden+archive */
-            }
+        /* Rate-limit on retries - otherwise a missing stick turns into
+         * a continuous enumeration retry that pegs the SCSI bus. */
+        if (DskImage_HasProbed ()
+            && (uint32_t)(now - s_next_probe) < 2000U) {
+            return DSK_ERR_NOT_MOUNTED;
         }
+        s_next_probe = now;
     }
-    return 1U;
+    return DskImage_Open ();
 }
-
-/* Direct read path. img_read_sector above reads straight from FatFs.
- * No on-demand cache fetch and no boot-window prime - both were
- * scaffolding for the now-removed PSRAM cache. */
 
 /* ========================================================================
  * 2. Lifecycle
@@ -665,6 +393,15 @@ static uint8_t img_read_sector (uint32_t lba, uint8_t *dst) {
  * (Back to the mailbox itself. Sections 1a-1c above are the state and
  * the helpers the lifecycle and the service path share.)
  * ====================================================================== */
+
+/* Stick removed / volume unmounted: drop the image through the class.
+ * Called from usb_disk.c's disconnect path. The kernel sees a media
+ * change to "no media", which is the honest state - the .dsk it was
+ * reading is gone with the stick - and lets DOS re-probe when a fresh
+ * stick arrives. */
+void Nextor_CacheInvalidate (void) {
+    DskImage_Invalidate ();
+}
 
 /* Power-on mailbox state. Called from main() at boot and again from
  * Cart_SetMapper() on every swap to CART_MAP_NEXTOR.
@@ -696,7 +433,13 @@ void Nextor_Init (void) {
     s_cyc_per_ms = 0U;
     cyc_calibrate ();
     s_boot_start_ms = ms_now ();
-    img_reset ();
+    s_next_probe    = 0U;
+    /* Hand the candidate list to the image class. DskImage_Open runs
+     * later from the main loop and consumes them. */
+    DskImage_Init ();
+    DskImage_SetCandidates (s_img_names,
+                            (uint8_t)(sizeof(s_img_names)
+                                      / sizeof(s_img_names[0])));
 }
 
 /* LBA argument, little-endian - MB_SEND pushes the driver's (HL) block
@@ -877,10 +620,11 @@ static void log_request (const log_snap *s) {
 void Nextor_Service (void) {
     /* Nothing to answer, so use the time to get the image ready. The
      * only slow work that lives outside a command is enumeration /
-     * mount / f_open in img_probe(); READs are served directly from
-     * FatFs on the command path. */
+     * mount / f_open + BPB parse in DskImage_Open (driven from
+     * img_probe); READs are served directly from FatFs on the command
+     * path. */
     if (s_mb.armed == 0U) {
-        img_probe ();
+        (void)img_probe ();
         return;
     }
 
@@ -961,16 +705,9 @@ void Nextor_Service (void) {
          * would blow the driver's command budget. s_img is kept current
          * by img_probe() from the main loop, so this is a read of state
          * that is at most a couple of seconds old. */
-        uint8_t st;
-        if (s_img.sectors == 0U) {
-            st = 0U;                       /* no image attached */
-        } else if (s_img.changed != 0U) {
-            st = 2U;                       /* attached, changed */
-        } else {
-            st = 1U;                       /* attached, unchanged */
-        }
+        uint8_t st = DskImage_MediaState ();
         if (cmd == NEXTOR_CMD_STATUS) {
-            s_img.changed = 0U;            /* consumed; STAPEEK leaves it */
+            DskImage_MediaLatchConsume ();
         }
         s_mb.res[0]  = st;
         s_mb.res_end = s_mb.res + 1U;
@@ -991,12 +728,12 @@ void Nextor_Service (void) {
          * capacity: the driver turns a failed CAPACITY into "0 sectors,
          * device still exists", which is what makes the kernel keep the
          * drive and retry later instead of dropping the device. */
-        if (img_ensure () == 0U) {
+        if (!DskImage_IsPresent ()) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
             break;
         }
         {
-            uint32_t v = s_img.sectors;
+            uint32_t v = DskImage_SectorCount ();
             uint8_t  i;
             for (i = 0U; i < 4U; i++) {
                 s_mb.res[i]     = (uint8_t)(v >> (8U * i));
@@ -1008,12 +745,12 @@ void Nextor_Service (void) {
     }
 
     case NEXTOR_CMD_READ: {
-        /* One sector straight out of the PSRAM cache into the result
+        /* One sector straight from the image class into the result
          * FIFO. The buffer is exactly one sector long, so a read can
          * never overrun it, and the driver drains it as soon as DONE
          * appears. */
         uint32_t lba = arg_lba();
-        if (img_read_sector (lba, s_mb.res) == 0U) {
+        if (DskImage_ReadSector (lba, s_mb.res) == 0U) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
             break;
         }
