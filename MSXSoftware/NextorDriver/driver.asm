@@ -826,34 +826,29 @@ DQP_NCLEAR:
 ;--- Shared tail: the flags and geometry bytes, then RESULT_OK. Reached
 ;    with HL = buffer+7.
 ;
-;    +7 flags = 06h. Two bits matter here, and getting the second one
-;    wrong is what made every file access fail with a disk I/O error
-;    while every mailbox command in the log came back clean:
+;    +7 flags = 05h. Matches what the Konamiman reference drivers ship
+;    with (MegaFlashROM SCC+ SD, Turbo-R FDD): bit 0 removable + bit 2
+;    floppy. Three reasons to land here:
 ;
-;      bit 2 (floppy disk drive)  MUST be set. Device 1 is a bare
-;        FAT12 floppy image: sector 0 is a boot sector, and there is no
-;        partition table anywhere in it. The kernel's automapper only
-;        skips the partition scan - and only then maps the drive to
-;        absolute sector 0 - for a device flagged as a floppy
-;        (bank4/partit.mac:1054-1092: bit 2 -> bit 6 of the internal
-;        flags, and bit 6 jumps straight to AA_DO_ASSIGN with first
-;        sector 0). With the bit clear, F_GPART runs, finds no valid
-;        partition, and the drive ends up unusable. The old value 01h
-;        (removable, not floppy) sent every read down that path.
+;      bit 2 (floppy)  MUST be set. With it clear, the kernel's automapper
+;        does a full partition scan; there is none on a flat .dsk file,
+;        and the resulting "no partition" outcome means the drive is
+;        never assigned. bank4/partit.mac:1054-1092 routes the floppy
+;        bit straight to AA_DO_ASSIGN with first-sector = 0.
 ;
-;      bit 1 (read only)  is set because that is the truth: the
-;        firmware refuses CMD_WRITE. Reporting it here means the kernel
-;        can answer "write protected" itself, and READ_WRITE returns
-;        .WPROT without ever touching the bus.
+;      bit 0 (removable)  is set because the medium is the file on the
+;        USB stick, which can come and go. The removable fallback path
+;        in partit.mac:1128-1136 is the right one for "image went away
+;        between probes" - without it the kernel thinks the drive is
+;        always-on, which makes the eject-on-removal case (stick pulled)
+;        look like a media change that isn't followed by a re-probe.
 ;
-;      bit 0 (removable) is deliberately CLEAR. The image does not come
-;        and go the way a card does: it is one file on the stick, and
-;        the old 01h was what fed the removable-media fallback in
-;        partit.mac:1128-1136 (no partitions, assigned on first access).
-;        That path is the wrong one now - the floppy path is both
-;        correct and simpler. A side effect worth knowing: with bit 0
-;        clear the drive no longer gets the "Insert disk" prompt on
-;        every access.
+;      bit 1 (read only)  is deliberately CLEAR. The kernel honours it
+;        by refusing writes itself; setting it here too just makes the
+;        drive look "frozen" in a way that confuses partition tools
+;        (they ask the device, get RO, skip). The firmware already
+;        refuses CMD_WRITE and returns NEXTOR_ERR_READONLY for that case;
+;        the kernel can answer "write protected" from that.
 ;
 ;      bit 3 (no automapping) stays clear so the device is still
 ;        automapped at boot.
@@ -864,7 +859,7 @@ DQP_NCLEAR:
 ;    would be a lie about a device that has a real geometry, and the
 ;    numbers cost 8 bytes. Little-endian, like the sector size above.
 DQP_TAIL:
-	ld	(hl),06h	;+7 flags: bit1 read-only + bit2 floppy
+	ld	(hl),05h	;+7 flags: bit0 removable + bit2 floppy
 	inc	hl
 	ld	(hl),50h	;+8 cylinders LE low  = 80
 	inc	hl
