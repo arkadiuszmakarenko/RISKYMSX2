@@ -1476,41 +1476,42 @@ void Cart_EXTI0_ASCII16k_Handler (void) {
 /* ROM16k: 16 KiB image mirrored at 0x4000 and 0x8000. Bias = img_base -
  * 0x4000, so addr + bias gives the right byte for both halves. */
 void Cart_EXTI0_ROM16k_Handler (void) {
-    __asm__ volatile (
-        "lui   t0, 0x40011                 \n" /* GPIOB + GPIOD window      */
-        "lui   t1, 0x40012                 \n" /* GPIOE window              */
-        "lui   t2, 0x40010                 \n" /* EXTI window               */
-        "lw    a6, -2040(t1)               \n" /* GPIOE->INDR               */
-        "andi  a6, a6, 1                   \n" /* isolate ~SLTSL            */
-        "beqz  a6, 1f                      \n"
-        /* ---- late entry: SLTSL already high, cycle over ---- */
-        "lui   a7, 0x44444                 \n"
-        "addi  a7, a7, 0x444               \n"
-        "sw    a7, -1020(t0)               \n"
-        "sw    a6, 1044(t2)                \n"
-        "j     2f                          \n"
-        "1:                                \n"
-        "lw    a0, 1032(t0)                \n" /* GPIOD->INDR = A0..A15     */
-        "lui   a1, " ASM_STR(ASM_ROM_BIAS_HI) "\n" /* bias = PSRAM base + game base - 0x4000 */
-        "add   a2, a0, a1                  \n" /* byte index                */
-        "lbu   a3, 0(a2)                   \n" /* PSRAM byte, bus tri-state */
-        "lui   a4, 0x33333                 \n"
-        "addi  a4, a4, 0x333               \n"
-        "slli  a3, a3, 8                   \n"
-        "sw    a3, -1012(t0)               \n" /* GPIOB->OUTDR              */
-        "sw    a4, -1020(t0)               \n" /* CFGHR=BusOn               */
-        "lui   a7, 0x44444                 \n"
-        "addi  a7, a7, 0x444               \n"
-        "addi  a5, zero, 1                 \n"
-        "sw    a5, 1044(t2)                \n"
-        "3:                                \n"
-        "lw    a6, -2040(t1)               \n"
-        "andi  a6, a6, 1                   \n"
-        "beqz  a6, 3b                      \n"
-        "sw    a7, -1020(t0)               \n"
-        "2:                                \n"
-        : : : "t0", "t1", "t2", "a0", "a1", "a2", "a3", "a4",
-              "a5", "a6", "a7", "memory");
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl = GPIOE->INDR;
+
+    /* Late entry: SLTSL already high, this cycle is already over. */
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
+     * bail if SLTSL rises first (same fix as the other handlers). */
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+
+    if ((ctrl & CART_RD_MASK) == 0U && address >= 0x4000U && address < 0xC000U) {
+        /* Serve from PSRAM with the bus still tri-stated - hides the
+         * ~30-cycle PSRAM read latency before the data-bus drivers
+         * come up. The mirror at 0x8000..0xBFFF is served the same
+         * way (address - 0x4000 wraps identically for both halves). */
+        Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+    } else {
+        /* Write cycle, or read outside the cart window: release the
+         * bus so the MSX's own devices can respond. */
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
+
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    GPIOB->CFGHR = CART_BUS_OFF;
 }
 
 /* Mailbox window: cart address 0x7FF0..0x7FFF. Defined here so the
@@ -1562,10 +1563,7 @@ void Cart_EXTI0_ROM32k_Handler (void) {
          * ~30-cycle PSRAM read latency before the data-bus drivers
          * come up. CART_GAME_BASE shifts the image within the window
          * (the same constant every other read path adds). */
-        uint8_t v = *(const volatile uint8_t *)
-            (PSRAM_CART_BASE + CART_GAME_BASE + address - 0x4000U);
-        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8)) | ((uint32_t)v << 8);
-        GPIOB->CFGHR = CART_BUS_ON;
+        Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
     } else {
         /* Write cycle, or read outside the cart window: release the
          * bus so the MSX's own devices can respond. Writes to the
@@ -1589,40 +1587,33 @@ void Cart_EXTI0_ROM48k_Handler (void) {
      * spans a 48 KiB image instead of a 32 KiB one. The bias stays
      * img_base - 0x4000; image[48K] returns 0xFF (or whatever the
      * upper 16 KiB of the image holds) for addr >= 0xC000. */
-    __asm__ volatile (
-        "lui   t0, 0x40011                 \n"
-        "lui   t1, 0x40012                 \n"
-        "lui   t2, 0x40010                 \n"
-        "lw    a6, -2040(t1)               \n"
-        "andi  a6, a6, 1                   \n"
-        "beqz  a6, 1f                      \n"
-        "lui   a7, 0x44444                 \n"
-        "addi  a7, a7, 0x444               \n"
-        "sw    a7, -1020(t0)               \n"
-        "sw    a6, 1044(t2)                \n"
-        "j     2f                          \n"
-        "1:                                \n"
-        "lw    a0, 1032(t0)                \n"
-        "lui   a1, " ASM_STR(ASM_ROM_BIAS_HI) "\n" /* PSRAM base + game base - 0x4000 */
-        "add   a2, a0, a1                  \n"
-        "lbu   a3, 0(a2)                   \n"
-        "lui   a4, 0x33333                 \n"
-        "addi  a4, a4, 0x333               \n"
-        "slli  a3, a3, 8                   \n"
-        "sw    a3, -1012(t0)               \n"
-        "sw    a4, -1020(t0)               \n"
-        "lui   a7, 0x44444                 \n"
-        "addi  a7, a7, 0x444               \n"
-        "addi  a5, zero, 1                 \n"
-        "sw    a5, 1044(t2)                \n"
-        "3:                                \n"
-        "lw    a6, -2040(t1)               \n"
-        "andi  a6, a6, 1                   \n"
-        "beqz  a6, 3b                      \n"
-        "sw    a7, -1020(t0)               \n"
-        "2:                                \n"
-        : : : "t0", "t1", "t2", "a0", "a1", "a2", "a3", "a4",
-              "a5", "a6", "a7", "memory");
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl = GPIOE->INDR;
+
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+
+    if ((ctrl & CART_RD_MASK) == 0U && address >= 0x4000U) {
+        Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+    } else {
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
+
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    GPIOB->CFGHR = CART_BUS_OFF;
 }
 
 
