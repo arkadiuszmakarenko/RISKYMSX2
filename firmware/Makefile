@@ -115,6 +115,12 @@ else
   BUILD_MODE     := debug
 endif
 
+# PROBES=1 forwards -ds RW_PROBES to the driver build, re-enabling the
+# per-sector value markers and the per-READ_WRITE frame trace that the
+# read hot path leaves out by default. It only changes the embedded ROM,
+# never the firmware image, so it gets its own invalidation stamp below.
+PROBES          ?= 0
+
 # --- Game base (PSRAM placement diagnostic) ----------------------------------
 # Where inside the 8 MiB PSRAM window the served cart image starts, in
 # whole MiB. 0 = image at PSRAM start (default). Valid: 0..7.
@@ -343,10 +349,20 @@ $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 # obj/User/nextor_rom.o depends on it, the build graph guarantees the
 # embed finishes BEFORE the compile starts - in serial and under -jN
 # alike. A single `make` after a driver.asm edit is therefore enough.
+# PROBES changes what the driver assembles, so flipping it must invalidate
+# the ROM. The stamp mirrors BUILD_MODE_STAMP: only one probe-mode file
+# exists at a time, so switching modes makes the ROM out of date and the
+# driver gets rebuilt (via the -ds RW_PROBES passthrough above).
+NEXTOR_PROBE_STAMP := $(OBJDIR)/.nextor-probes-$(if $(filter 1,$(PROBES)),on,off)
+$(NEXTOR_PROBE_STAMP):
+	@mkdir -p "$(OBJDIR)"
+	@rm -f "$(OBJDIR)"/.nextor-probes-on "$(OBJDIR)"/.nextor-probes-off
+	@touch "$@"
+
 ifeq ($(NEXTOR_OWN_ROM),yes)
-$(NEXTOR_ROM): $(NEXTOR_ASM) $(NEXTOR_DIR)/Makefile
+$(NEXTOR_ROM): $(NEXTOR_ASM) $(NEXTOR_DIR)/Makefile $(NEXTOR_PROBE_STAMP)
 	@echo "  ROM   $(notdir $@)"
-	@$(MAKE) -C "$(NEXTOR_DIR)"
+	@$(MAKE) -C "$(NEXTOR_DIR)" PROBES=$(PROBES)
 else
 # NEXTOR_ROM was overridden: this image is not ours to build, so declare
 # no rule for it at all. `make` then requires the file to already exist

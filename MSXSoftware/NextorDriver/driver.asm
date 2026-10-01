@@ -1044,12 +1044,14 @@ READ_WRITE:
 	;    would produce no mailbox traffic at all, so this is the marker
 	;    that separates "the kernel never called READ_WRITE" from "it did
 	;    and the driver died in its first dozen instructions".
+IFDEF RW_PROBES
 	ld	b,(iy+3)		;report the caller's requested sector count
 	ld	a,MB_MK_RW_FRAME
 	call	MB_FRAME_TRACE
 	ld	b,d			;report the destination's high byte too:
 	ld	a,MB_MK_RW_BUFPG	;81h = direct-to-DTA (RW_MANY), else a
 	call	MB_FRAME_TRACE	;kernel buffer - tells the two callers apart
+ENDIF
 
 	;--- Device range. This driver exposes one physical USB device and the
 	;    mailbox protocol has no device byte. Some kernels pass a value
@@ -1183,14 +1185,33 @@ RW_ONE_READ:
 	ei
 	jp	RW_OUT
 RW_BUF_OK:
-	push	de
-	pop	hl			;HL = the buffer
-	ld	bc,MB_SECTOR_SIZE
-	call	MB_GETRES_ATOMIC	;512 bytes into the kernel's buffer
-	push	hl
-	pop	de			;HL ended one sector on: DE follows it
+	;--- Fast drain. The result port is a single fixed address, so read
+	;    it through HL with `ld a,(hl)` (7 T-states) instead of the
+	;    absolute form (13 T-states), and unroll 4x so the DJNZ is paid
+	;    once per four bytes: 23 T-states/byte against the old loop's 52.
+	;    DE is the caller's live per-sector pointer and IS the
+	;    destination, so the drain advances DE rather than HL; HL is free
+	;    for the port address. The buffer origin the probes below need is
+	;    recovered from the frame (iy+16), not from HL.
+	ld	hl,MBOX_DATA
+	ld	b,128			;128 x 4 = 512 bytes
+RW_DRAIN_L:
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	djnz	RW_DRAIN_L
 	ei
 
+IFDEF RW_PROBES
 	;--- Prove the sector actually landed, instead of assuming it did.
 	;
 	;    Everything above reports success identically whether 512 bytes
@@ -1204,10 +1225,9 @@ RW_BUF_OK:
 	;    says the read raced the answer, while seeing 0FAh/0AAh says the
 	;    data is in the caller's buffer and the kernel is what rejects it.
 	;
-	;    Byte 0 comes from the frame rather than from HL, because HL has
-	;    already walked one sector forward. Only HL is touched: DE has to
-	;    survive as the next sector's buffer pointer, and IX and IY are
-	;    still live.
+	;    Byte 0 comes from the frame rather than from HL. Only HL is
+	;    touched: DE has to survive as the next sector's buffer pointer,
+	;    and IX and IY are still live.
 	push	de			;the next-sector buffer pointer survives probes
 	ld	a,(iy+16)
 	ld	l,a
@@ -1262,6 +1282,7 @@ RW_BUF_OK:
 	ld	a,MB_MK_RW_SIGH
 	call	MB_MARK_WAIT
 	pop	de
+ENDIF
 
 RW_SECTOR_OK:
 	;32-bit increment of the sector number through IX, little-endian, so

@@ -1,3 +1,6 @@
 firmware/obj
 docs/NEXTOR_PLAN.md
 NEXTOR_PLAN.md
+# Driver probe-mode stamps (flip when PROBES=0/1 changes; see NextorDriver/Makefile)
+MSXSoftware/NextorDriver/.probes-*
+

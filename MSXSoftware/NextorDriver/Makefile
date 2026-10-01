@@ -34,8 +34,18 @@ NEXTOR_BASE := ../../Nextor/Nextor/bin/kernel-base/Nextor-3.0.0-beta2.base.dat
 N80         := $(VENDOR)/n80/N80
 MKNEXROM    := $(VENDOR)/mknexrom
 
+# Debug probes. The per-sector value markers and the per-READ_WRITE frame
+# trace are full mailbox round trips sitting in the middle of the read
+# hot path, so they are off unless asked for. `make PROBES=1` (in this
+# directory or in firmware/, which forwards the knob) assembles them back
+# in, and the firmware logs the matching lines when built with QUIET unset.
+PROBES ?=
+ifeq ($(PROBES),1)
+N80_PROBES := -ds RW_PROBES
+endif
+
 N80_FLAGS := --no-string-escapes --no-show-banner --verbosity 0 \
-             --include-directory $(NEXTOR_SDK)
+             --include-directory $(NEXTOR_SDK) $(N80_PROBES)
 
 # NOTE: this Makefile does NOT write firmware/User/nextor_rom.c.
 # The firmware Makefile owns that generated source and regenerates it
@@ -60,7 +70,14 @@ $(ROM): driver.bin chgbnk.bin
 	$(MKNEXROM) $(NEXTOR_BASE) $@ /d:driver.bin /m:chgbnk.bin
 	@echo "Built $@"
 
-driver.bin: driver.asm
+# Mirror of the firmware's QUIET mode stamp: switching PROBES flips this
+# file so `make PROBES=1` cannot silently reuse a probe-free driver.bin.
+PROBE_STAMP := .probes-$(if $(N80_PROBES),on,off)
+$(PROBE_STAMP):
+	@rm -f .probes-on .probes-off
+	@touch "$@"
+
+driver.bin: driver.asm $(PROBE_STAMP)
 	$(N80) driver.asm driver.bin $(N80_FLAGS)
 	@test $$(stat -c%s driver.bin) -eq 16336 || { \
 	    echo "*** driver.bin is not 16336 bytes (expected 0x4000..0x7FCF: 256 dummy + 16080 code)"; exit 1; }
@@ -74,4 +91,4 @@ test: $(ROM)
 	    -command "after time 15 { screenshot /tmp/opencode/msx/nextor-test.png } ; after time 16 exit"
 
 clean:
-	rm -f driver.bin chgbnk.bin $(ROM)
+	rm -f driver.bin chgbnk.bin $(ROM) .probes-on .probes-off
