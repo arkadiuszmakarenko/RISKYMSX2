@@ -14,6 +14,8 @@
 #   make list       # show which CC/wlink/chip are in use
 #   make flash      # program the chip with OpenOCD (WCH-Link E)
 #   make prog       # alias for flash
+#   make flash QUIET=1  # rebuild/flash with printf completely bypassed
+#   make rebuild QUIET=1 # explicit quiet rebuild
 #
 # Toolchain:
 #   Override RISKY_TC=<path-to-bin-dir> or TRI=<gcc-prefix>. Default points
@@ -43,6 +45,7 @@
 
 PROJECT       := RISKYMSX2
 LINKER        := Ld/Link.ld
+.DEFAULT_GOAL  := all
 
 # --- Memory capacity (mirrors Ld/Link.ld) -----------------------------------
 # FLASH 576K; RAM region is 136K-1K = 135K (the linker script places RAM at
@@ -98,6 +101,19 @@ CFLAGS_COMMON  = $(ARCH_FLAGS) \
                  -fsigned-char -ffunction-sections -fdata-sections -fno-common \
                  -Wunused -Wuninitialized \
                  -g -gdwarf-4 -std=gnu99
+
+# UART output is useful while diagnosing the mailbox, but a polled printf can
+# steal enough main-loop time to perturb a timing-sensitive cart exchange. A
+# quiet build wraps printf at link time, so formatting and UART transmission
+# are both skipped while the firmware behavior remains otherwise identical.
+QUIET           ?= 0
+ifeq ($(QUIET),1)
+  CFLAGS_COMMON += -DRISKY_QUIET=1
+  QUIET_LDFLAGS  := -Wl,--wrap=printf
+  BUILD_MODE     := quiet
+else
+  BUILD_MODE     := debug
+endif
 
 # --- Game base (PSRAM placement diagnostic) ----------------------------------
 # Where inside the 8 MiB PSRAM window the served cart image starts, in
@@ -229,6 +245,16 @@ OBJ_S          := $(patsubst %.S,$(OBJDIR)/%.o,$(OBJ_C))
 OBJS           := $(OBJ_S)
 DEPS           := $(OBJS:.o=.d)
 
+# Make changes to QUIET rebuild every object automatically, so `make flash
+# QUIET=1` cannot accidentally flash an old debug build. The mode stamp is
+# deliberately separate from the generated ROM dependencies.
+BUILD_MODE_STAMP := $(OBJDIR)/.build-mode-$(BUILD_MODE)
+$(OBJS): $(BUILD_MODE_STAMP)
+$(BUILD_MODE_STAMP):
+	@mkdir -p "$(OBJDIR)"
+	@rm -f "$(OBJDIR)"/.build-mode-debug "$(OBJDIR)"/.build-mode-quiet
+	@touch "$@"
+
 # If User/PSRAM is pulled in later, also pick it up — kept as a no-op target
 # so calling `make obj/User/psram.o` works without breaking the wildcard.
 EXTRA_OBJS     :=
@@ -302,7 +328,7 @@ all: $(ELF) $(HEX) $(LST) showsize
 #   --specs=nano.specs / nosys.specs are WCH's default newlib configs.
 $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 	@echo "  LD    $@"
-	@"$(CC)" $(ARCH_FLAGS) -Os -g -gdwarf-4 \
+	@"$(CC)" $(ARCH_FLAGS) -Os -g -gdwarf-4 $(QUIET_LDFLAGS) \
 		-T "$(CURDIR)/$(LINKER)" \
 		-nostartfiles \
 		-Xlinker --gc-sections \
@@ -418,6 +444,7 @@ size: showsize
 
 list:
 	@echo "CC       = $(CC)"
+	@echo "QUIET    = $(QUIET) (mode=$(BUILD_MODE))"
 	@"$(CC)" --version | head -1
 	@echo "OCD      = $(RISKY_OCD)"
 	@echo "OCD_CFG  = $(RISKY_OCD_CFG)"
