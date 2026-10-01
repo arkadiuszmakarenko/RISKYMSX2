@@ -990,9 +990,17 @@ CUSTOM_DEVICE_QUERY:
 
 READ_WRITE:
 	push	af			;A = device number, F = direction
+	push	bc			;B is the caller's sector count and C the
+					;media descriptor. The marker below needs
+					;B for its payload, so both have to survive
+					;it: the frame stores B at iy+3 and every
+					;transfer decision reads the count back
+					;out of it. Losing it here made every
+					;request look like a one-sector read.
 	ld	b,a
 	ld	a,MB_MK_RW_ENTER	;so the log says WHICH device was asked for
 	call	MB_MARK			;before the frame exists to read it from
+	pop	bc			;restore the real count / media
 	pop	af
 	push	hl			;saved caller HL / sector buffer
 	push	ix			;saved caller IX
