@@ -170,12 +170,29 @@ static uint8_t usb_send_cbw (const CBW_t *cbw) {
 }
 
 static uint8_t usb_recv_csw (CSW_t *csw) {
-    uint16_t plen = sizeof (CSW_t);
     uint8_t  res;
+    int zlp_retries = 0;
     for (int tries = 0; tries < 60; tries++) {
+        uint16_t plen = sizeof (CSW_t);
         res = USBHSH_GetEndpData (usb_in_ep, &in_tog,
                                   (uint8_t *)csw, &plen);
-        if (res == ERR_SUCCESS) return res;
+        /* The only successful CSW is the 13-byte struct. An ERR_SUCCESS
+         * with RX_LEN == 0 is the controller reporting the stick's "still
+         * busy, no data" ZLP - GetEndpData deliberately leaves the toggle
+         * alone for it (see its comment). That is exactly what a WRITE
+         * sees while the stick programs the block just received, and the
+         * old "any ERR_SUCCESS is a CSW" rule returned the caller an
+         * uninitialised struct while the real CSW stayed queued for the
+         * next command. Treat a short/empty success as "not ready", back
+         * off, and ask again. */
+        if ((res == ERR_SUCCESS) && (plen >= (uint16_t)sizeof (CSW_t))) {
+            return res;
+        }
+        if (res == ERR_SUCCESS) {
+            if (++zlp_retries >= 20) return ERR_USB_TRANSFER;
+            Delay_Us (100);
+            continue;
+        }
         if ((tries % 10) == 9) {
             uint8_t ep0 = RootHubDev[DEF_USB_PORT].bEp0MaxPks;
             (void)USBHSH_ClearEndpStall (ep0, (uint8_t)(0x80 | usb_in_ep));
@@ -689,8 +706,18 @@ static uint8_t scsi_write_sector_once (uint32_t lba, const uint8_t *buf,
         bytes_sent += chunk;
     }
 
-    Delay_Ms (1);
-    res = usb_recv_csw (&csw);
+    /* Match the READ path's CSW patience. A WRITE CSW only arrives after
+     * the stick has accepted the block, and cheap sticks stall that for
+     * tens of milliseconds (flash programming / wear levelling), which is
+     * precisely when a single usb_recv_csw() would give up. The read side
+     * has always retried this in an outer loop; writes now do too. */
+    int csw_retries = 0;
+    do {
+        Delay_Ms (1);
+        res = usb_recv_csw (&csw);
+        if (res == ERR_SUCCESS && csw.bCSWStatus == 0) break;
+        csw_retries++;
+    } while (csw_retries < 40);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
         printf ("USB: WR10 CSW rc=%02x status=%u\r\n",
                 (unsigned)res, (unsigned)csw.bCSWStatus);
