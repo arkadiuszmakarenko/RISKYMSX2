@@ -81,7 +81,8 @@ DRESULT disk_ioctl (BYTE pdrv, BYTE cmd, void *buff) {
     switch (cmd) {
     case GET_SECTOR_COUNT:
         if (usb_scsi_read_capacity (&bc, &bs) == 0) {
-            *(DWORD *)buff = bc + 1;
+            /* bc is already a count - see usb_disk.h. */
+            *(DWORD *)buff = bc;
             return RES_OK;
         }
         return RES_ERROR;

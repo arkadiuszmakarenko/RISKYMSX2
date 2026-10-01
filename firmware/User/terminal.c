@@ -4,11 +4,17 @@
 #include "psram.h"
 #include "usb_disk.h"
 #include "nextor.h"
-#include "dsk_image.h"
-#include "img_image.h"
+#include "raw_disk.h"
 #include "ff.h"
 #include <stdio.h>
+#include <string.h>
 #include "ch32v4x7.h"
+
+/* Declared here rather than by including Debug/debug.h: that header also
+ * drags in the USART bring-up declarations, and terminal.c has no use for
+ * them (it writes the MSX screen, not the UART). Same declaration
+ * nextor.c uses. */
+extern void Delay_Ms (uint32_t n);
 
 #pragma GCC push_options
 #pragma GCC optimize("Os")
@@ -33,12 +39,11 @@ TerminalMailbox g_term_mbox;
  * to be ambiguous ("is this row 21 the new one or the old one?").
  * One log line at session start settles it, and it costs one string.
  * Bump this whenever the key map changes. */
-#define TERM_MENU_VERSION "v3 (D/F1=nextor menu, N=boot)"
+#define TERM_MENU_VERSION "v4 (N=boot)"
 
 typedef enum {
     MENU_LIST,
     MENU_MAPPER,
-    MENU_NEXTOR,
 } MenuState;
 
 /* Per-file menu state. */
@@ -68,48 +73,8 @@ static struct {
 } s_menu;
 
 /* ------------------------------------------------------------------ */
-/* Nextor submenu state                                                 */
+/* Menu rendering                                                      */
 /* ------------------------------------------------------------------ */
-
-/* Declared up here rather than next to the renderer because
- * Terminal_Reset() has to clear the outcome line, and the submenu's
- * state is the same kind of thing s_menu is: per-session menu state
- * that a mapper swap must not carry into the next session. */
-
-typedef enum {
-    NXA_CREATE = 0,   /* create a new image of `sectors`      */
-    NXA_DELETE,       /* delete the image that is there      */
-    NXA_RESCAN,       /* re-probe both devices               */
-} NextorActionKind;
-
-typedef struct {
-    uint8_t  kind;     /* NextorActionKind */
-    uint32_t sectors;  /* NXA_CREATE only: image size in 512B sectors */
-} NextorAction;
-
-/* Action rows, at most five: four sizes while the image is missing,
- * one delete while it is there, plus the rescan row. The list is
- * rebuilt (never patched) by the render, so a create or a delete
- * cannot leave a row behind that points at a file which is gone.
- * s_menu.sel is the highlighted index on this screen - the same field
- * the file list and the mapper menu reuse for their own selection. */
-static NextorAction s_nx_act[5];
-static uint8_t      s_nx_nact;    /* rows in s_nx_act */
-
-/* Outcome line of the last action, row 14. Static rather than a local
- * because the action runs, THEN the screen is redrawn - and the
- * redraw is a full clear_screen(), so anything printed during the
- * action is gone.
- *
- * Sized to the 30-column screen budget (see print_nx_img_line): a
- * longer message is truncated rather than wrapped, because a wrapped
- * message would push the two hint lines off the bottom of the screen. */
-static char         s_nx_msg[30];
-
-/* Last percentage drawn by term_nextor_progress, 0xFFFF = none. */
-static uint32_t     s_nx_last_pct = 0xFFFFU;
-
-/* Number of pages needed to display s_menu.count files. */
 static uint16_t menu_page_count (void) {
     if (s_menu.count == 0U) return 1U;
     return (uint16_t)((s_menu.count + TERM_PAGE_SIZE - 1U) / TERM_PAGE_SIZE);
@@ -263,14 +228,6 @@ void Terminal_Reset (void) {
     s_menu.loaded = 0;
     s_menu.state  = MENU_LIST;
     s_menu.picked[0] = '\0';
-    /* Nextor submenu state. The action list is not rebuilt here - it is
-     * built by the render, which is the first thing that needs it - but
-     * the outcome line has to be cleared, or a session that started
-     * with a soft reset into the cart would show the previous
-     * session's "created 512 MB image" as if it were current. */
-    s_nx_msg[0]     = '\0';
-    s_nx_nact       = 0U;
-    s_nx_last_pct   = 0xFFFFU;
     s_list_pending = 1U;
 }
 
@@ -391,23 +348,16 @@ static void print_file_list (void) {
         newline ();
     }
 
-    /* Two hint rows at the bottom. Row 21 is the page indicator (it was
-     * the only footer before the Nextor menu existed), row 22 is free
-     * and carries the second half of the key map.
-     *
-     * "D" rather than "F1" is the entry point that works on this
-     * hardware: pressing F1 forwards no byte at all through the
-     * terminal's CHGET loop (see handle_list_key), so advertising it
-     * as the way in would send the user to a key that does nothing.
-     * F1 is still accepted for BIOSes that do deliver it. */
+    /* Two hint rows at the bottom: row 21 is the page indicator, row 22
+     * carries the key map. */
     char buf[32];
     move_cursor ((uint8_t)(1 + TERM_PAGE_SIZE), 1);
-    snprintf (buf, sizeof (buf), " Pg %u/%u   D=nextor menu",
+    snprintf (buf, sizeof (buf), " Pg %u/%u",
               (unsigned)(s_menu.page + 1U), (unsigned)menu_page_count ());
     out_str (buf);
     newline ();
     move_cursor ((uint8_t)(2 + TERM_PAGE_SIZE), 1);
-    out_str (" N=boot  F=old  ESC=scan");
+    out_str (" N=nextor B=mbr F=old ESC=scan");
     newline ();
 }
 
@@ -435,483 +385,6 @@ static void print_mapper_menu (void) {
         newline ();
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* Nextor screen                                                         */
-/* ------------------------------------------------------------------ */
-
-/* Defined further down: the FAT scan owns the FatFs directory walk,
- * and nextor_boot is the N-key launch sequence, which lives with the
- * key handlers so the one soft-reset-into-cart call site stays next to
- * its race-window comment. */
-static void scan_usb (void);
-static void nextor_boot (void);
-
-/* Two things need explaining on screen here, and neither can be
- * explained by a key alone:
- *
- *   1. The way in is 'D' on the file list, not F1. Physical F1 is
- *      accepted and advertised nowhere: on this hardware the MSX-side
- *      terminal loop forwards no byte for it at all (F1 is swallowed
- *      somewhere in the key path before CHSNS sees it), and the file
- *      list's footer is the only place a key can be announced.
- *
- *   2. Device 2's image is not shipped. It has to be as large as the
- *      stick can spare, and only the user knows how much that is, so
- *      creating it is an explicit act rather than something the
- *      firmware does when it does not find the file. The screen is
- *      that act: it reports what both devices look like right now,
- *      and offers the create / delete / rescan rows.
- *
- * Row map (0-based, the MSX accepts any 0..23):
- *
- *      0  title
- *      1  device 1, what it is
- *      2  device 1, the file and its size - or "(not present)"
- *      3  device 2, what it is
- *      4  device 2, the file and its size - or "(not present)"
- *      5  free space left on the stick
- *      6  (blank)
- *      7  action row 0, at TERM_NX_ROW0
- *      8  action row 1
- *      9  action row 2
- *     10  action row 3
- *     11  action row 4
- *     12  (blank)
- *     13  create progress bar
- *     14  outcome of the last action
- *     15-20 unused
- *     21  hint line 1
- *     22  hint line 2
- */
-#define TERM_NX_ROW0        7U     /* first action row               */
-#define TERM_NX_ROW_PROG    13U    /* create progress bar            */
-#define TERM_NX_ROW_MSG     14U    /* outcome of the last action     */
-
-/* Size presets offered for a new image, in 512-byte sectors. Four
- * entries rather than a typed-in number because this is an F1 screen
- * on a 32-column display with no text entry, and a size the user has
- * to count keystrokes to specify is one they will not specify.
- *
- * The floor is 16 MB because the volume inside the image has to come
- * out as FAT16 and MSX-DOS identifies anything below 4085 clusters as
- * FAT12 (see img_image.h); the ceiling is 512 MB because a bigger file
- * is minutes of cluster-chain walking over USB and this hardware's
- * stick is the one being carved up. */
-static const uint32_t kNxSectors[4] = {
-    32768UL,        /*  16 MB */
-    131072UL,       /*  64 MB */
-    262144UL,       /* 128 MB */
-    1048576UL,      /* 512 MB */
-};
-
-static void nextor_build_actions (void) {
-    uint8_t i;
-
-    s_nx_nact = 0U;
-    if (ImgImage_IsPresent () == 0U) {
-        for (i = 0U; i < (uint8_t)(sizeof (kNxSectors) / sizeof (kNxSectors[0])); i++) {
-            s_nx_act[s_nx_nact].kind    = NXA_CREATE;
-            s_nx_act[s_nx_nact].sectors = kNxSectors[i];
-            s_nx_nact++;
-        }
-    } else {
-        /* No create row while the image is there: ImgImage_Create()
-         * refuses to overwrite it, and offering a row that always
-         * fails would be worse than not offering it. The delete is
-         * the explicit, separate step. */
-        s_nx_act[s_nx_nact].kind    = NXA_DELETE;
-        s_nx_act[s_nx_nact].sectors = 0U;
-        s_nx_nact++;
-    }
-    s_nx_act[s_nx_nact].kind    = NXA_RESCAN;
-    s_nx_act[s_nx_nact].sectors = 0U;
-    s_nx_nact++;
-
-    if (s_menu.sel >= s_nx_nact) {
-        s_menu.sel = (uint16_t)(s_nx_nact - 1U);
-    }
-}
-
-/* Free space on the stick, in MiB, or `ok` = 0 when FatFs could not
- * say (stick absent, exFAT, or an I/O error). Shown because the size
- * presets are absolute: "512 MB" is only a sensible offer on a stick
- * that has 512 MB free, and this is the number the user needs to
- * decide.
- *
- * f_getfree() is not cheap - it walks the host FAT counting clusters,
- * a fraction of a second on a big stick - so it is called once per
- * screen redraw and its result is not cached across redraws. A
- * progress redraw never comes through here (it only repaints the bar),
- * so the create path is unaffected. */
-#if (FF_MAX_SS != FF_MIN_SS)
-/* csize is expressed in FF_MAX_SS units; with the two unequal the
- * sector size is per-volume and the arithmetic below is wrong. */
-#error "term_nx_free_mib assumes FF_MAX_SS == FF_MIN_SS (csize counts 512B sectors)"
-#endif
-static uint32_t term_nx_free_mib (uint8_t *ok) {
-    FATFS  *fs = (FATFS *)0;
-    DWORD   ncl = 0U;
-    uint32_t mib;
-
-    *ok = 0U;
-    if (f_getfree ("0:/", &ncl, &fs) != FR_OK || fs == (FATFS *)0) {
-        return 0U;
-    }
-    /* FatFs's "could not count" answer, which is also what a full
-     * volume reports - the same thing to show the user either way. */
-    if (ncl == 0xFFFFFFFFU) {
-        return 0U;
-    }
-    *ok = 1U;
-    mib = ((uint32_t)ncl * (uint32_t)fs->csize) / (1024U * 2U);  /* -> MiB */
-    return mib;
-}
-
-/* Create progress, in place on one row. Same shape and the same
- * discipline as term_progress_cb: throttle to a percentage change,
- * and skip the repaint when the MSX has not drained the ring - a
- * dropped cosmetic update is harmless, but a dropped one lands in the
- * middle of the "done" line the caller prints afterwards.
- *
- * ImgImage_Create() calls this once per 8 MiB hop of the cluster-chain
- * walk, so a 512 MB image is 64 callbacks: far below the rate that
- * would need throttling to be cheap, and the throttle is kept anyway
- * because the callback is the documented contract rather than an
- * implementation detail of today's step size. */
-static void term_nextor_progress (uint32_t done, uint32_t total) {
-    uint32_t pct;
-
-    if (total == 0U) {
-        return;
-    }
-    pct = (uint32_t)(((uint64_t)done * 100ULL) / (uint64_t)total);
-    if (pct == s_nx_last_pct) {
-        return;
-    }
-    s_nx_last_pct = pct;
-    if (g_term_mbox.out_n > 1024U) {
-        return;         /* MSX is behind; see term_progress_cb */
-    }
-    draw_bar (TERM_NX_ROW_PROG, 1U, pct);
-}
-
-/* One action row. The number in column 2 is the shortcut that runs
- * this row, so the digits and the labels cannot drift apart: both
- * come from the row's index. */
-static void print_nx_action (const NextorAction *a, uint8_t idx) {
-    char b[30];
-
-    if (a->kind == NXA_CREATE) {
-        snprintf (b, sizeof (b), "  %u  create  %u MB",
-                  (unsigned)(idx + 1U), (unsigned)(a->sectors / 2048U));
-    } else if (a->kind == NXA_DELETE) {
-        const char *path = ImgImage_PrimaryPath ();
-        snprintf (b, sizeof (b), "  %u  delete %s",
-                  (unsigned)(idx + 1U), (path != (const char *)0) ? path : "(none)");
-    } else {
-        snprintf (b, sizeof (b), "  %u  rescan devices", (unsigned)(idx + 1U));
-    }
-    out_str (b);
-}
-
-/* The device-2 line under its description. MiB rather than sectors
- * because a disk is thought of in megabytes; the exact sector count is
- * what the kernel reads from CAPACITY and nobody types it in.
- *
- * "missing" rather than "(not present)" for the same reason every
- * other line here is short: the MSX is 32 columns wide and a line that
- * reaches the last column leaves the cursor wrapped, so the CR/LF
- * after it skips a screen row. 30 characters is the budget, and the
- * s_nx_msg / print_nx_action buffers are sized to truncate at it
- * rather than wrap. */
-static void print_nx_img_line (void) {
-    if (ImgImage_IsPresent () != 0U) {
-        char b[30];
-        snprintf (b, sizeof (b), "   %s  %u MB",
-                  ImgImage_Path () ? ImgImage_Path () : "?",
-                  (unsigned)(ImgImage_SectorCount () / 2048U));
-        out_str (b);
-    } else {
-        char b[30];
-        const char *path = ImgImage_PrimaryPath ();
-        snprintf (b, sizeof (b), "   %s  missing",
-                  (path != (const char *)0) ? path : "(no name set)");
-        out_str (b);
-    }
-}
-
-static void print_nextor_menu (void) {
-    uint8_t i;
-    uint8_t have_free;
-    uint32_t free_mib;
-    char b[30];
-
-    /* Action list FIRST, because it decides how many rows there are
-     * and clamps s_menu.sel - the arrow below has to be placed against
-     * the post-clamp index, or a create (5 rows) followed by a redraw
-     * (2 rows) leaves the sprite parked on a row that is no longer
-     * highlighted. */
-    nextor_build_actions ();
-
-    /* Arrow first, same rationale as print_file_list / print_mapper_menu:
-     * the sprite is on-screen before any of the text that explains
-     * which row it is on. */
-    move_pointer (0, (uint8_t)(TERM_NX_ROW0 + s_menu.sel));
-
-    clear_screen ();
-    move_cursor (0, 0);
-    out_str (" NEXTOR   RET run  ESC back");
-    newline ();
-
-    /* Device 1. The name comes from the backend rather than being
-     * spelled out here, so this screen and nextor.c cannot end up
-     * describing different files. */
-    move_cursor (1, 0);
-    out_str (" D1 floppy 720K, read only");
-    newline ();
-    move_cursor (2, 1);
-    if (DskImage_IsPresent () != 0U) {
-        snprintf (b, sizeof (b), "   %s  %u sectors",
-                  DskImage_Path () ? DskImage_Path () : "?",
-                  (unsigned)DskImage_SectorCount ());
-    } else {
-        snprintf (b, sizeof (b), "   %s  missing",
-                  DskImage_PrimaryPath () ? DskImage_PrimaryPath ()
-                                          : "(no name set)");
-    }
-    out_str (b);
-    newline ();
-
-    /* Device 2. */
-    move_cursor (3, 0);
-    out_str (" D2 disk, read + write");
-    newline ();
-    move_cursor (4, 1);
-    print_nx_img_line ();
-    newline ();
-
-    /* Free space on the stick. */
-    free_mib = term_nx_free_mib (&have_free);
-    move_cursor (5, 0);
-    if (have_free != 0U) {
-        snprintf (b, sizeof (b), " free on stick: %u MB", (unsigned)free_mib);
-        out_str (b);
-    } else {
-        out_str (" free on stick: ?");
-    }
-    newline ();
-
-    for (i = 0U; i < s_nx_nact; i++) {
-        move_cursor ((uint8_t)(TERM_NX_ROW0 + i), 1);
-        print_nx_action (&s_nx_act[i], i);
-        newline ();
-    }
-
-    /* Progress row, blanked rather than left stale: the outcome line
-     * below it is what the user reads, and a half-drawn bar under a
-     * "failed" message is worse than no bar. */
-    move_cursor (TERM_NX_ROW_PROG, 0);
-    out_str ("                              ");
-    newline ();
-
-    move_cursor (TERM_NX_ROW_MSG, 1);
-    out_str (s_nx_msg);
-    newline ();
-
-    move_cursor (21, 1);
-    out_str (" RET run  ESC back to list");
-    newline ();
-    move_cursor (22, 1);
-    out_str (" N boots Nextor right now");
-    newline ();
-}
-
-/* Re-probe both devices, ignoring the outcome - the screen reports
- * what is there afterwards, and a failure to open is exactly the
- * "not present" case it renders. */
-static void nextor_rescan (void) {
-    (void)DskImage_Open ();
-    (void)ImgImage_Open ();
-    (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "rescanned the USB stick");
-}
-
-static void nextor_create (uint32_t sectors) {
-    const char *path = ImgImage_PrimaryPath ();
-    ImgErr       err;
-
-    if (path == (const char *)0) {
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "no image name configured");
-        print_nextor_menu ();
-        return;
-    }
-
-    /* Drop anything typed during the wait: those keys were meant for
-     * the screen the user was on before, and replaying them onto the
-     * freshly drawn one would look like the menu moved on its own. */
-    {
-        uint8_t junk;
-        while (kbd_pop (&junk)) { }
-    }
-
-    s_nx_last_pct = 0xFFFFU;
-    /* The "working" text goes on the outcome row, not the bar row: the
-     * bar redraws in place on its own row and would wipe whatever was
-     * written there. The two rows are adjacent for that reason. */
-    move_cursor (TERM_NX_ROW_MSG, 1);
-    out_str (" creating, please wait...");
-    draw_bar (TERM_NX_ROW_PROG, 1, 0U);
-
-    ImgImage_ProgressCB = term_nextor_progress;
-    err = ImgImage_Create (path, sectors);
-    ImgImage_ProgressCB = 0;
-
-    /* Re-open rather than leave the state half-updated: the screen
-     * below reports IsPresent(), and an image the screen calls
-     * "(not present)" while the kernel sees it is exactly the kind of
-     * disagreement that wastes an hour of debugging. ImgImage_Create
-     * leaves the file closed, so this is just a probe. */
-    ImgImage_Invalidate ();
-    (void)ImgImage_Open ();
-
-    printf ("TERM: nextor create '%s' %u sectors -> %d\r\n",
-            path, (unsigned)sectors, (int)err);
-
-    switch (err) {
-    case IMG_OK:
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
-                        "created %u MB image", (unsigned)(sectors / 2048U));
-        break;
-    case IMG_ERR_NO_SPACE:
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
-                        "not enough space on stick");
-        break;
-    case IMG_ERR_EXISTS:
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
-                        "image exists - delete first");
-        break;
-    case IMG_ERR_NOT_MOUNTED:
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "USB stick not mounted");
-        break;
-    case IMG_ERR_BAD_SIZE:
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
-                        "%u MB: bad FAT16 size",
-                        (unsigned)(sectors / 2048U));
-        break;
-    case IMG_ERR_FATFS:
-    default:
-        /* The specific FatFs error is on the UART log, which is where
-         * the FRESULT belongs; the screen cannot say more usefully. */
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
-                        "write failed - see UART log");
-        break;
-    }
-    /* The action list is a different list now (the create rows are
-     * gone, a delete row has appeared), so the old index means
-     * something else. Start at the top rather than let the clamp in
-     * nextor_build_actions() land the arrow on the last row. */
-    s_menu.sel = 0U;
-    print_nextor_menu ();
-}
-
-static void nextor_delete (void) {
-    const char *path = ImgImage_PrimaryPath ();
-    ImgErr       err;
-    uint8_t      junk;
-
-    if (path == (const char *)0) {
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "no image name configured");
-        print_nextor_menu ();
-        return;
-    }
-    while (kbd_pop (&junk)) { }
-
-    /* Drop the backend's view of the image BEFORE unlinking. Leaving
-     * it open would leave IsPresent() true and the cached sector count
-     * intact, so the redraw below would report a disk that is no
-     * longer there and offer "delete" instead of "create" - the screen
-     * and the stick disagreeing, which is worse than either alone. */
-    ImgImage_Invalidate ();
-    err = ImgImage_Delete (path);
-    if (err == IMG_OK) {
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "deleted the disk image");
-    } else {
-        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
-                        "delete failed - see UART log");
-    }
-    printf ("TERM: nextor delete '%s' -> %d\r\n", path, (int)err);
-    s_menu.sel = 0U;
-    print_nextor_menu ();
-}
-
-static void nextor_run (uint8_t idx) {
-    if (idx >= s_nx_nact) {
-        return;
-    }
-    switch (s_nx_act[idx].kind) {
-    case NXA_CREATE:
-        nextor_create (s_nx_act[idx].sectors);
-        break;
-    case NXA_DELETE:
-        nextor_delete ();
-        break;
-    case NXA_RESCAN:
-    default:
-        nextor_rescan ();
-        print_nextor_menu ();
-        break;
-    }
-}
-
-static void handle_nextor_key (uint8_t key) {
-    printf ("TERM: nextor key=0x%02X sel=%u nact=%u\r\n",
-            key, s_menu.sel, s_nx_nact);
-
-    if (key == 0x1E) {                   /* up */
-        if (s_menu.sel > 0U) s_menu.sel--;
-        move_pointer (0, (uint8_t)(TERM_NX_ROW0 + s_menu.sel));
-        return;
-    }
-    if (key == 0x1F) {                   /* down */
-        if ((int)s_menu.sel + 1 < (int)s_nx_nact) s_menu.sel++;
-        move_pointer (0, (uint8_t)(TERM_NX_ROW0 + s_menu.sel));
-        return;
-    }
-    if (key == 0x0D) {                   /* RET - run the highlighted row */
-        printf ("TERM: nextor RET -> action %u\r\n", s_menu.sel);
-        nextor_run ((uint8_t)s_menu.sel);
-        return;
-    }
-    if (key == 0x1B) {                   /* ESC - back to the file list */
-        printf ("TERM: nextor ESC -> file list\r\n");
-        s_menu.state = MENU_LIST;
-        /* Rescan: creating or deleting the image changes what the
-         * file list has to show, and the list is not otherwise
-         * refreshed on the way back. */
-        scan_usb ();
-        s_menu.page = 0;
-        s_menu.sel  = 0;
-        print_file_list ();
-        return;
-    }
-    if (key >= '1' && key <= '9') {
-        const uint8_t idx = (uint8_t)(key - '1');
-        if (idx < s_nx_nact) {
-            s_menu.sel = idx;
-            nextor_run (idx);
-        }
-        return;
-    }
-    if (key == 'N' || key == 'n') {
-        /* Booting from here is the point of the screen: the image the
-         * user just created is already open (nextor_create re-opens
-         * it), so the kernel finds device 2 on its first probe
-         * instead of waiting out the 2 s retry window. */
-        nextor_boot ();
-    }
-}
-
-
 
 /* ------------------------------------------------------------------ */
 /* FAT scan                                                             */
@@ -995,6 +468,408 @@ static void scan_usb (void) {
         s_menu.count++;
     }
     f_closedir (&dir);
+}
+
+/* ------------------------------------------------------------------ */
+/* Bootable-stick helper                                               */
+/* ------------------------------------------------------------------ */
+/*
+ * The stick is the disk (NEXTOR_PLAN.md D4), so Nextor boots from the
+ * stick's OWN MBR + active FAT partition - there is no image file to
+ * place on it. That makes one stick shape unbootable: a single
+ * whole-disk FAT volume, which is what `mkfs.fat /dev/sdX` produces and
+ * what most USB-stick vendors ship. Its filesystem starts at LBA 0, so
+ * there is no partition table at all, and a Nextor kernel with no
+ * partition to map has no drive. The host-side fixes are `parted`,
+ * `diskpart`, `sfdisk` - none of which the user necessarily has next to
+ * the machine. So the terminal can do it.
+ *
+ * WHAT IT WRITES, exactly:
+ *
+ *   sector 1   the volume's existing boot sector, with the BPB's
+ *              "hidden sectors" field (offset 28) set to 1
+ *   sector 0   a fresh MBR: zeroed bootstrap area, one primary
+ *              partition entry - active, start LBA 1, length = the rest
+ *              of the medium, type derived from the volume's own
+ *              cluster count - and the 55AA signature
+ *
+ * and NOTHING ELSE. Every sector from 2 up is left exactly as it was.
+ *
+ * The FAT needs no rewriting, and that is the part worth being sure
+ * about, because it is the part that decides whether this is safe: a FAT
+ * stores no absolute sector numbers anywhere outside its BPB. Cluster
+ * numbers are relative to the partition, and the partition's start is
+ * what "hidden sectors" describes. Moving a volume from LBA 0 to LBA 1
+ * is therefore a two-sector operation - exactly what every partitioning
+ * tool does when it shifts a partition, and the reason `sfdisk` can
+ * prepend a partition table to a superfloppy at all.
+ *
+ * WRITE ORDER IS THE SAFETY PROPERTY. Sector 1 goes FIRST. A power cut
+ * between the two writes leaves the volume intact and merely
+ * unpartitioned: the stick still mounts over this terminal, and the
+ * helper can simply be run again. The other order would leave a live
+ * partition table pointing at a boot sector that is about to be
+ * overwritten - a stick that no longer mounts anywhere.
+ */
+
+#define MBR_SECT        512U
+#define MBR_PT_OFF      446U    /* first of the four partition entries */
+#define MBR_PT_STRIDE   16U
+#define MBR_PT_MAX      4U
+#define MBR_SIG_OFF     510U
+
+/* Scratch for sector 0 as read, and for the MBR to write. Static rather
+ * than on the stack: 1 KiB of automatic storage is a lot to ask of an
+ * embedded stack, and the read-back verification reuses the first
+ * buffer, so both have to outlive the individual steps. */
+static uint8_t s_sect[MBR_SECT];
+static uint8_t s_mbr[MBR_SECT];
+
+/* What sector 0 says about the stick. */
+#define MBRST_VOLUME    0U  /* no partition table: a filesystem boot sector */
+#define MBRST_NO_PART   1U  /* a partition table, but no usable active entry */
+#define MBRST_READY     2U  /* a partition table with an active partition */
+
+static uint16_t mbr_get16 (const uint8_t *p) {
+    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint32_t mbr_get32 (const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void mbr_put32 (uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+/* --- What sector 0 is.
+ *
+ * The signature alone does not tell a partition table from a filesystem:
+ * a FAT boot sector ends in 55AA too, and always has. What separates
+ * them is the first instruction. A real filesystem begins with the
+ * mandatory `jmp short` (EB xx) or the 3-byte `jmp` (E9), because the
+ * jump instruction has to be a fixed size for the loader to know how far
+ * to skip the BPB. A partition table has no boot code at all in a
+ * stick that is not meant to chain-load, so its first byte is neither.
+ * This is the same test fdisk and mtools use.
+ */
+static uint8_t mbr_classify (const uint8_t *s) {
+    if (s[MBR_SIG_OFF] != 0x55U || s[MBR_SIG_OFF + 1U] != 0xAAU) {
+        return MBRST_VOLUME;
+    }
+    if (s[0] == 0xEBU || s[0] == 0xE9U) return MBRST_VOLUME;
+
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        const uint8_t *e = s + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (e[4] == 0U) continue;               /* empty entry              */
+        if ((e[0] & 0x80U) == 0U) continue;     /* not flagged bootable      */
+        if (mbr_get32(&e[8]) == 0U) continue;    /* starts at LBA 0: overlaps
+                                                 * the MBR itself           */
+        if (mbr_get32(&e[12]) == 0U) continue;  /* zero length              */
+        return MBRST_READY;
+    }
+    return MBRST_NO_PART;
+}
+
+/* --- The MBR partition type for the filesystem the BPB describes, or 0
+ *     if the BPB does not describe something we can partition.
+ *
+ * The type byte is what a PC's partition chooser (and Windows, and Linux)
+ * reads to decide which driver to mount with, so picking it from the
+ * volume's own cluster count is the difference between a stick that
+ * mounts everywhere and one that needs a manual "specify filesystem"
+ * prompt on another machine. The cluster count has to be derived - the
+ * boot sector does not store it - and derived exactly as the FAT
+ * specification defines it, because the FAT12/FAT16 boundary at 4085 is
+ * where drivers change.
+ *
+ * Note this reads the FAT count (offset 16) and not a hard-coded two: a
+ * volume formatted with three FATs, which some tools still do, has to be
+ * measured with three or the derived cluster count is wrong.
+ */
+static uint8_t mbr_fattype (const uint8_t *s) {
+    uint16_t bps, rsvd, spf, root, tot16;
+    uint8_t  spc, nfat;
+    uint32_t tot, data, clusters;
+
+    bps = mbr_get16(&s[11]);
+    if (bps != 512U) return 0U;                 /* the whole mailbox is 512 */
+    spc = s[13];
+    if (spc == 0U) return 0U;
+    rsvd  = mbr_get16(&s[14]);
+    nfat  = s[16];
+    spf   = mbr_get16(&s[22]);
+    root  = mbr_get16(&s[17]);
+    tot16 = mbr_get16(&s[19]);
+    if (nfat == 0U || spf == 0U) return 0U;
+
+    /* tot16 is authoritative when set and zero for FAT32 by definition. */
+    tot = (tot16 != 0U) ? (uint32_t)tot16 : mbr_get32(&s[32]);
+    if (tot == 0U) return 0U;
+
+    data = (uint32_t)rsvd + (uint32_t)nfat * (uint32_t)spf
+         + ((uint32_t)root * 32U) / (uint32_t)bps;
+    if (tot <= data) return 0U;                 /* more metadata than volume */
+    clusters = (tot - data) / (uint32_t)spc;
+
+    if (clusters < 4085U)  return 0x01U;       /* FAT12 */
+    if (clusters < 65525U) return 0x06U;       /* FAT16 */
+    return 0x0BU;                              /* FAT32 */
+}
+
+/* --- Assemble the MBR into s_mbr.
+ *
+ * The 446-byte bootstrap area is left zeroed on purpose. Nothing on the
+ * cartridge chain-loads an MBR - the MSX goes straight to the Z80 and
+ * the Z80 maps a ROM - so boot code in that area would be dead bytes we
+ * would have to invent, and inventing it is exactly the kind of thing
+ * that turns a working stick into an unbootable one.
+ *
+ * The CHS triple in a partition entry is legacy: every reader that
+ * matters uses the LBA fields, and 0xFE / 0xC0 in the head and cylinder-
+ * high bytes is the conventional "this entry is LBA, ignore the CHS"
+ * marker. It is filled in rather than zeroed because old CHS-only code
+ * (a BIOS `int 13h`, MSX-DOS's own CHS path) does read it, and a zeroed
+ * CHS reads as "cylinder 0, head 0, sector 0", which is not a sector.
+ */
+static void mbr_build (uint32_t lba, uint32_t nsec, uint8_t type) {
+    uint8_t *e = s_mbr + MBR_PT_OFF;
+    uint32_t cyl;
+
+    memset (s_mbr, 0, MBR_SECT);
+    s_mbr[MBR_SIG_OFF]     = 0x55U;
+    s_mbr[MBR_SIG_OFF + 1U] = 0xAAU;
+
+    cyl = lba / 63U;
+    if (cyl > 1023U) cyl = 1023U;
+
+    e[0] = 0x80U;                              /* active / bootable         */
+    e[1] = (uint8_t)(cyl & 0xFFU);
+    e[2] = (uint8_t)(((cyl >> 8) & 0x03U) | 0xC0U);
+    e[3] = (uint8_t)((lba % 63U) + 1U);
+    e[4] = 0xFEU;
+    e[5] = type;
+    e[6] = e[2];
+    e[7] = e[3];
+    mbr_put32(&e[8], lba);
+    mbr_put32(&e[12], nsec);
+}
+
+/* --- Wait for one keypress, up to `ms`. Returns 0xFF on timeout.
+ *
+ * Safe to block on: the key FIFO is filled by an EXTI interrupt on this
+ * side and the output ring is drained by an interrupt on the MSX side, so
+ * both keep moving while this spins. Nothing on the RISC-V needs the main
+ * loop to be inside Terminal_Service for either to happen.
+ */
+static uint8_t term_wait_key (uint32_t ms) {
+    uint32_t waited = 0U;
+    for (;;) {
+        uint8_t k;
+        if (kbd_pop (&k)) return k;
+        if (waited >= ms) return 0xFFU;
+        Delay_Ms (10U);
+        waited += 10U;
+    }
+}
+
+static void mbr_end (const char *line) {
+    out_str (line);
+    newline ();
+    term_wait_drain (200U);
+    (void)term_wait_key (5000U);
+}
+
+/* --- The 'B' entry point: report what the stick looks like, and make it
+ *     bootable if it is not.
+ *
+ * Every step reports before doing and re-reads after writing. That is
+ * more output than a menu usually prints, and it is deliberate: this
+ * routine rewrites sector 0 of a filesystem the user did not create here,
+ * and the only thing that makes a user trust that afterwards is being
+ * able to see the answer come back off the stick rather than out of the
+ * firmware.
+ */
+static void mbr_helper (void) {
+    uint32_t total, nsec;
+    uint8_t  state, fattype, k;
+    char buf[32];
+
+    clear_screen ();
+    out_str (" Bootable-stick check");
+    newline ();
+    newline ();
+
+    printf ("TERM: mbr_helper entry\r\n");
+
+    /* RawDisk_Probe() is the expensive one - it may have to enumerate a
+     * freshly plugged stick, which is hundreds of milliseconds. Safe
+     * here and nowhere else: the terminal mapper is active, so no
+     * Nextor mailbox request can be in flight while it runs. */
+    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U) {
+        out_str (" No USB stick found.");
+        newline ();
+        mbr_end (" Cannot read sector 0.");
+        return;
+    }
+    total = RawDisk_SectorCount ();
+    snprintf (buf, sizeof (buf), " Stick: %u MB, vendor [%s]",
+              (unsigned)((uint64_t)total / 2048U), RawDisk_Manufacturer ());
+    out_str (buf);
+    newline ();
+
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) {
+        out_str (" Read of sector 0 FAILED.");
+        newline ();
+        mbr_end (" Nothing was written.");
+        return;
+    }
+
+    state = mbr_classify (s_sect);
+    if (state == MBRST_READY) {
+        const uint8_t *e = s_sect + MBR_PT_OFF;
+        snprintf (buf, sizeof (buf), " Already bootable: type %02Xh, LBA %u",
+                  (unsigned)e[5], (unsigned)mbr_get32(&e[8]));
+        out_str (buf);
+        newline ();
+        newline ();
+        out_str (" Nothing to do.");
+        newline ();
+        mbr_end ("");
+        return;
+    }
+
+    fattype = mbr_fattype (s_sect);
+    if (state == MBRST_NO_PART) {
+        /* Refuse rather than guess. There IS a partition table here, so
+         * the filesystem's real start is not sector 0 and this helper
+         * has no way to find it - it would have to parse the entries and
+         * guess which one is the intended volume, and guessing at sector
+         * 0 of somebody's disk is not a thing to do. */
+        out_str (" Has a partition table, but no");
+        newline ();
+        out_str (" active partition. Not touching");
+        newline ();
+        out_str (" it - fix this on a PC.");
+        newline ();
+        mbr_end ("");
+        return;
+    }
+    if (fattype == 0U) {
+        out_str (" Sector 0 is not a 512-byte");
+        newline ();
+        out_str (" FAT boot sector, so there is");
+        newline ();
+        out_str (" no volume to partition.");
+        newline ();
+        mbr_end (" Nothing was written.");
+        return;
+    }
+
+    /* Everything checks out: a whole-disk FAT volume. */
+    nsec = total - 1U;                          /* everything past the MBR */
+    mbr_build (1U, nsec, fattype);
+
+    out_str (" Found a whole-disk volume:");
+    newline ();
+    snprintf (buf, sizeof (buf), "   %s, no partition",
+              fattype == 0x01U ? "FAT12" : fattype == 0x06U ? "FAT16" : "FAT32");
+    out_str (buf);
+    newline ();
+    newline ();
+    out_str (" Will write:");
+    newline ();
+    out_str ("  LBA 1 = its boot sector,");
+    newline ();
+    snprintf (buf, sizeof (buf), "  LBA 0 = MBR: 1 part %02Xh, boot,",
+              (unsigned)fattype);
+    out_str (buf);
+    newline ();
+    snprintf (buf, sizeof (buf), "           start LBA 1, %u MB", (unsigned)(nsec / 2048U));
+    out_str (buf);
+    newline ();
+    newline ();
+    out_str (" Sectors 2 and up: UNTOUCHED.");
+    newline ();
+    newline ();
+    out_str (" Write it? (Y/N)");
+    newline ();
+
+    k = term_wait_key (15000U);
+    if (k != 'Y' && k != 'y') {
+        printf ("TERM: mbr_helper cancelled (key=0x%02X)\r\n", (unsigned)k);
+        mbr_end (" Cancelled - nothing written.");
+        return;
+    }
+
+    /* Hidden sectors = 1: the volume now starts one sector in. Set on the
+     * copy that goes to sector 1, and it is the ONLY byte of the
+     * filesystem's own metadata that changes. */
+    mbr_put32(&s_sect[28], 1U);
+
+    printf ("TERM: mbr_helper writing LBA 1 (boot sector)\r\n");
+    if (RawDisk_WriteSectors (1U, 1U, s_sect) == 0U) {
+        printf ("TERM: mbr_helper LBA 1 write FAILED\r\n");
+        out_str (" FAILED at sector 1 - the MBR");
+        newline ();
+        out_str (" was NOT written, so the");
+        newline ();
+        out_str (" stick is unchanged.");
+        newline ();
+        mbr_end (" Run this again to retry.");
+        return;
+    }
+    printf ("TERM: mbr_helper writing LBA 0 (MBR)\r\n");
+    if (RawDisk_WriteSectors (0U, 1U, s_mbr) == 0U) {
+        printf ("TERM: mbr_helper LBA 0 write FAILED\r\n");
+        out_str (" FAILED at sector 0. Sector 1");
+        newline ();
+        out_str (" now holds a boot sector but");
+        newline ();
+        out_str (" there is no partition table.");
+        newline ();
+        mbr_end (" Reformat, then run this again.");
+        return;
+    }
+
+    /* Verify against the stick, not against what we meant to write. */
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) {
+        mbr_end (" Wrote both sectors, but could");
+        newline ();
+        out_str (" not read sector 0 back to");
+        newline ();
+        out_str (" verify. Check on a PC.");
+        return;
+    }
+    if (mbr_classify (s_sect) != MBRST_READY) {
+        printf ("TERM: mbr_helper verify FAILED\r\n");
+        mbr_end (" Wrote, but the stick does");
+        newline ();
+        out_str (" not read back bootable.");
+        return;
+    }
+    if (RawDisk_ReadSectors (1U, 1U, s_sect) == 0U ||
+        mbr_get32(&s_sect[28]) != 1U) {
+        printf ("TERM: mbr_helper verify BPB FAILED\r\n");
+        mbr_end (" MBR is good but sector 1");
+        newline ();
+        out_str (" did not take the boot sector.");
+        return;
+    }
+
+    out_str (" Done - the stick is bootable.");
+    newline ();
+    newline ();
+    out_str (" Reboot, then press N in the");
+    newline ();
+    out_str (" file list to boot Nextor.");
+    newline ();
+    printf ("TERM: mbr_helper OK\r\n");
+    mbr_end ("");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1318,39 +1193,12 @@ static void handle_list_key (uint8_t key) {
     } else if (key == 'N' || key == 'n') {
         nextor_boot ();
         return;
-    } else if (key == 0x3C || key == 0x01 || key == 'D' || key == 'd') {
-        /* -> the Nextor submenu.
-         *
-         * 'D' is the documented key and F1 is a bonus, because F1
-         * cannot be relied on here. The MSX side forwards CHGET's
-         * return value verbatim (RomLoader/asm/terminal.asm) and
-         * CHGET only produces a byte for a function key if the
-         * machine's BIOS key buffer actually receives it. Measured on
-         * this hardware: pressing F1 forwards NOTHING - not 0x01, not
-         * the 0x3C matrix code, not any byte at all - while ordinary
-         * keys arrive normally. Something in the key path eats the
-         * F-keys before CHSNS can report them, and the fix for that
-         * belongs on the MSX side (scan the matrix directly, SNSMAT)
-         * rather than in a key guess here.
-         *
-         * So the entry point is a plain letter, which every BIOS
-         * delivers, and the two F1 encodings are still accepted for
-         * the machines where they do arrive:
-         *
-         *   0x3C  the raw key-matrix code, on a BIOS whose KEYB table
-         *          gives F1 a matrix code rather than a token
-         *   0x01  the KEY-string token, which is what a stock
-         *          MSX-BIOS returns for F1
-         *
-         * None of the three means anything else on this screen, so
-         * accepting all of them costs nothing - and picking the wrong
-         * one would leave the menu with an entry point the user can
-         * see advertised in the footer and never reach. */
-        printf ("TERM: key 0x%02X -> NEXTOR menu\r\n", key);
-        s_menu.sel   = 0;          /* first action row */
-        s_menu.state = MENU_NEXTOR;
-        s_nx_msg[0]  = '\0';       /* no stale outcome from a prior visit */
-        print_nextor_menu ();
+    } else if (key == 'B' || key == 'b') {
+        /* Make the stick bootable, if it is not already. See the
+         * "Bootable-stick helper" section for why this is needed at
+         * all and what it is allowed to touch. */
+        mbr_helper ();
+        print_file_list ();
         return;
     }
     /* redraw cursor + arrow on the line we landed on (in-page row) */
@@ -1422,13 +1270,10 @@ void Terminal_Service (void) {
         case MENU_MAPPER:
             handle_mapper_key (key);
             break;
-        case MENU_NEXTOR:
-            handle_nextor_key (key);
-            break;
         case MENU_LIST:
         default:
             /* default, not a plain MENU_LIST: s_menu.state is only
-             * ever set to one of the three, so a corrupt value would
+             * ever set to one of the two, so a corrupt value would
              * otherwise land in the file list and quietly answer with
              * file-selection behaviour. */
             handle_list_key (key);

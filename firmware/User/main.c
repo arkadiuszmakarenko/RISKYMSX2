@@ -16,6 +16,7 @@
 #include "scc.h"
 #include "loader.h"
 #include "nextor.h"
+#include "raw_disk.h"
 #include "terminal.h"
 #include "usb_disk.h"
 #include "usb_tests.h"
@@ -77,7 +78,15 @@ int main (void) {
      * from the terminal menu (N key) starts with a clean bank select +
      * ATA register file + PATA device signature. The actual USB
      * enumeration is driven by Nextor_Service() from the main loop;
-     * this only primes the in-RAM state struct. */
+     * this only primes the in-RAM state struct.
+     *
+     * RawDisk_Init() is a power-on call, and it has to be here rather than
+     * in Nextor_Init(): a mapper swap does not change whether a USB stick
+     * is plugged in, so re-initialising the medium on every swap just
+     * throws away a good enumeration and makes the next session start
+     * with a multi-hundred-millisecond re-probe competing with the Z80's
+     * first HANDSHAKE. */
+    RawDisk_Init ();
     Nextor_Init ();
 
     printf ("\r\n=== boot complete (terminal mapper active) ===\r\n");

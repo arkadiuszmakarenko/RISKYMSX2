@@ -456,8 +456,15 @@ static uint8_t scsi_read_capacity10_once (uint32_t *block_count,
         return 3;
     }
     Delay_Ms (1);
-    *block_count = ((uint32_t)cap_buf[0] << 24) | ((uint32_t)cap_buf[1] << 16)
-                 | ((uint32_t)cap_buf[2] << 8)  |  (uint32_t)cap_buf[3];
+    /* READ CAPACITY returns the LAST LBA, not a count. Callers (diskio.c's
+     * disk_ioctl, raw_disk.c) all want a block COUNT, so the +1 belongs
+     * here rather than in four call sites. Forgetting it costs exactly the
+     * last sector of the medium: the capacity still looks sane, every read
+     * below it works, and a partition whose last cluster happens to end on
+     * the final block fails with a read error instead of a clean
+     * "out of range". */
+    *block_count = ((((uint32_t)cap_buf[0] << 24) | ((uint32_t)cap_buf[1] << 16)
+                   | ((uint32_t)cap_buf[2] << 8)  |  (uint32_t)cap_buf[3]) + 1U);
     *block_size  = ((uint32_t)cap_buf[4] << 24) | ((uint32_t)cap_buf[5] << 16)
                  | ((uint32_t)cap_buf[6] << 8)  |  (uint32_t)cap_buf[7];
     return 0;
@@ -493,7 +500,11 @@ static uint8_t scsi_read_capacity16_once (uint32_t *block_count,
                         | ((uint32_t)cap_buf[5] << 16)
                         | ((uint32_t)cap_buf[6] << 8)
                         |  (uint32_t)cap_buf[7];
-        *block_count = lba_hi ? 0xFFFFFFFFU : lba_lo;
+        /* Same LAST-LBA-to-count conversion as the (10) form above. A
+         * device too big for 32 bits cannot be addressed by anything that
+         * takes a uint32_t block count, so it saturates rather than
+         * wrapping to a small number that would look like a tiny disk. */
+        *block_count = lba_hi ? 0xFFFFFFFFU : (lba_lo + 1U);
         *block_size  = ((uint32_t)cap_buf[8] << 24)
                      | ((uint32_t)cap_buf[9] << 16)
                      | ((uint32_t)cap_buf[10] << 8)
@@ -838,7 +849,7 @@ static uint8_t s_fatfs_mounted = 0U;
  * Use this from any CLI/file op BEFORE calling f_open / f_opendir so a
  * missed `USB` step (or a stick unplug/replug) doesn't silently fail
  * with FR_NO_FILESYSTEM (12).  Idempotent: cheap to call repeatedly. */
-uint8_t USB_TryEnsureMounted (void) {
+uint8_t USB_TryEnsureEnumerated (void) {
     /* 1. Poll the root hub.  Up to 5 attempts: freshly plugged sticks
      *    often need 200-500 ms to finish their post-enumeration
      *    housekeeping (especially flash translation layer init).
@@ -853,14 +864,12 @@ uint8_t USB_TryEnsureMounted (void) {
                 s_fatfs_mounted = 0U;
                 printf ("USB: stick removed, volume unmounted\r\n");
             }
-            /* The image file's FIL handle and the PSRAM sector cache
-             * both belong to a volume that no longer exists: drop the
-             * handle (any later f_lseek/f_read would fail with
-             * FR_INVALID_OBJECT) and reset the fill cursor so the next
-             * idle pass re-probes and restarts the fill from the
-             * (re-)plugged stick. Guarded by whether the Nextor engine
-             * has ever been primed, so callers before main()'s
-             * Nextor_Init are harmless no-ops. */
+            /* Whatever is caching block data against the old stick -
+             * the Nextor engine's capacity/INQUIRY state, or a FatFs
+             * volume - belongs to a medium that no longer exists. Drop it
+             * so the next idle pass re-probes the (re-)plugged stick.
+             * Guarded by whether the Nextor engine has ever been primed,
+             * so callers before main()'s Nextor_Init are harmless no-ops. */
             Nextor_CacheInvalidate ();
             return DEF_ERR_DETECT;
         }
@@ -871,6 +880,14 @@ uint8_t USB_TryEnsureMounted (void) {
         return DEF_ERR_ENUM;
     }
     if (r != DEF_SUCCESS && r != DEF_DEFAULT) {
+        return r;
+    }
+    return DEF_SUCCESS;
+}
+
+uint8_t USB_TryEnsureMounted (void) {
+    uint8_t r = USB_TryEnsureEnumerated ();
+    if (r != DEF_SUCCESS) {
         return r;
     }
 

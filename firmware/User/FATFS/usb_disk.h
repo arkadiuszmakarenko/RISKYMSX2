@@ -65,7 +65,13 @@ uint8_t USBH_EnumRootDevice (uint8_t usb_port);
  * appeared, or return a status code if the device went away. */
 uint8_t USBH_PreDeal (void);
 
-/* SCSI commands used by the disk layer */
+/* SCSI commands used by the disk layer
+ *
+ * block_count is the medium's block COUNT (last LBA + 1), not the last LBA
+ * that SCSI READ CAPACITY puts on the wire. The conversion happens once,
+ * inside usb_disk.c, so that no caller has to remember which of the two it
+ * is holding - the mistake that lost the last sector of every stick before
+ * the +1 was moved here. */
 uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size);
 uint8_t usb_scsi_read_sector (uint32_t lba, uint8_t *buf, uint32_t block_size);
 uint8_t usb_scsi_write_sector (uint32_t lba, const uint8_t *buf, uint32_t block_size);
@@ -133,8 +139,22 @@ void USB_ListDir (const char *path, uint16_t max);
 /* Lazy-mount helper: poll the root hub, enumerate if needed, f_mount()
  * if not already mounted.  Returns DEF_SUCCESS on success, DEF_ERR_*
  * otherwise.  Call before any FatFs API (f_open, f_opendir, etc.) so a
- * missed `USB` step doesn't silently produce FR_NO_FILESYSTEM. */
+ * missed `USB` step doesn't silently produce FR_NO_FILESYSTEM.
+ *
+ * This is USB_TryEnsureEnumerated() plus the f_mount step.  A consumer that
+ * talks to the stick as a BLOCK DEVICE and never touches FatFs - raw_disk.c,
+ * which hands the raw medium to the Nextor driver - must call
+ * USB_TryEnsureEnumerated() instead: it gets the enumeration and the
+ * disconnect notification without requiring the volume to be mountable,
+ * which is what lets a stick with no (or no readable) filesystem still show
+ * up as a disk. */
 uint8_t USB_TryEnsureMounted (void);
+
+/* Enumeration only: poll the root hub, enumerate a newly attached device,
+ * unmount + invalidate on disconnect.  No f_mount, no filesystem required.
+ * Idempotent and cheap to call repeatedly.  Returns DEF_SUCCESS when the
+ * device is enumerated and its bulk endpoints are usable. */
+uint8_t USB_TryEnsureEnumerated (void);
 
 /* NOTE: the standalone tests (verbose enumeration diagnostic, SCSI
  * read test, FAT integration test) now live in USB_Host/usb_tests.{c,h}

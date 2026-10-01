@@ -311,8 +311,8 @@ void USB_Tests_Enumerate (void) {
         printf ("USBD:   attempt %d...\r\n", attempt);
         uint8_t r = USB_ScsiReadCapacityOnce (&bc, &bs);
         if (r == 0) {
-            printf ("USBD:   OK last_lba=%u (=%u blocks) block_size=%u\r\n",
-                    (unsigned)bc, (unsigned)(bc + 1U), (unsigned)bs);
+            printf ("USBD:   OK blocks=%u (last LBA %u) block_size=%u\r\n",
+                    (unsigned)bc, (unsigned)(bc - 1U), (unsigned)bs);
             printf ("USBD: enumeration + READ CAPACITY succeeded!\r\n");
             return;
         }
@@ -333,7 +333,7 @@ void USB_Tests_Enumerate (void) {
     {
         uint8_t r16 = USB_ScsiReadCapacity16Once (&bc, &bs);
         if (r16 == 0) {
-            printf ("USBD:   OK last_lba=%u block_size=%u\r\n",
+            printf ("USBD:   OK blocks=%u block_size=%u\r\n",
                     (unsigned)bc, (unsigned)bs);
             return;
         }
@@ -414,12 +414,12 @@ void USB_Tests_Scsi (void) {
         printf ("UREAD: ERR READ CAPACITY failed (rc=%u)\r\n", (unsigned)rc);
         return;
     }
-    uint64_t total_bytes = (uint64_t)(bc + 1U) * (uint64_t)bs;
+    uint64_t total_bytes = (uint64_t)bc * (uint64_t)bs;
     printf ("UREAD: READ CAPACITY OK\r\n");
+    printf ("  total blocks    = %lu\r\n", (unsigned long)bc);
     printf ("  last LBA        = %lu (0x%lx)\r\n",
-            (unsigned long)bc, (unsigned long)bc);
+            (unsigned long)(bc - 1U), (unsigned long)(bc - 1U));
     printf ("  block size      = %lu bytes\r\n", (unsigned long)bs);
-    printf ("  total blocks    = %lu\r\n", (unsigned long)(bc + 1U));
     printf ("  total capacity  = %llu bytes (%llu MiB)\r\n",
             (unsigned long long)total_bytes,
             (unsigned long long)(total_bytes / (1024ULL * 1024ULL)));
@@ -469,13 +469,16 @@ void USB_Tests_Scsi (void) {
                 (unsigned)sector[510], (unsigned)sector[511]);
     }
 
-    /* Step 6: spot reads at 4 LBAs across the volume. */
+    /* Step 6: spot reads at 4 LBAs across the volume.
+     *
+     * bc is a block count (usb_disk.h), so the last valid LBA is bc-1 and
+     * these four are quarters of the volume, not an LBA past the end. */
     if (bc >= 1) {
         uint32_t samples[4] = {
             1U,
-            (bc + 3U) / 4U,
-            (bc + 1U) / 2U,
-            (3U * bc + 3U) / 4U
+            bc / 4U,
+            bc / 2U,
+            (3U * bc) / 4U
         };
         printf ("UREAD: spot-reading 4 sectors across the volume...\r\n");
         for (int i = 0; i < 4; i++) {

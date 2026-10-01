@@ -27,51 +27,57 @@
  * (command dispatch, result FIFO, disk access) lives in nextor.c.
  *
  * ---------------------------------------------------------------------------
- * The device table
+ * The device
  * ---------------------------------------------------------------------------
- * The driver reports two devices to the kernel (driver query 5 answers
- * 2, and the jump table in driver.asm is the only place that number is
- * written down). Neither of them is the raw USB stick: each is one file
- * on the stick, read out of FatFs one sector at a time, behind the
- * mailbox.
+ * The driver reports ONE device to the kernel (driver query 5 answers 1, and
+ * the jump table in driver.asm is the only place that number is written
+ * down). That one device IS the USB stick: the raw SCSI medium, addressed by
+ * LBA, with its capacity and block size taken from READ CAPACITY during
+ * enumeration. There is no filesystem anywhere in the data path - no FatFs,
+ * no f_lseek, no file handle - and no container image standing in for the
+ * medium. Backed by raw_disk.c.
  *
- *   device 1   a fixed, read-only 720 KiB MSX-DOS floppy image
- *              (NEXTOR.DSK: a bare 1440 x 512-byte FAT12 image with no
- *              partition table). Flagged to the kernel as a floppy disk
- *              drive, which is what makes it map a drive straight onto
- *              sector 0 instead of scanning for partitions it does not
- *              have. Backed by dsk_image.c.
+ * That means the drive looks to Nextor exactly as an IDE disk looks, and the
+ * kernel's own machinery does the rest: sector 0 is an MBR, the MBR's
+ * partition entries lead to a FAT volume, and the volume's boot sector is
+ * what gets executed. driver.asm is written in the shape of the reference
+ * Sunrise IDE driver for Nextor v3 for the same reason - it is the case this
+ * hardware actually is.
  *
- *   device 2   a read-write disk image (NEXTOR.IMG: a file whose length
- *              IS the capacity, containing a partition table and a
- *              FAT16 volume). Flagged removable and NOT flagged as a
- *              floppy, so the kernel runs its normal partition scan and
- *              finds the MBR. Backed by img_image.c, which can also
- *              create and delete the file.
- *
- * Every device-scoped command carries the device number as its first
- * argument, so the two share one command set and one driver entry point
- * with no per-device branch on the firmware side beyond the dispatch
- * table at the bottom of nextor.c. The device number is a wire field,
- * not a compile-time constant, precisely so that adding a third device
- * later is a table entry and a `ld b,3` - not a second protocol.
+ * Having exactly one device is also why the wire protocol carries NO device
+ * byte. Version 2 prepended one to every device-scoped command so that two
+ * devices could share one command set; with one device it is a field that
+ * can only ever be wrong, and the boot log showed it going wrong.
+ * Reintroducing it (and the dispatch table behind it) is a clean future step
+ * once a second medium exists, not something to carry now.
  *
  * ---------------------------------------------------------------------------
- * Version 2 of the wire protocol
+ * Version 3 of the wire protocol
  * ---------------------------------------------------------------------------
- * v1 had a single device and no device byte. v2 prepends the device
- * number to CAPACITY / STATUS / READ / WRITE / STAPEEK. The handshake
- * answer carries the version byte and driver.asm checks it against
- * MB_EXPECT, so a driver built against one revision and a firmware
- * built against the other fails the handshake at boot - loudly, with
- * the kernel skipping this driver - rather than answering every command
- * for the wrong device.
+ * v1 had a single device and no device byte. v2 added the device byte
+ * anyway, for a second device that has since been replaced by the raw stick
+ * itself. v3 drops the byte again and changes two answers:
+ *
+ *   - CAPACITY now returns the whole 12-byte Nextor parameter block
+ *     (medium type, sector size, sector count, flags, CHS) instead of
+ *     blocks + blocksize. The kernel wants all twelve bytes anyway, so this
+ *     removes the driver assembling byte by byte a block it could only
+ *     partly invent, and turns "no medium" into an ordinary answer
+ *     (sector count 0) instead of a special path through the driver.
+ *
+ *   - IDENT is new: it returns the stick's INQUIRY strings, so Nextor's
+ *     device screen names the actual drive instead of a hardcoded label.
+ *
+ * The handshake answer carries the version byte and driver.asm checks it
+ * against MB_EXPECT, so a driver built against one revision and a firmware
+ * built against the other fails the handshake at boot - loudly, with the
+ * kernel skipping this driver - rather than answering every command with
+ * arguments in the wrong places.
  *
  * The mailbox window itself has NOT moved. It is decoded by address in
- * every paged-in bank and the window test in cart.c keeps A0..A3, so
- * the register layout is tied to the low address bits and changing it
- * would mean changing the decode. It has been 0x7FF0..0x7FF5 since v1
- * and stays there.
+ * every paged-in bank and the window test in cart.c keeps A0..A3, so the
+ * register layout is tied to the low address bits and changing it would mean
+ * changing the decode. It has been 0x7FF0..0x7FF5 since v1 and stays there.
  */
 
 #ifndef __NEXTOR_H
@@ -138,55 +144,93 @@ extern "C" {
 #define NEXTOR_STAT_ERR           0x20U   /* command failed             */
 #define NEXTOR_STAT_RX_AVAIL      0x10U   /* result FIFO not empty      */
 
-/* ERR port values. */
+/* ERR port values.
+ *
+ * Deliberately three, not five. The v2 set also had READONLY and NODEV,
+ * and with the raw drive both became unraisable: there is no read-only
+ * device to report (the stick is writable and says so in its parameter
+ * block, so the kernel never sends a write it expects to be refused) and
+ * no device byte that could name a device this firmware does not have.
+ * An ERR code nothing can raise is a code the driver cannot be written
+ * against correctly, so they are gone rather than left as 0xFF. */
 #define NEXTOR_ERR_NONE           0x00U
+/* No medium. Distinct from IO because the driver maps them to different
+ * DOS errors - .NRDY ("insert disk") versus .DISK - and reporting a
+ * failed transfer as "no medium" makes the kernel unmap a drive that is
+ * present. */
 #define NEXTOR_ERR_NO_MEDIA       0x01U
+/* The transfer itself failed: a SCSI error, a bus error, or a range
+ * check rejection. */
 #define NEXTOR_ERR_IO             0x02U
+/* Reserved. The driver's MB_POLL has its own timeout and answers with a
+ * Nextor error code of its own; nothing in the firmware raises this. */
 #define NEXTOR_ERR_TIMEOUT        0x03U
-/* Device 1 is a read-only image, so a write to it is refused rather
- * than silently dropped. The driver never gets this far for that
- * device (it rejects writes locally with .WPROT, which is a DOS error
- * and not a mailbox round trip); the code exists so a CMD_WRITE naming
- * device 1 that arrives anyway gets a truthful answer instead of DONE
- * with an empty result. */
-#define NEXTOR_ERR_READONLY       0x04U
-/* The device byte named a device this firmware does not have. Only
- * reachable from a driver built against a different device count than
- * the firmware it is talking to. */
-#define NEXTOR_ERR_NODEV          0x05U
 
-/* Device numbers as they appear on the wire. These are the same numbers
- * the kernel uses: driver query 5 (DO_DRVQ_GET_MAX_DEVICE) answers
- * NEXTOR_DEVICE_COUNT, and that is the number the kernel counts up
- * from. Both sides therefore have to agree, which is exactly why the
- * constant is here and the driver repeats it in one place with a
- * comment pointing at this line. */
-#define NEXTOR_DEV_FLANKY         1U   /* NEXTOR.DSK, read-only 720K      */
-#define NEXTOR_DEV_DISK           2U   /* NEXTOR.IMG, read-write          */
-#define NEXTOR_DEVICE_COUNT       2U
+/* The one and only device number. Both the kernel and driver.asm count up
+ * from 1, so this is a count AND a maximum. It is written down in three
+ * places (this, driver.asm's jump-table answer and driver.asm's device
+ * check) and the handshake is what catches a disagreement between the
+ * driver and this file. */
+#define NEXTOR_DEVICE_COUNT       1U
 
 /* Command bytes written to NEXTOR_MBOX_CMD.
  *
- * HANDSHAKE and ABORT take no arguments at all and are not scoped to a
- * device. Every other command takes the device number as its FIRST
- * argument, before anything else - the device byte is a wire field, not
- * a compile-time constant, so that a third device is a table entry on
- * the firmware side and one `ld` on the driver side rather than a
- * second protocol. */
+ * NONE of them takes a device number - see the header note on why. HANDSHAKE
+ * and ABORT take no arguments at all; CAPACITY, STATUS and STAPEEK take no
+ * arguments either and are pure queries about the one device. */
 #define NEXTOR_CMD_HANDSHAKE      0x00U
-#define NEXTOR_CMD_CAPACITY       0x01U   /* <- dev  -> 8 bytes             */
-#define NEXTOR_CMD_STATUS         0x02U   /* <- dev  -> 1 byte, CONSUMES the
-                                               *        change latch          */
-#define NEXTOR_CMD_READ           0x03U   /* <- dev + LBA(4) -> 512 bytes  */
-#define NEXTOR_CMD_WRITE          0x04U   /* <- dev + LBA(4) + 512 bytes    */
+#define NEXTOR_CMD_CAPACITY       0x01U   /* -> 12 bytes: the whole Nextor
+                                                *    device parameter block */
+#define NEXTOR_CMD_STATUS         0x02U   /* -> 1 byte, CONSUMES the media
+                                                *    change latch            */
+#define NEXTOR_CMD_READ           0x03U   /* <- LBA(4) -> 512 bytes       */
+#define NEXTOR_CMD_WRITE          0x04U   /* <- LBA(4) + 512 bytes        */
 #define NEXTOR_CMD_ABORT          0x05U
-#define NEXTOR_CMD_STAPEEK        0x06U   /* <- dev  -> 1 byte, does NOT
-                                               *        consume the latch     */
-#define NEXTOR_CMD_MAX            0x07U
+#define NEXTOR_CMD_STAPEEK        0x06U   /* -> 1 byte, does NOT consume
+                                                *    the media change latch  */
+#define NEXTOR_CMD_IDENT          0x07U   /* -> 28 bytes: INQUIRY vendor(8)
+                                                *    + product(20), space-padded */
+#define NEXTOR_CMD_MAX            0x08U
 
-/* Handshake reply: "RNX2" + version byte. */
-#define NEXTOR_MAGIC              "RNX2"
-#define NEXTOR_VERSION            0x02U
+/* --- Breadcrumbs -------------------------------------------------------
+ *
+ * Reserved command bytes the driver writes to NEXTOR_MBOX_CMD to say
+ * "I got this far", with no arguments and no answer. They exist because
+ * everything else the Z80 does is invisible from here: it has no console
+ * the firmware can read, and a driver that dies half way through
+ * READ_WRITE produces NO mailbox traffic at all - not one line, because
+ * the last thing it managed to do was not send a command. In that
+ * situation the log cannot tell "the kernel never called READ_WRITE" from
+ * "READ_WRITE crashed on its third instruction", and those need opposite
+ * fixes.
+ *
+ * A single store to the command register is the whole mechanism, so a
+ * breadcrumb costs 4 bytes of ROM, no protocol change and no answer -
+ * Nextor_Service prints the name and returns. The driver is free to leave
+ * DONE set afterwards: the next real command clears it.
+ *
+ * Bytes 0x20..0x3F, chosen to be far from the 8 real commands and from
+ * the 0x08..0x1F range a corrupted stack is more likely to produce, so a
+ * marker in the log is a marker and not a wild write. */
+#define NEXTOR_CMD_MARK_FIRST      0x20U
+#define NEXTOR_CMD_MARK_COUNT      0x20U
+#define NEXTOR_CMD_MARK(n)         (NEXTOR_CMD_MARK_FIRST + (n))
+
+/* A breadcrumb carries ONE argument: the register value the step is about.
+ * The device number for a bad-device exit, the query index for a
+ * dispatcher, the direction bit for a transfer. A breadcrumb with a name
+ * but no value answers "which step", which leaves the interesting question
+ * - "which <em>value</em>" - open; the argument closes it for the price of
+ * one more bus write and one more byte in args[].
+ *
+ * argend is therefore args+1 for a marker, not args, so the byte the driver
+ * pushes after the command byte lands in the argument buffer instead of
+ * being dropped by the overflow guard. See Nextor_WriteByte(). */
+#define NEXTOR_MARK_ARGC           1U
+
+/* Handshake reply: "RNX3" + version byte. */
+#define NEXTOR_MAGIC              "RNX3"
+#define NEXTOR_VERSION            0x03U
 
 /* ========================================================================
  * Public API
@@ -202,11 +246,10 @@ void Nextor_Init (void);
 void Nextor_Service (void);
 
 /* Called by the USB layer when the stick is removed/re-plugged (or the
- * volume is unmounted for any other reason). Drops the image file
- * handles of BOTH devices and resets the PSRAM cache fill cursor, so
- * the next main-loop idle pass re-probes and restarts the streaming
- * fill from the (new) stick's file. Main-loop or service context only
- * - NOT IRQ safe. */
+ * volume is unmounted for any other reason). Drops the cached capacity and
+ * INQUIRY strings so the next main-loop idle pass re-probes the new stick
+ * and the kernel is told about the media change. Main-loop or service
+ * context only - NOT IRQ safe. */
 void Nextor_CacheInvalidate (void);
 
 /* --- Code entries for Cart_EXTI0_Nextor_Handler (IRQ context) ------- */
