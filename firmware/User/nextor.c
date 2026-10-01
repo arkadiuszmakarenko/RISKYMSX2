@@ -183,7 +183,7 @@ static const char *const s_cmd_name[NEXTOR_CMD_MAX] = {
 /* NEXTOR_MARK_DEFINED counts the entries above; the reserved range is
  * deliberately wider (see NEXTOR_CMD_MARK_COUNT), so the difference has to
  * be bounded rather than assumed away. */
-#define NEXTOR_MARK_DEFINED        29U
+#define NEXTOR_MARK_DEFINED        30U
 
 static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "RW:enter",              /* MB_MK_RW_ENTER       device number     */
@@ -215,6 +215,7 @@ static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "RW:MBR sig high",      /* MB_MK_RW_SIGH        sector +511       */
     "RW:bad buffer low",    /* MB_MK_RW_BADBUFL     invalid buffer low */
     "RW:bad buffer high",   /* MB_MK_RW_BADBUFH     invalid buffer high*/
+    "RW:buf high byte",     /* MB_MK_RW_BUFPG       dest page: 81h=DTA */
 };
 
 /* A command byte is a breadcrumb rather than a mistake if it lands in the
@@ -873,13 +874,16 @@ static void log_request (const log_snap *s) {
     const uint32_t lba  = s->lba;
 
     if (is_mark (raw)) {
-        /* Markers are diagnostic traffic, not requests. Do not print them
-         * while testing the DATA path: their UART output can occupy the
-         * main loop while the Z80 is performing a 512-byte drain, and they
-         * must not contribute to request-drop accounting. */
+        /* Markers are diagnostic traffic, not requests. They must not
+         * contribute to request-drop accounting. The driver's probe
+         * markers (index 18 and up) ARE printed: they carry the values
+         * the Z80 actually received, which is the only way to compare
+         * the drained bytes against what raw_disk.c read. The old
+         * fire-and-forget storm (indices 0-17) stays silent - those
+         * call sites are compiled to no-ops in the driver anyway. */
         {
             const uint8_t idx = (uint8_t)(raw - NEXTOR_CMD_MARK_FIRST);
-            if (idx >= 27U) {
+            if (idx >= 18U) {
                 printf ("[nx]   . %-22s = %3u (0x%02x)\r\n",
                         (idx < NEXTOR_MARK_DEFINED)
                             ? s_mark_name[idx] : "(unnamed)",
@@ -1247,12 +1251,19 @@ void Nextor_Service (void) {
         /* Keep the USB/backend result separate from the later mailbox
          * drain diagnostics. If this line is correct but RW:buf byte 0 is
          * not, the corruption is between res[] and the cart DATA port. If
-         * this line is already wrong, the USB BOT transfer is the fault. */
-        if (snap_lba == 0U) {
-            printf ("[nx]   raw lba0: %02x %02x %02x %02x "
-                    "sig=%02x%02x\r\n",
-                    (unsigned)s_mb.res[0], (unsigned)s_mb.res[1],
-                    (unsigned)s_mb.res[2], (unsigned)s_mb.res[3],
+         * this line is already wrong, the USB BOT transfer is the fault.
+         *
+         * Every read dumps its head and tail now, not just LBA 0 and
+         * 2048: the driver's per-read probes report the bytes the Z80
+         * received, and this line is the byte-for-byte reference to
+         * compare them against. */
+        {
+            uint16_t qi;
+            printf ("[nx]   raw lba=%lu:", (unsigned long)snap_lba);
+            for (qi = 0U; qi < 4U; qi++) {
+                printf (" %02x", (unsigned)s_mb.res[qi]);
+            }
+            printf ("  tail=%02x %02x\r\n",
                     (unsigned)s_mb.res[510], (unsigned)s_mb.res[511]);
         }
         if ((snap_lba == 2048U) && (s_mb.boot_dumped == 0U)) {

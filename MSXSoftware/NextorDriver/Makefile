@@ -27,7 +27,10 @@ ROM       := Nextor-3.0.RISKYMSX2.ROM
 
 VENDOR    := vendor
 NEXTOR_SDK  := $(VENDOR)/nextor-sdk/sdk
-NEXTOR_BASE := $(VENDOR)/Nextor-3.0.0-beta1.base.dat
+# Build against the beta2 kernel base. The USB root contains the matching
+# Nextor-3.0 beta2 NEXTOR.SYS; using the beta1 base here makes the kernel
+# reject that system file after reading its first and last sectors.
+NEXTOR_BASE := ../../Nextor/Nextor/bin/kernel-base/Nextor-3.0.0-beta2.base.dat
 N80         := $(VENDOR)/n80/N80
 MKNEXROM    := $(VENDOR)/mknexrom
 

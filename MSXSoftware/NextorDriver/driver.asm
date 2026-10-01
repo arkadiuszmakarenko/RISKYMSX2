@@ -197,6 +197,10 @@ MB_MK_RW_SIGL		equ	19h	; B = sector byte at +510
 MB_MK_RW_SIGH		equ	1Ah	; B = sector byte at +511
 MB_MK_RW_BADBUFL	equ	1Bh	; B = low byte of an invalid buffer
 MB_MK_RW_BADBUFH	equ	1Ch	; B = high byte of an invalid buffer
+MB_MK_RW_BUFPG		equ	1Dh	; B = high byte of the caller's HL buffer.
+				;     81h = the page-2 view of a direct
+				;     to-DTA transfer (RW_MANY), anything
+				;     else is a kernel buffer (SECBUF) -
 
 ;answer sizes. CAPACITY is the Nextor device parameter block verbatim;
 ; IDENT is INQUIRY vendor + product, both space-padded by the firmware so
@@ -832,11 +836,12 @@ DQP_TIMEOUT:
 ;     in after boot stays invisible.
 
 DO_DEVQ_GET_STATUS:
-	ld	b,c			;C is still the device number: the
-					;dispatcher's range test read it via
-					;A and left it alone
-	ld	a,MB_MK_DQ_STATUS
-	call	MB_MARK
+	;STATUS may be polled by the kernel in a tight loop (often every
+	;VBL) once a medium is reported absent. Going through the full
+	;mailbox transaction for each poll starves the firmware service loop
+	;and prevents any other command from being answered. The media byte
+	;is the result of MB_STATUS anyway, so issue STATUS directly and wait
+	;for the single byte answer.
 	ld	a,MB_STATUS
 	call	MB_CMD0_1BYTE
 	jr	c,DQS_STAT_DEFAULT
@@ -962,7 +967,8 @@ CUSTOM_DEVICE_QUERY:
 ; The buffer pointer does NOT live in the frame. It lives in DE, because
 ; DE is the one register pair that survives every primitive this path
 ; calls: MB_SEND touches A/B/HL, MB_PUSH and MB_GETRES touch A/BC/HL, and
-; MB_POLL touches A/BC and B' - none of them writes DE. `push de / pop hl`
+; MB_POLL touches A/BC while preserving the caller's shadow BC - none of
+; them writes DE. `push de / pop hl`
 ; is therefore the buffer fetch, and after a transfer the same instruction
 ; pair stores the already-advanced HL back into it. Both primitives happen
 ; to advance HL by exactly the number of bytes they moved, which is the
@@ -1028,7 +1034,10 @@ READ_WRITE:
 	;    and the driver died in its first dozen instructions".
 	ld	b,(iy+3)		;report the caller's requested sector count
 	ld	a,MB_MK_RW_FRAME
-	call	MB_MARK
+	call	MB_FRAME_TRACE
+	ld	b,d			;report the destination's high byte too:
+	ld	a,MB_MK_RW_BUFPG	;81h = direct-to-DTA (RW_MANY), else a
+	call	MB_FRAME_TRACE	;kernel buffer - tells the two callers apart
 
 	;--- Device range. This driver exposes one physical USB device and the
 	;    mailbox protocol has no device byte. Some kernels pass a value
@@ -1139,14 +1148,11 @@ RW_ONE_READ:
 	ld	a,(MBOX_STAT)
 	and	MBST_ERR
 	jp	nz,RW_IOERR
-	;Mask BEFORE loading the destination and 16-bit count. An interrupt
-	;between `ld bc,512` and `call MB_GETRES` can otherwise corrupt the
-	;loop setup before the callee's own DI executes.
+	;Mask before loading the 16-bit count. DE is the live destination
+	;pointer and has already advanced by 512 for each previous sector in
+	;this READ_WRITE request. Do NOT reload DE from the frame here: that
+	;would make a multi-sector transfer overwrite the same sector buffer.
 	di
-	;Reload DE after DI rather than trusting the live pointer across
-	;MB_POLL. The frame copy is the authoritative buffer address.
-	ld	e,(iy+16)
-	ld	d,(iy+17)
 	;READ_WRITE buffers must be outside page 1. If the destination ever
 	;lands in 4000h-7FFFh, the following LDIR-like store would write into
 	;the mailbox at 7FF0h and turn sector data into invalid commands.
@@ -1434,13 +1440,34 @@ MB_MARK:
 	ret
 
 
-;--- MB_MARK_WAIT: marker followed by a normal DONE poll.
-;    The ordinary marker is intentionally fire-and-forget, but a diagnostic
-;    burst can contain several markers and the firmware may still be printing
-;    the previous one. Waiting here makes the value probes lossless.
+;--- MB_MARK_WAIT: an ACKNOWLEDGED marker - emit and wait for DONE.
+;    Unlike the fire-and-forget MB_MARK (which stays a silent no-op so the
+;    old breadcrumb storm cannot return), this one performs the whole
+;    command/argument/poll transaction itself, so the value probes can
+;    never overwrite a pending real request and every diagnostic byte is
+;    captured. Only the per-read buffer probes and nothing else uses it.
 ;    In: A = marker index, B = payload. Trashes AF, BC, HL.
 
 MB_MARK_WAIT:
+	add	a,20h
+	ld	(MBOX_CMD),a
+	ld	a,b
+	ld	(MBOX_DATA),a
+	call	MB_POLL
+	ret
+
+
+;--- MB_FRAME_TRACE: a single acknowledged frame-count marker per
+;    READ_WRITE call. Unlike the old fire-and-forget breadcrumbs this waits
+;    for the firmware to consume the marker before any real mailbox request
+;    can follow, so it cannot overwrite a pending command. In: B=count.
+
+MB_FRAME_TRACE:
+	add	a,20h
+	ld	(MBOX_CMD),a
+	ld	a,b
+	ld	(MBOX_DATA),a
+	call	MB_POLL
 	ret
 
 ;--- MB_SEND: send a command byte plus B argument bytes copied from (HL).
@@ -1524,12 +1551,13 @@ MB_PUSH_L:
 ;--- MB_POLL: wait for DONE in STATUS.
 ;    Bounded: 3 passes of a 16-bit poll counter (~0.8 s total at 3.58 MHz).
 ;    Out: on DONE: A = STATUS bits, Cy=0.  On timeout: Cy=1.
-;    Trashes AF, BC. Uses B' as the pass counter (re-armed every call), so
-;    no shadow register carries state between calls - the READ_WRITE frame
-;    is the only thing that has to survive a mailbox round trip.
+;    Trashes AF, BC. The pass counter uses B' because BC is the main-set
+;    poll counter. The kernel parks its live registers in the shadow set
+;    across inter-slot driver calls, so preserve shadow BC around the poll.
 
 MB_POLL:
 	exx
+	push	bc			;save caller's shadow BC, including kernel B'
 	ld	b,3
 	exx
 MB_POLL_P:
@@ -1544,6 +1572,7 @@ MB_POLL_L:
 	jr	nz,MB_POLL_L
 	exx
 	djnz	MB_POLL_GO	;inner pass done, next pass
+	pop	bc			;restore caller's shadow BC (still in shadow set)
 	exx
 	scf			;passes exhausted: timeout
 	ret
@@ -1551,6 +1580,9 @@ MB_POLL_GO:
 	exx
 	jr	MB_POLL_P
 MB_POLL_OK:
+	exx
+	pop	bc			;restore caller's shadow BC on success too
+	exx
 	or	a		;clear Cy (A = STATUS bits, DONE set)
 	ret
 
