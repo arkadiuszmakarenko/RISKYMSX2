@@ -141,8 +141,16 @@ void     DskImage_MediaLatchConsume (void);
 uint8_t  DskImage_MediaState (void);   /* 0 absent / 1 ready / 2 changed */
 
 /* String of the candidate path that actually opened, or NULL if no
- * image is open. Used by the boot log to name the source. */
+ * image is open. Used by the boot log to name the source. NULL means
+ * "not open", not "no such file" - for the name of the file this
+ * backend looks for, see DskImage_PrimaryPath. */
 const char *DskImage_Path (void);
+
+/* The FIRST candidate name, or NULL when no list has been set. Read
+ * only - device 1 is never written, so there is nothing to create or
+ * delete. The terminal's Nextor screen shows it so the name is
+ * answerable without a second copy of the list in the UI. */
+const char *DskImage_PrimaryPath (void);
 
 /* FRESULT of the most recent underlying f_open / f_lseek / f_read
  * call. 0 = FR_OK. Used by the diagnostic log to explain failures. */

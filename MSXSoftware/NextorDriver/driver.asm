@@ -23,24 +23,35 @@
 ; once DONE appears in STATUS):
 ;
 ;   0x00 HANDSHAKE   -> 5 bytes: "RNX2" + fw version byte
-;   0x01 CAPACITY    -> 8 bytes: block count LE(4) + block size LE(4)
-;   0x02 STATUS      -> 1 byte: 0 no image / 1 ready / 2 image changed
-;                               (CONSUMES the firmware's change latch)
-;   0x03 READ        <- LBA LE(4)  -> 512 bytes sector data
-;   0x04 WRITE       <- LBA LE(4) + 512 bytes -> never issued: device 1 is
-;                               read-only, so the driver answers .WPROT
-;                               and never writes a command byte. Defined
-;                               for completeness: the wire number the
-;                               firmware refuses with ERR_READONLY.
+;   0x01 CAPACITY    <- dev -> 8 bytes: block count LE(4) + block size LE(4)
+;   0x02 STATUS      <- dev -> 1 byte: 0 no image / 1 ready / 2 image changed
+;                                 (CONSUMES the firmware's change latch)
+;   0x03 READ        <- dev + LBA LE(4) -> 512 bytes sector data
+;   0x04 WRITE       <- dev + LBA LE(4) + 512 bytes -> nothing back
 ;   0x05 ABORT       -> nothing
-;   0x06 STAPEEK     -> 1 byte: like STATUS but does NOT consume the
-;                               change latch (device availability query)
+;   0x06 STAPEEK     <- dev -> 1 byte: like STATUS but does NOT consume the
+;                                 change latch (device availability query)
+;
+; THE DEVICE BYTE. Every command except HANDSHAKE and ABORT takes the
+; device number as its FIRST argument. That is what lets two devices share
+; one command set and one driver entry point: the medium is chosen on the
+; wire, per request, instead of being fixed by which routine the kernel
+; happened to call. MB_STDEV pushes it for the one-byte commands and the
+; two sector paths inline it; the only place the device number is ever
+; used as a constant is picking the ROM byte to send (MB_DEV1 / MB_DEV2)
+; and the per-device answer in DQP_TAIL.
+;
+; HANDSHAKE and ABORT carry no device because neither touches a medium:
+; the first is about the mailbox itself, the second is a mailbox-level
+; operation. This also means the firmware can answer a handshake before it
+; knows whether its device count agrees with the driver's - which is the
+; point of the version byte below.
 ;
 ; Taking results off the DATA port:
 ;   MB_RESULT_IS  compare N expected bytes as they stream past (no RAM)
 ;   MB_RD4        load 4 result bytes into L/H/E/D
 ;   MB_GETRES     store N result bytes at (HL) - (HL) MUST be RAM
-;   MB_STCMD      1 result byte, straight back in A
+;   MB_STDEV      1 result byte, straight back in A (command in A, dev in B)
 ;
 ; There is a trap here worth stating once, because it cost a long debug
 ; session: this is a ROM driver, so it has NO writable variables. A `ds`
@@ -49,13 +60,26 @@
 ; assembler put in the file. Anything that stores a mailbox result into
 ; the driver's own data will silently see zeros. Results therefore have
 ; to be consumed into registers (MB_RESULT_IS / MB_RD4) or into a buffer
-; the kernel supplies in RAM.
+; the kernel supplies in RAM. This is also why the device byte is sent
+; from two read-only ROM bytes rather than from a computed one: MB_SEND
+; copies its arguments out of memory, and the only memory this driver can
+; name as an argument source is ROM.
 ;
-; Device model (docs/NEXTOR_PLAN.md D4): device 1 = ONE fixed, read-only
-; 720K floppy image (NEXTOR.DSK) served sector by sector from a file on
-; the USB stick. 1440 x 512-byte sectors, flagged to the kernel as a
-; floppy disk drive and as read-only; there is no partition table, and
-; the floppy flag is what tells the kernel so (see DQP_TAIL).
+; Device model (docs/NEXTOR_PLAN.md D4): TWO devices, each one file on
+; the USB stick, served sector by sector.
+;
+;   device 1   NEXTOR.DSK - a fixed, READ-ONLY 720K floppy image:
+;              1440 x 512-byte sectors, no partition table, flagged to
+;              the kernel as a floppy disk drive and as removable. The
+;              floppy flag is what tells the kernel to map a drive onto
+;              sector 0 rather than scan for partitions (see DQP_TAIL).
+;
+;   device 2   NEXTOR.IMG - a READ-WRITE disk image whose length IS its
+;              capacity, carrying an MBR and a FAT16 volume. Flagged
+;              removable and NOT floppy, so the kernel runs its ordinary
+;              partition scan and finds the MBR. The image is created and
+;              deleted from the firmware terminal's Nextor menu, not by
+;              the driver.
 ;
 ; Z80 rules respected:
 ;   - documented opcodes only (pairs with a .NO_UNDOC. kernel variant);
@@ -108,6 +132,11 @@ MB_WRITE	equ	04h
 MB_ABORT	equ	05h
 MB_STAPEEK	equ	06h
 
+;device numbers (the wire form of nextor.h's NEXTOR_DEV_*)
+MB_DEV_FLANKY	equ	1	;NEXTOR.DSK, read-only 720K floppy
+MB_DEV_DISK	equ	2	;NEXTOR.IMG, read-write disk
+MB_DEVICE_COUNT	equ	2	;driver query 5's answer
+
 ;mailbox ERR port values
 MBERR_NONE	equ	00h
 MBERR_NOMEDIA	equ	01h
@@ -119,6 +148,14 @@ MB_MAGIC0	equ	"R"
 MB_MAGIC1	equ	"N"
 MB_MAGIC2	equ	"X"
 MB_MAGIC3	equ	"2"
+
+;protocol revision this driver is written against. The firmware answers
+;the handshake with ITS revision byte and MB_EXPECT compares it, so a
+;driver built against one revision talking to a firmware built against
+;another is rejected at boot - loudly, with the kernel skipping this
+;driver - instead of answering every command for the wrong device.
+;Must equal NEXTOR_VERSION in firmware/User/nextor.h.
+MB_PROTOCOL_V2	equ	02h
 
 ;-----------------------------------------------------------------------------
 ; ROM driver boilerplate
@@ -338,14 +375,36 @@ MB_GETRES_L:
 	jr	nz,MB_GETRES_L
 	ret
 
-;--- MB_STCMD: send zero-arg command A, poll, pop its 1-byte result.
+;--- MB_STDEV: send command A for device B, poll, pop its 1-byte result.
 ;    Used for STATUS / STAPEEK.
+;    In:  A = command byte, B = device number
 ;    Out: A = result byte, Cy=0.  Cy=1 on timeout.
 ;    Trashes AF, BC, HL.
+;
+;    Why the device number cannot simply be pushed as an argument value:
+;    MB_SEND copies its argument bytes out of memory addressed by HL, and
+;    the only memory this ROM driver can name as an argument source is ROM
+;    (see the note at the top of the file - a `ds` buffer cannot be
+;    written to). So the device byte is one of two READ-ONLY bytes,
+;    MB_DEV1 / MB_DEV2, selected by a compare. That costs 2 bytes of ROM
+;    and is the only place the driver names a device as a constant; a
+;    third device is a third byte and one more compare here.
+;
+;    The command byte is stacked across the select because A is needed for
+;    both jobs and there is only one of it. `pop af` is safe: the compare's
+;    flags have already been consumed by the jr.
 
-MB_STCMD:
-	ld	hl,MB_NOARGS
-	ld	b,0
+MB_STDEV:
+	push	af		;the command byte
+	ld	a,b		;A = device number
+	cp	MB_DEV_DISK
+	ld	hl,MB_DEV2
+	jr	z,MB_STDEV_GO
+	ld	hl,MB_DEV1	;device 1, and anything else the callers
+				;did not already reject
+MB_STDEV_GO:
+	ld	b,1		;one argument byte
+	pop	af		;A = command byte again
 	call	MB_SEND
 	call	MB_POLL
 	ret	c
@@ -423,9 +482,23 @@ MB_HS_NO:
 				;are the whole diagnosis
 	ret
 
-;--- Zero-arg source byte (MB_SEND arg pointer for no-arg commands).
+;--- Zero-arg source byte (MB_SEND arg pointer for no-arg commands: the
+;    handshake and abort). The byte's VALUE is never sent (B = 0 means no
+;    argument burst at all); it exists so HL has something legal to point
+;    at, and so it cannot accidentally read as a real argument if a caller
+;    ever gets the count wrong.
 
 MB_NOARGS:	db	0
+
+;--- The device byte to send, as a function of the device number.
+;
+;    Read-only, like everything else in this file. MB_STDEV selects
+;    between these two; the two sector paths inline `ld a,(iy+0)` and
+;    write it straight to MBOX_DATA instead, so these are for the one-byte
+;    commands only.
+
+MB_DEV1:	db	MB_DEV_FLANKY
+MB_DEV2:	db	MB_DEV_DISK
 
 ;--- The handshake answer the firmware is required to send: "RNX2" plus the
 ;    firmware version byte. In ROM on purpose - MB_RESULT_IS only ever
@@ -438,10 +511,17 @@ MB_NOARGS:	db	0
 ;    `ld (hl),a` into them was discarded - so the handshake compared the
 ;    firmware's correct "RNX2" reply against the 00 00 00 00 00 baked
 ;    into the ROM file and always reported "bad magic".
+;
+;    The fifth byte is the protocol revision, and it is a REAL check now:
+;    MB_EXPECT is compared byte by byte, so a firmware still speaking v1
+;    (one device, no device byte) reports "bad magic at byte 4" and the
+;    kernel skips this driver. That is the intended outcome of a half
+;    flashed update - much better than letting it run and answering every
+;    CAPACITY for device 1 while the kernel thinks it asked about device 2.
 
 MB_HSLEN	equ	5
 MB_EXPECT:	db	MB_MAGIC0,MB_MAGIC1,MB_MAGIC2,MB_MAGIC3
-		db	1		;NEXTOR_VERSION, as nextor.h defines it
+		db	MB_PROTOCOL_V2	;== NEXTOR_VERSION in nextor.h
 
 ;--- INC32: increment the 32-bit little-endian value at (HL) in place.
 ;    Preserves HL. Trashes AF. (inc (hl) sets Z only when the byte
@@ -626,10 +706,16 @@ DO_DRVQ_INIT:
 
 
 ; Driver query 5: Get maximum supported device number
+;
+; The kernel counts UP from 1 to this answer, so it is a count AND a
+; maximum: device numbers are 1..MB_DEVICE_COUNT with no gaps. Keep this,
+; DEVICE_QUERY's own range test and the DEVICE NAMES below in step - the
+; firmware has its own copy of the count in NEXTOR_DEVICE_COUNT, and the
+; handshake is what keeps the two from drifting.
 
 DO_DRVQ_GET_MAX_DEVICE:
 	ld	a,RESULT_OK
-	ld	b,1		;device 1 = the USB stick
+	ld	b,MB_DEVICE_COUNT	;devices 1 and 2
 	ret
 
 
@@ -640,17 +726,16 @@ DO_DRVQ_GET_MAX_DEVICE:
 ;--- DEVICE_QUERY dispatcher.
 ;    In:  A = query index, C = device number.
 ;    The device number is validated BEFORE the index is consumed
-;    (.IDEVN for unknown devices regardless of the query index).
+;    (.IDEVN for unknown devices regardless of the query index), and C is
+;    left intact so each device query still knows which device it is for.
 
 DEVICE_QUERY:
 	push	af		;save the query index
 	ld	a,c
-	cp	1
-	jr	z,DQ_DEV_OK
-	pop	af		;discard (keep the stack clean)
-	ld	a,RESULT_INVALID_DEVICE
-	ret
-DQ_DEV_OK:
+	cp	MB_DEV_FLANKY	;C < 1: device numbers start at 1
+	jr	c,DQ_DEVN
+	cp	MB_DEVICE_COUNT+1
+	jr	nc,DQ_DEVN	;C > 2
 	pop	af		;recover the query index
 	dec	a
 	jp	z,DO_DEVQ_GET_STRING
@@ -668,19 +753,39 @@ DQ_DEV_OK:
 	jp	z,DO_DEVQ_STOP_MOTOR
 	ld	a,RESULT_NOT_IMPLEMENTED
 	ret
+DQ_DEVN:
+	pop	af		;discard (keep the stack clean)
+	ld	a,RESULT_INVALID_DEVICE
+	ret
 
 
 ; Device query 1: Get device information string
-; In:  B = string index (4 = device name), D = buffer size, HL = buffer
+; In:  B = string index (4 = device name), D = buffer size, HL = buffer,
+;      C = device number (still intact from the dispatcher)
 ; Out: A = RESULT_OK / RESULT_TRUNCATED_STRING / RESULT_NOT_IMPLEMENTED
+;
+; Two devices, two names - NEXTOR's own device-parameter screen shows
+; this string as the device's description, and "720K disk image" on the
+; read-write disk is not a useful thing to read.
+;
+; C survives OUTPUT_STRING (it modifies AF, B, DE and HL only), so the
+; device number is still available after the copy and does not have to be
+; stacked across it. The B it DOES destroy is why the buffer size is
+; moved into B first.
 
 DO_DEVQ_GET_STRING:
-	ld	a,b
-	ld	b,d
-	ex	de,hl
+	ld	a,b		;A = string index
+	ld	b,d		;B = buffer size (OUTPUT_STRING wants it in B)
+	ex	de,hl		;HL = buffer, DE = string pointer
 	dec	a
 	jr	nz,DO_DEVQ_STR_NI
-	ld	hl,MSG_DEVICE_NAME
+	ld	a,c		;A = device number
+	cp	MB_DEV_DISK
+	ld	hl,MSG_DEVICE_NAME2
+	jr	z,DO_DEVQ_STR_OUT
+	ld	hl,MSG_DEVICE_NAME	;device 1; the dispatcher has already
+					;rejected anything above 2
+DO_DEVQ_STR_OUT:
 	call	OUTPUT_STRING
 	xor	a		;RESULT_OK
 	ret
@@ -691,22 +796,26 @@ DO_DEVQ_STR_NI:
 
 ; Device query 2: Get device parameters
 ;
-; In:  HL = buffer address, or 0 for "validate only" (must be supported)
+; In:  HL = buffer address, or 0 for "validate only" (must be supported),
+;      C = device number (still intact from the dispatcher)
 ; Out: A = RESULT_OK / RESULT_NOT_IMPLEMENTED
 ;
 ; Buffer layout (12 bytes):
 ;   +0 (1)  device type: 0 = block device
-;   +1 (2)  sector size LE: always 512, medium or not
+;   +1 (2)  sector size LE: always 512, medium or not, device or not
 ;   +3 (4)  total sectors LE (from firmware CMD_CAPACITY over the
 ;           image file; 0 when there is no image / no capacity yet)
-;   +7 (1)  flags: bit1 = read-only, bit2 = floppy disk drive
-;           (bit0 removable and bit3 no-automapping both clear)
-;   +8..11  cylinders(2)/heads(1)/sectors-per-track(1) = 80/2/9
+;   +7 (1)  flags: bit0 removable, bit2 floppy disk drive
+;   +8..11  cylinders(2)/heads(1)/sectors-per-track(1)
 ;
-; Bytes +0..+2 and +7 are written by the shared DQP_HDR / DQP_TAIL pair,
-; so the medium and no-medium answers cannot drift apart. They must not:
-; the kernel reads this block at two different points with two different
+; Bytes +0..+2 are written by the shared DQP_HDR and +7..+11 by the
+; shared DQP_TAIL, so the medium and no-medium answers cannot drift
+; apart and device 1 and device 2 cannot drift apart. They must not: the
+; kernel reads this block at two different points with two different
 ; expectations, and it can see one without the other.
+;
+; +8..+11 is NOT the same for the two devices, and the difference is the
+; whole point of device 2. See DQP_TAIL.
 
 DO_DEVQ_GET_PARAMS:
 	ld	a,h
@@ -717,15 +826,29 @@ DO_DEVQ_GET_PARAMS:
 DQP_FILL:
 	;MB_SEND takes its argument pointer in HL and leaves HL advanced past
 	;the arguments, so it eats HL - and HL is this buffer address. Without
-	;the save the whole 12-byte fill below ran at MB_NOARGS, inside the
+	;the save the whole 12-byte fill below ran at MB_DEV2, inside the
 	;driver's own image: the kernel got an untouched parameter block and
 	;the Z80 wrote over its own code. MB_SEND documents HL as an output
-	;(see its header); it is easy to read the `ld hl,MB_NOARGS` as merely
+	;(see its header); it is easy to read the `ld hl,MB_DEV2` as merely
 	;picking a source and miss that it also overwrites the caller's HL.
 	push	hl		;the buffer address
+
+	;CAPACITY takes the device byte as its only argument. D also carries
+	;the device number to DQP_TAIL - it cannot stay in C, because MB_POLL
+	;does `ld bc,0FFFFh` and destroys C, and it cannot go on the stack
+	;either because DQP_TAIL is reached from two places. D is safe across
+	;both: MB_SEND uses A/B/HL, and MB_POLL's exx protects DE'.
+	ld	a,c
+	cp	MB_DEV_DISK
+	ld	a,MB_DEV_DISK
+	ld	hl,MB_DEV2
+	jr	z,DQP_SEND
+	ld	a,MB_DEV_FLANKY
+	ld	hl,MB_DEV1
+DQP_SEND:
+	ld	d,a		;device number, for DQP_TAIL
 	ld	a,MB_CAPACITY
-	ld	hl,MB_NOARGS
-	ld	b,0
+	ld	b,1		;one argument byte
 	call	MB_SEND
 	pop	hl
 	call	MB_POLL
@@ -757,7 +880,7 @@ DQP_FILL:
 	;
 	;The block-size half of CAPACITY's 8 result bytes is left unread: the
 	;firmware clears the result FIFO when the next command byte lands, and
-	;512 is this driver's only block size.
+	;512 is this driver's only block size for either device.
 	ld	a,(MBOX_DATA)
 	ld	(hl),a
 	inc	hl
@@ -824,71 +947,160 @@ DQP_NCLEAR:
 	jr	DQP_TAIL
 
 ;--- Shared tail: the flags and geometry bytes, then RESULT_OK. Reached
-;    with HL = buffer+7.
+;    with HL = buffer+7 and D = device number.
 ;
-;    +7 flags = 05h. Matches what the Konamiman reference drivers ship
-;    with (MegaFlashROM SCC+ SD, Turbo-R FDD): bit 0 removable + bit 2
-;    floppy. Three reasons to land here:
+;    +7 FLAGS differ per device, and the difference is not cosmetic:
 ;
-;      bit 2 (floppy)  MUST be set. With it clear, the kernel's automapper
-;        does a full partition scan; there is none on a flat .dsk file,
-;        and the resulting "no partition" outcome means the drive is
-;        never assigned. bank4/partit.mac:1054-1092 routes the floppy
-;        bit straight to AA_DO_ASSIGN with first-sector = 0.
+;      bit 2 (floppy disk drive) - SET on device 1, CLEAR on device 2.
 ;
-;      bit 0 (removable)  is set because the medium is the file on the
-;        USB stick, which can come and go. The removable fallback path
-;        in partit.mac:1128-1136 is the right one for "image went away
+;        Device 1 MUST have it. With it clear the kernel's automapper does
+;        a full partition scan; there is none on a flat .dsk file, and
+;        the resulting "no partition" outcome means the drive is never
+;        assigned. bank4/partit.mac:1054-1092 routes the floppy bit
+;        straight to AA_DO_ASSIGN with first-sector = 0.
+;
+;        Device 2 MUST NOT have it. NEXTOR.IMG is a hard-disk-shaped
+;        image - its sector 0 is an MBR and its length is its capacity -
+;        and the floppy flag would make the kernel map a filesystem onto
+;        sector 0, i.e. read the MBR as a boot sector. Clearing the bit
+;        sends it down the ordinary partition-scan path instead, which is
+;        what finds the partition entry and produces a real drive letter.
+;
+;      bit 0 (removable) - SET on both. The medium is a file on the USB
+;        stick, which can come and go. The removable fallback path in
+;        partit.mac:1128-1136 is the right one for "image went away
 ;        between probes" - without it the kernel thinks the drive is
 ;        always-on, which makes the eject-on-removal case (stick pulled)
 ;        look like a media change that isn't followed by a re-probe.
 ;
-;      bit 1 (read only)  is deliberately CLEAR. The kernel honours it
-;        by refusing writes itself; setting it here too just makes the
-;        drive look "frozen" in a way that confuses partition tools
-;        (they ask the device, get RO, skip). The firmware already
-;        refuses CMD_WRITE and returns NEXTOR_ERR_READONLY for that case;
-;        the kernel can answer "write protected" from that.
+;      bit 1 (read only) - deliberately CLEAR on both. The kernel honours
+;        it by refusing writes itself; setting it here too just makes the
+;        drive look "frozen" in a way that confuses partition tools (they
+;        ask the device, get RO, skip). The firmware answers device 1's
+;        writes with NEXTOR_ERR_READONLY, which the kernel turns into
+;        .WPROT - and this driver refuses a write to device 1 locally,
+;        before any command byte is sent. See RW_ONE_WRITE.
 ;
-;      bit 3 (no automapping) stays clear so the device is still
+;      bit 3 (no automapping) stays clear on both so the devices are still
 ;        automapped at boot.
 ;
-;    +8..+11 is the 720K geometry, 80/2/9 = 1440 sectors, matching the
-;    fixed sector count this driver reports. The kernel does not read
-;    these fields (guide 4.6.2: only partitioning tools do), but zeros
-;    would be a lie about a device that has a real geometry, and the
-;    numbers cost 8 bytes. Little-endian, like the sector size above.
+;    +8..+11 CHS GEOMETRY. Device 2 reports zeros - its capacity is a
+;    FILE LENGTH, not the product of three numbers, and there is no
+;    honest CHS triple to report. Zeros is the documented "not available"
+;    answer (guide 4.6.2), and for a non-floppy HDD the kernel's
+;    partition-scan path ignores +8..+11.
+;
+;    Device 1 (the floppy) is different. The floppy shortcut in partit.mac
+;    routes the device straight to A: with first-sector 0, and that path
+;    REQUIRES a non-zero, internally-consistent CHS to recognise the
+;    device as a floppy at all. Zeros aborts the shortcut and the kernel
+;    never assigns A: (it then asks for "drive B", the next empty drive
+;    letter). A hardcoded 80/2/9 = 1440 works for the standard 720K .dsk
+;    but contradicts any other total (e.g. an 896KB image with tot=1792),
+;    and the contradiction aborts the shortcut the same way.
+;
+;    The chosen compromise: 80/2/9 for the 720K case (exact match,
+;    unchanged behaviour), 255/2/9 = 4590 for anything else. The 255/2/9
+;    CHS capacity is always >= total, so the kernel takes min(total, CHS)
+;    = total for the drive size and the floppy shortcut fires. Inventing
+;    a "correct" CHS for an arbitrary size would need a division by the
+;    host's heads*spt, and the kernel doesn't actually USE the CHS for
+;    boot (it reads sector 0 via LBA and parses the BPB) - it only uses
+;    CHS to recognise the floppy shortcut, so "big enough to not look
+;    broken" is the right answer. See DQP_TAIL_FDK for the 4-byte compare
+;    that selects between the two.
 DQP_TAIL:
-	ld	(hl),05h	;+7 flags: bit0 removable + bit2 floppy
+	ld	a,d
+	cp	MB_DEV_FLANKY
+	jr	z,DQP_TAIL_FDK
+
+	;Device 2: removable only, no floppy bit, no CHS geometry.
+
+	ld	(hl),01h	;+7 flags: bit0 removable
 	inc	hl
-	ld	(hl),50h	;+8 cylinders LE low  = 80
-	inc	hl
-	xor	a		;+9 cylinders LE high = 0
+	xor	a
+	ld	b,4		;+8..11 geometry: not available
+DQP_GEOM0:
 	ld	(hl),a
 	inc	hl
-	ld	(hl),2		;+10 heads = 2
-	inc	hl
-	ld	(hl),9		;+11 sectors per track = 9
+	djnz	DQP_GEOM0
+	jr	DQP_DONE
+
+DQP_TAIL_FDK:
+	ld	(hl),05h	;+7 flags: bit0 removable + bit2 floppy
+	;
+	;CHS geometry must be NON-ZERO and consistent with the capacity
+	;for the floppy shortcut to fire and map this device to A:.
+	;Zeros caused Nextor to skip the floppy path entirely and leave
+	;A: empty (the kernel then asks "insert disk in drive B" - the
+	;next drive letter, also empty). A hardcoded 80/2/9 = 1440 is
+	;correct for the standard 720K .dsk but contradicts any other
+	;total (e.g. the 896KB image with tot=1792), and the
+	;contradiction aborts the shortcut the same way.
+	;
+	;Solution: 80/2/9 for the 720K case (exact match, unchanged
+	;behaviour), 255/2/9 = 4590 for everything else. The 255/2/9
+	;CHS capacity is always >= total, so the kernel takes
+	;min(total, CHS) = total for the drive size and the floppy
+	;shortcut fires. No division: a 4-byte compare against the
+	;720K signature (A0 05 00 00 LE) is enough.
+	;
+	;IX is used here as the base for negative-displacement reads -
+	;HL has no indexed addressing mode, only IX/IY do.
+	push	hl
+	pop	ix		;IX = buffer+7 (flags byte, just written)
+	ld	a,(ix-4)	;buffer+3 (total LSB)
+	cp	0A0h
+	jr	nz,DQP_FDK_MAX
+	ld	a,(ix-3)	;buffer+4
+	cp	05h
+	jr	nz,DQP_FDK_MAX
+	ld	a,(ix-2)	;buffer+5
+	or	a
+	jr	nz,DQP_FDK_MAX
+	ld	a,(ix-1)	;buffer+6 (total MSB)
+	or	a
+	jr	nz,DQP_FDK_MAX
+	;Total == 1440 -> 80/2/9 (exact). IX is still buffer+7 here;
+	;(ix+1) writes buffer+8, etc.
+	ld	(ix+1),50h	;+8 cylinders low = 80
+	ld	(ix+2),0	;+9 cylinders high
+	ld	(ix+3),2	;+10 heads
+	ld	(ix+4),9	;+11 sectors per track
+	jr	DQP_DONE
+DQP_FDK_MAX:
+	;Any other total -> 255/2/9 (always >= total)
+	ld	(ix+1),0FFh	;+8 cylinders low = 255
+	ld	(ix+2),0	;+9 cylinders high
+	ld	(ix+3),2	;+10 heads
+	ld	(ix+4),9	;+11 sectors per track
+DQP_DONE:
 	xor	a		;RESULT_OK
 	ret
 
 
 ; Device query 3: Get device status
+; In:  C = device number
 ; Out: A = RESULT_OK, B = 0 no media / 1 ready / 2 media changed.
 ; Consumes the firmware's change latch (this query is what the
 ; "changed once, then ready" tracking is built on).
+;
+; This used to answer `ld b,1 / xor a` without going near the mailbox:
+; correct only while there was one device whose medium was whatever it was
+; at boot. With two devices it is wrong in both directions - a missing
+; NEXTOR.IMG reported as "ready" makes the kernel mount a drive that is
+; not there, and a stick that was plugged in late reported as "no media"
+; is never noticed at all. The mailbox already knows the answer, because
+; CMD_STATUS is the same call the sector paths make.
 
-;DO_DEVQ_GET_STATUS:
-;	ld	a,MB_STATUS
-;	call	MB_STCMD
-;	jr	c,DQ_STAT_TMO
-;	ld	b,a
-;	ld	a,RESULT_OK
-;	ret
 DO_DEVQ_GET_STATUS:
-    ld b,1
-    xor a
-    ret
+	ld	b,c		;B = device number
+	ld	a,MB_STATUS	;A = command byte
+	call	MB_STDEV
+	jr	c,DQ_STAT_TMO
+	ld	b,a		;0 no media / 1 ready / 2 changed
+	ld	a,RESULT_OK
+	ret
 
 
 DQ_STAT_TMO:
@@ -898,13 +1110,15 @@ DQ_STAT_TMO:
 
 
 ; Device query 4: Get device availability
+; In:  C = device number
 ; Out: A = RESULT_OK, B = 0 not available / 1 available.
 ; Must NOT consume the change latch -> uses CMD_STAPEEK; a "changed"
 ; result still counts as "available".
 
 DO_DEVQ_GET_AVAILABILITY:
-	ld	a,MB_STAPEEK
-	call	MB_STCMD
+	ld	b,c		;B = device number
+	ld	a,MB_STAPEEK	;A = command byte
+	call	MB_STDEV
 	jr	c,DQ_STAT_TMO
 	ld	b,a
 	or	a		;0 no media / 1 ready / 2 changed
@@ -918,22 +1132,28 @@ DQ_AVAIL_DONE:
 	ret
 
 
-; Device queries 5-7: the format-related ones, which only make sense for
-; a floppy disk drive that can actually be formatted.
+; Device queries 5-7: the format-related ones.
 ;
-; The device IS flagged as a floppy (DQP_TAIL bit 2) but it is read-only,
-; so there is nothing to offer. RESULT_NOT_IMPLEMENTED is the documented
-; answer for "this device is not formattable" (guide 4.6.5/4.6.6: "for
-; floppy disks if the driver doesn't support formatting it should always
-; return RESULT_NOT_IMPLEMENTED"), and it is what all three queries are
-; required to answer together - query 5 and 6 are a pair, so leaving 5
+; Device 1 is flagged as a floppy (DQP_TAIL bit 2) but is read-only, so
+; there is nothing to offer. Device 2 is NOT flagged as a floppy, but
+; formatting it means throwing away a disk image that lives in a file on
+; a removable stick - and the honest way to do that is to delete the file
+; from the firmware terminal's Nextor menu and let the user create a new
+; one, which is a choice with a size in front of it. Formatting here
+; would be a silent wipe of whatever was on the medium, which is not
+; something a driver should do behind the user's back.
+;
+; RESULT_NOT_IMPLEMENTED is the documented answer for "this device is not
+; formattable" (guide 4.6.5/4.6.6: "for floppy disks if the driver
+; doesn't support formatting it should always return
+; RESULT_NOT_IMPLEMENTED"), and it is what all three queries are required
+; to answer together - query 5 and 6 are a pair, so leaving 5
 ; unimplemented and answering 6 would be the inconsistent one.
 ;
-; Consequence: CALL FORMAT (BASIC) and COMMAND3.COM's FORMAT still list
-; the drive with the kernel's default single/double side choices, and the
+; Consequence: CALL FORMAT (BASIC) and COMMAND3.COM's FORMAT still list the
+; drive with the kernel's default single/double side choices, and the
 ; format itself then fails on query 6. The user-visible result is an
-; error rather than a silent "formatted", which is the honest outcome
-; for a disk whose sectors live in a file that is never written.
+; error rather than a silent "formatted", which is the honest outcome.
 DO_DEVQ_GET_FORMAT_CHOICES:
 DO_DEVQ_DO_FORMAT:
 DO_DEVQ_STOP_MOTOR:
@@ -956,9 +1176,9 @@ CUSTOM_DEVICE_QUERY:
 ;--- READ_WRITE: read or write logical sectors.
 ;
 ;    In:  Cy = 0 read / 1 write
-;         A  = device number (must be 1)
+;         A  = device number (1 or 2)
 ;         B  = sector count
-;         C  = media descriptor (ignored: not a floppy)
+;         C  = media descriptor (ignored)
 ;         HL = buffer (non page-1, direct accessible)
 ;         DE = address of the 4-byte LBA (LE), non page-1
 ;    Out: A = DOS error code (0 = ok), B = sectors transferred
@@ -969,26 +1189,46 @@ CUSTOM_DEVICE_QUERY:
 ;      DE' = address of the 4-byte LBA value in kernel memory
 ;      IY  = stack frame (helpers never touch IY)
 ;
-;    Per sector: media check -> CMD_READ/CMD_WRITE + LBA(4) ->
+;    Per sector: media check -> CMD_READ/CMD_WRITE + dev + LBA(4) ->
 ;    (read: drain 512 from DATA / write: push 512 to DATA) -> poll DONE
 ;    -> map errors -> increment the 32-bit LBA at (DE').
 ;    On error: B = sectors transferred = original count - remaining.
 
 READ_WRITE:
-	push	af
+	;Frame layout once the pushes are done (IY = SP, bytes in Z80 order):
+	;
+	;   (iy+0)  A on entry = device number / A on exit = DOS error code
+	;   (iy+1)  F on entry; bit 0 is the read/write selector
+	;   (iy+10) C on entry = media descriptor (unused)
+	;   (iy+11) B on entry = sector count / sectors transferred on exit
+	;
+	;AF is pushed LAST, which is what puts the device number at (iy+0).
+	;That offset is not arbitrary: it is the one byte the per-sector
+	;helpers read on every sector AND the one slot the returned error code
+	;is written to, so both the device number and the exit code survive in
+	;the same place and both exits can share RW_EXIT. It is also the only
+	;offset none of the helpers can move - they all save and restore BC,
+	;DE and HL around themselves and none of them touches IY at all.
+	;
+	;Pushed bottom-up BC, DE, HL, IX, IY, AF, so the pops are the reverse:
 	push	bc
 	push	de
 	push	hl
 	push	ix
 	push	iy
+	push	af
 	ld	iy,0
-	add	iy,sp		;frame: (iy+8..9)=BC, (iy+10..11)=AF
+	add	iy,sp
 
-	;Device number must be 1 (.IDEVN otherwise).
+	;Device number must be 1 or 2 (.IDEVN otherwise). Same range the
+	;device-query dispatcher accepts, and the same one the firmware's
+	;device table has rows for.
 
-	ld	a,(iy+11)	;original A = device number
-	cp	1
-	jr	nz,RW_IDEVN
+	ld	a,(iy+0)
+	cp	MB_DEV_FLANKY	;below 1: device numbers start at 1
+	jr	c,RW_IDEVN
+	cp	MB_DEVICE_COUNT+1
+	jr	nc,RW_IDEVN
 
 	;Zero sectors: immediate success.
 
@@ -1008,7 +1248,7 @@ READ_WRITE:
 
 	;Dispatch on Cy (bit 0 of the saved F).
 
-	ld	a,(iy+10)	;saved F
+	ld	a,(iy+1)	;saved F
 	rra			;bit0 (Cy) -> carry
 	jr	c,RW_W_LOOP
 
@@ -1031,8 +1271,8 @@ RW_W_LOOP:
 
 RW_OK:
 	xor	a		;A = 0 (ok)
-	ld	(iy+11),a	;becomes the returned A at exit
-	ld	b,(iy+9)	;B = all sectors transferred
+	ld	(iy+0),a	;becomes the returned A at exit
+	ld	b,(iy+11)	;B = all sectors transferred
 	jr	RW_EXIT
 
 	;--- Error exit: A = error code (from the helper), B = remaining
@@ -1043,32 +1283,50 @@ RW_OK:
 
 RW_ERROR:
 	push	af		;stash the error code
-	ld	a,(iy+9)	;original B = total requested
+	ld	a,(iy+11)	;original B = total requested
 	sub	b		;done = total - remaining
 	ld	b,a
 	pop	af		;recover the error code
-	ld	(iy+11),a	;it becomes the returned A
+	ld	(iy+0),a	;it becomes the returned A
 	jr	RW_EXIT
 
 RW_EXIT:
+	pop	af		;A = error code, F = saved flags
 	pop	iy
 	pop	ix
 	pop	hl
 	pop	de
-	pop	bc
-	pop	af		;A = error code, B = sectors transferred
+	pop	bc		;B = sectors transferred
 	ret
 
+;--- Unknown device number.
+;
+;    .IDEVN is loaded here rather than left as the device number in A, and
+;    that is a fix: the check above ends on a compare, so by the time
+;    control reaches this label A holds the device number, and storing that
+;    as the DOS error code returns the DEVICE NUMBER as the error. For
+;    device 2 that is error code 2 - which is a real DOS error meaning
+;    something else entirely, so the kernel reported a nonsensical disk
+;    failure instead of "invalid device number".
+
 RW_IDEVN:
-	ld	(iy+11),a	;.IDEVN into the saved-A slot
+	ld	a,.IDEVN
+	ld	(iy+0),a
 	xor	a
 	ld	b,a		;B = 0 sectors transferred
 	jr	RW_EXIT
 
 
 ;--- RW_ONE_READ: transfer one sector (read).
-;    IX = buffer, DE' = LBA pointer, B = remaining (preserved).
+;    IX = buffer, DE' = LBA pointer, (iy+0) = device number,
+;    B = remaining (preserved).
 ;    Returns A = 0 or a DOS error code. Trashes AF, BC, DE, HL.
+;
+;    The device number is read out of the frame rather than passed in a
+;    register: A holds the command byte here, B has to stay the remaining
+;    count across the call, and the frame is the only place the value
+;    already lives. (iy) is set up once by READ_WRITE and never disturbed
+;    by anything below.
 
 RW_ONE_READ:
 	push	bc		;preserve the remaining-count register
@@ -1076,19 +1334,23 @@ RW_ONE_READ:
 	;Media check (consumes the change latch; that is fine - the
 	;kernel calls status query 3 before any access anyway).
 
+	ld	b,(iy+0)	;device number
 	ld	a,MB_STATUS
-	call	MB_STCMD
+	call	MB_STDEV
 	jp	c,RW1_TMO
 	or	a
 	jp	z,RW1_NRDY
 
-	;Send CMD_READ + the 4 LBA bytes (copied from (DE') via HL').
+	;Send CMD_READ + the device byte + the 4 LBA bytes (copied
+	;from (DE') via HL').
 
 	exx
 	push	de
 	pop	hl		;HL' = copy of the LBA pointer
 	ld	a,MB_READ
-	ld	(MBOX_CMD),a
+	ld	(MBOX_CMD),a	;the command byte comes FIRST...
+	ld	a,(iy+0)
+	ld	(MBOX_DATA),a	;...then the device, then the LBA
 	ld	a,(hl)
 	ld	(MBOX_DATA),a
 	inc	hl
@@ -1129,28 +1391,94 @@ RW1_RDR:
 	ret
 
 ;--- RW_ONE_WRITE: transfer one sector (write).
-;    Same register contract as RW_ONE_READ.
+;    Same register contract as RW_ONE_READ, and the same frame slot for
+;    the device number.
 ;
-;    This device is read-only, so there is no transfer: return .WPROT
-;    straight away, without a media check and without CMD_WRITE.
-;
-;    The old version of this routine issued MB_STATUS, pushed the LBA
-;    and then 512 data bytes at MBOX_DATA, and only found out at the end
-;    that the firmware had refused all of it. That cost 517 cart-bus
-;    cycles per sector, each one an EXTI0 interrupt on the firmware side,
-;    to be told the answer the device's own +7 flag bit 1 already gives
-;    the kernel. It also leaked the sector: the 4 LBA bytes went out
-;    before the refusal was known, leaving a half-finished command in
-;    the mailbox collector.
+;    Device 1 is the read-only floppy image and returns .WPROT without a
+;    media check and without a command byte. That is not just an
+;    optimisation: the previous version of this routine issued MB_STATUS,
+;    pushed the device byte, the LBA and 512 data bytes at MBOX_DATA, and
+;    only found out at the end that the firmware had refused all of it.
+;    That cost 517 cart-bus cycles per sector, each one an EXTI0
+;    interrupt on the firmware side, to be told the answer the device's
+;    own flags already give the kernel. It also leaked the sector: the
+;    command byte and its arguments went out before the refusal was
+;    known, leaving a half-finished request in the mailbox collector.
 ;
 ;    .WPROT is the right code rather than .NRDY or .DISK: the guide
 ;    (4.9.4) says to return the DOS error that describes the failure,
 ;    and the kernel already uses .WPROT to report "Write protected disk"
 ;    for exactly this case.
+
 RW_ONE_WRITE:
 	push	bc		;preserve the remaining-count register
-	ld	a,.WPROT
-	pop	bc
+
+	;Only device 2 (the read-write .img) has anything to write to.
+
+	ld	a,(iy+0)
+	cp	MB_DEV_DISK
+	jr	c,RW1_WPROT
+
+	;Media check, exactly as in the read path.
+
+	ld	b,(iy+0)	;device number
+	ld	a,MB_STATUS
+	call	MB_STDEV
+	jp	c,RW1_TMO
+	or	a
+	jp	z,RW1_NRDY
+
+	;Send CMD_WRITE + the device byte + the 4 LBA bytes (copied
+	;from (DE') via HL').
+
+	exx
+	push	de
+	pop	hl		;HL' = copy of the LBA pointer
+	ld	a,MB_WRITE
+	ld	(MBOX_CMD),a
+	ld	a,(iy+0)
+	ld	(MBOX_DATA),a	;device, then LBA
+	ld	a,(hl)
+	ld	(MBOX_DATA),a
+	inc	hl
+	ld	a,(hl)
+	ld	(MBOX_DATA),a
+	inc	hl
+	ld	a,(hl)
+	ld	(MBOX_DATA),a
+	inc	hl
+	ld	a,(hl)
+	ld	(MBOX_DATA),a
+	ex	de,hl		;HL' = LBA pointer (for INC32)
+	call	INC32
+	ex	de,hl
+	exx
+
+	;Push the sector: 512 bytes from (IX) to DATA. BC is the loop
+	;counter here, which is safe precisely because the remaining count
+	;was pushed on entry and is popped back at the end.
+
+	ld	bc,512
+RW1_WDR:
+	ld	a,(ix+0)
+	ld	(MBOX_DATA),a
+	inc	ix
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,RW1_WDR
+
+	;Wait for the firmware to acknowledge. A successful write produces
+	;no result bytes at all - DONE with an empty FIFO is the success
+	;signal - so there is nothing to drain afterwards.
+
+	call	MB_POLL
+	jp	c,RW1_TMO
+	ld	a,(MBOX_STAT)
+	bit	5,a		;ERR bit
+	jp	nz,RW1_ERR
+	pop	bc		;restore remaining count
+	xor	a
 	ret
 
 ;--- Shared one-sector error tails (BC was pushed by the helper).
@@ -1176,6 +1504,11 @@ RW1_NRDY2:
 	ld	a,.NRDY
 	ret
 
+RW1_WPROT:
+	pop	bc
+	ld	a,.WPROT
+	ret
+
 ;-----------------------------------------------------------------------------
 ; Strings and messages
 ;-----------------------------------------------------------------------------
@@ -1184,10 +1517,10 @@ RW1_NRDY2:
 
 MSG_DRIVER_NAME:	db	"RISKY MSX 2",0
 MSG_DEVICE_NAME:	db	"720K disk image",0
+MSG_DEVICE_NAME2:	db	"read-write disk image",0
 
 INIT_MSG:		db	"\r\nRISKY MSX 2 driver\r\n"
-			db	"RISKY MSX 2 read-only 720K floppy image\r\n"
-			db	"Hello world from driver\r\n",0
+			db	"720K floppy image + read/write disk",0
 
 ;--- Init-phase verdicts. The handshake already prints enough on
 ;    success; the FAIL prints below cover what can still go wrong.

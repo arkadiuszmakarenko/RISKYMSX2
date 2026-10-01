@@ -3,6 +3,9 @@
 #include "cart.h"
 #include "psram.h"
 #include "usb_disk.h"
+#include "nextor.h"
+#include "dsk_image.h"
+#include "img_image.h"
 #include "ff.h"
 #include <stdio.h>
 #include "ch32v4x7.h"
@@ -23,9 +26,19 @@ TerminalMailbox g_term_mbox;
                                  * CR/LF never wraps mid-row. */
 #define TERM_PAGE_SIZE   20U    /* rows per page on the file list */
 
+/* Terminal menu build tag, printed once per session on the UART.
+ *
+ * Why a tag at all: the on-screen footers are the user-facing version
+ * marker, and they are 32-column lines that get edited often enough
+ * to be ambiguous ("is this row 21 the new one or the old one?").
+ * One log line at session start settles it, and it costs one string.
+ * Bump this whenever the key map changes. */
+#define TERM_MENU_VERSION "v3 (D/F1=nextor menu, N=boot)"
+
 typedef enum {
     MENU_LIST,
     MENU_MAPPER,
+    MENU_NEXTOR,
 } MenuState;
 
 /* Per-file menu state. */
@@ -53,6 +66,48 @@ static struct {
                                  * operational name passed to
                                  * Terminal_BootCart */
 } s_menu;
+
+/* ------------------------------------------------------------------ */
+/* Nextor submenu state                                                 */
+/* ------------------------------------------------------------------ */
+
+/* Declared up here rather than next to the renderer because
+ * Terminal_Reset() has to clear the outcome line, and the submenu's
+ * state is the same kind of thing s_menu is: per-session menu state
+ * that a mapper swap must not carry into the next session. */
+
+typedef enum {
+    NXA_CREATE = 0,   /* create a new image of `sectors`      */
+    NXA_DELETE,       /* delete the image that is there      */
+    NXA_RESCAN,       /* re-probe both devices               */
+} NextorActionKind;
+
+typedef struct {
+    uint8_t  kind;     /* NextorActionKind */
+    uint32_t sectors;  /* NXA_CREATE only: image size in 512B sectors */
+} NextorAction;
+
+/* Action rows, at most five: four sizes while the image is missing,
+ * one delete while it is there, plus the rescan row. The list is
+ * rebuilt (never patched) by the render, so a create or a delete
+ * cannot leave a row behind that points at a file which is gone.
+ * s_menu.sel is the highlighted index on this screen - the same field
+ * the file list and the mapper menu reuse for their own selection. */
+static NextorAction s_nx_act[5];
+static uint8_t      s_nx_nact;    /* rows in s_nx_act */
+
+/* Outcome line of the last action, row 14. Static rather than a local
+ * because the action runs, THEN the screen is redrawn - and the
+ * redraw is a full clear_screen(), so anything printed during the
+ * action is gone.
+ *
+ * Sized to the 30-column screen budget (see print_nx_img_line): a
+ * longer message is truncated rather than wrapped, because a wrapped
+ * message would push the two hint lines off the bottom of the screen. */
+static char         s_nx_msg[30];
+
+/* Last percentage drawn by term_nextor_progress, 0xFFFF = none. */
+static uint32_t     s_nx_last_pct = 0xFFFFU;
 
 /* Number of pages needed to display s_menu.count files. */
 static uint16_t menu_page_count (void) {
@@ -208,6 +263,14 @@ void Terminal_Reset (void) {
     s_menu.loaded = 0;
     s_menu.state  = MENU_LIST;
     s_menu.picked[0] = '\0';
+    /* Nextor submenu state. The action list is not rebuilt here - it is
+     * built by the render, which is the first thing that needs it - but
+     * the outcome line has to be cleared, or a session that started
+     * with a soft reset into the cart would show the previous
+     * session's "created 512 MB image" as if it were current. */
+    s_nx_msg[0]     = '\0';
+    s_nx_nact       = 0U;
+    s_nx_last_pct   = 0xFFFFU;
     s_list_pending = 1U;
 }
 
@@ -231,6 +294,45 @@ static void print_size (uint32_t bytes) {
     while (n > 0) buf[i++] = tmp[--n];
     buf[i++] = suffix; buf[i] = '\0';
     out_str (buf);
+}
+
+/* Progress bar geometry - keep in sync with the header printed by
+ * Terminal_BootCart: "  [--------------------]   0%" = 2 spaces + '['
+ * + 20 blocks + ']' + 2 spaces + 3 digits + '%' = 30 chars. Shared with
+ * the Nextor screen's create progress, which is the same 20-block bar
+ * at a different row. */
+#define TERM_PROG_BAR_BLOCKS  20U
+
+/* Draw the progress bar in place at (row, col) for a percentage. Both
+ * long-running UI paths redraw the same 29-char bar in place rather
+ * than scrolling, so a callback must be cheap: 29 out_push calls and
+ * nothing else. Callers do their own throttling and backpressure
+ * (see term_progress_cb and term_nextor_progress) - this is the
+ * drawing primitive, not the policy. */
+static void draw_bar (uint8_t row, uint8_t col, uint32_t pct) {
+    uint32_t filled;
+    char     num[4];
+    uint8_t  i;
+
+    if (pct > 100U) pct = 100U;
+    filled = (pct * TERM_PROG_BAR_BLOCKS) / 100U;
+
+    move_cursor (row, col);
+    out_push (' ');
+    out_push (' ');
+    out_push ('[');
+    for (i = 0U; i < TERM_PROG_BAR_BLOCKS; i++) {
+        out_push ((uint8_t)((i < filled) ? '#' : '-'));
+    }
+    out_push (']');
+    out_push (' ');
+    /* Percentage, 3 chars zero-padded so the column stays fixed. */
+    if (pct >= 100U) { num[0] = '1'; num[1] = '0'; num[2] = '0'; }
+    else if (pct >= 10U) { num[0] = (char)('0' + pct / 10U); num[1] = (char)('0' + pct % 10U); num[2] = ' '; }
+    else { num[0] = (char)('0' + pct); num[1] = ' '; num[2] = ' '; }
+    num[3] = '\0';
+    out_str (num);
+    out_push ('%');
 }
 
 static void print_menu_title (void) {
@@ -289,12 +391,23 @@ static void print_file_list (void) {
         newline ();
     }
 
-    /* Page indicator on the last row. */
+    /* Two hint rows at the bottom. Row 21 is the page indicator (it was
+     * the only footer before the Nextor menu existed), row 22 is free
+     * and carries the second half of the key map.
+     *
+     * "D" rather than "F1" is the entry point that works on this
+     * hardware: pressing F1 forwards no byte at all through the
+     * terminal's CHGET loop (see handle_list_key), so advertising it
+     * as the way in would send the user to a key that does nothing.
+     * F1 is still accepted for BIOSes that do deliver it. */
+    char buf[32];
     move_cursor ((uint8_t)(1 + TERM_PAGE_SIZE), 1);
-    char buf[16];
-    snprintf (buf, sizeof (buf), " Pg %u/%u  F=old N=nextor",
+    snprintf (buf, sizeof (buf), " Pg %u/%u   D=nextor menu",
               (unsigned)(s_menu.page + 1U), (unsigned)menu_page_count ());
     out_str (buf);
+    newline ();
+    move_cursor ((uint8_t)(2 + TERM_PAGE_SIZE), 1);
+    out_str (" N=boot  F=old  ESC=scan");
     newline ();
 }
 
@@ -322,6 +435,483 @@ static void print_mapper_menu (void) {
         newline ();
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Nextor screen                                                         */
+/* ------------------------------------------------------------------ */
+
+/* Defined further down: the FAT scan owns the FatFs directory walk,
+ * and nextor_boot is the N-key launch sequence, which lives with the
+ * key handlers so the one soft-reset-into-cart call site stays next to
+ * its race-window comment. */
+static void scan_usb (void);
+static void nextor_boot (void);
+
+/* Two things need explaining on screen here, and neither can be
+ * explained by a key alone:
+ *
+ *   1. The way in is 'D' on the file list, not F1. Physical F1 is
+ *      accepted and advertised nowhere: on this hardware the MSX-side
+ *      terminal loop forwards no byte for it at all (F1 is swallowed
+ *      somewhere in the key path before CHSNS sees it), and the file
+ *      list's footer is the only place a key can be announced.
+ *
+ *   2. Device 2's image is not shipped. It has to be as large as the
+ *      stick can spare, and only the user knows how much that is, so
+ *      creating it is an explicit act rather than something the
+ *      firmware does when it does not find the file. The screen is
+ *      that act: it reports what both devices look like right now,
+ *      and offers the create / delete / rescan rows.
+ *
+ * Row map (0-based, the MSX accepts any 0..23):
+ *
+ *      0  title
+ *      1  device 1, what it is
+ *      2  device 1, the file and its size - or "(not present)"
+ *      3  device 2, what it is
+ *      4  device 2, the file and its size - or "(not present)"
+ *      5  free space left on the stick
+ *      6  (blank)
+ *      7  action row 0, at TERM_NX_ROW0
+ *      8  action row 1
+ *      9  action row 2
+ *     10  action row 3
+ *     11  action row 4
+ *     12  (blank)
+ *     13  create progress bar
+ *     14  outcome of the last action
+ *     15-20 unused
+ *     21  hint line 1
+ *     22  hint line 2
+ */
+#define TERM_NX_ROW0        7U     /* first action row               */
+#define TERM_NX_ROW_PROG    13U    /* create progress bar            */
+#define TERM_NX_ROW_MSG     14U    /* outcome of the last action     */
+
+/* Size presets offered for a new image, in 512-byte sectors. Four
+ * entries rather than a typed-in number because this is an F1 screen
+ * on a 32-column display with no text entry, and a size the user has
+ * to count keystrokes to specify is one they will not specify.
+ *
+ * The floor is 16 MB because the volume inside the image has to come
+ * out as FAT16 and MSX-DOS identifies anything below 4085 clusters as
+ * FAT12 (see img_image.h); the ceiling is 512 MB because a bigger file
+ * is minutes of cluster-chain walking over USB and this hardware's
+ * stick is the one being carved up. */
+static const uint32_t kNxSectors[4] = {
+    32768UL,        /*  16 MB */
+    131072UL,       /*  64 MB */
+    262144UL,       /* 128 MB */
+    1048576UL,      /* 512 MB */
+};
+
+static void nextor_build_actions (void) {
+    uint8_t i;
+
+    s_nx_nact = 0U;
+    if (ImgImage_IsPresent () == 0U) {
+        for (i = 0U; i < (uint8_t)(sizeof (kNxSectors) / sizeof (kNxSectors[0])); i++) {
+            s_nx_act[s_nx_nact].kind    = NXA_CREATE;
+            s_nx_act[s_nx_nact].sectors = kNxSectors[i];
+            s_nx_nact++;
+        }
+    } else {
+        /* No create row while the image is there: ImgImage_Create()
+         * refuses to overwrite it, and offering a row that always
+         * fails would be worse than not offering it. The delete is
+         * the explicit, separate step. */
+        s_nx_act[s_nx_nact].kind    = NXA_DELETE;
+        s_nx_act[s_nx_nact].sectors = 0U;
+        s_nx_nact++;
+    }
+    s_nx_act[s_nx_nact].kind    = NXA_RESCAN;
+    s_nx_act[s_nx_nact].sectors = 0U;
+    s_nx_nact++;
+
+    if (s_menu.sel >= s_nx_nact) {
+        s_menu.sel = (uint16_t)(s_nx_nact - 1U);
+    }
+}
+
+/* Free space on the stick, in MiB, or `ok` = 0 when FatFs could not
+ * say (stick absent, exFAT, or an I/O error). Shown because the size
+ * presets are absolute: "512 MB" is only a sensible offer on a stick
+ * that has 512 MB free, and this is the number the user needs to
+ * decide.
+ *
+ * f_getfree() is not cheap - it walks the host FAT counting clusters,
+ * a fraction of a second on a big stick - so it is called once per
+ * screen redraw and its result is not cached across redraws. A
+ * progress redraw never comes through here (it only repaints the bar),
+ * so the create path is unaffected. */
+#if (FF_MAX_SS != FF_MIN_SS)
+/* csize is expressed in FF_MAX_SS units; with the two unequal the
+ * sector size is per-volume and the arithmetic below is wrong. */
+#error "term_nx_free_mib assumes FF_MAX_SS == FF_MIN_SS (csize counts 512B sectors)"
+#endif
+static uint32_t term_nx_free_mib (uint8_t *ok) {
+    FATFS  *fs = (FATFS *)0;
+    DWORD   ncl = 0U;
+    uint32_t mib;
+
+    *ok = 0U;
+    if (f_getfree ("0:/", &ncl, &fs) != FR_OK || fs == (FATFS *)0) {
+        return 0U;
+    }
+    /* FatFs's "could not count" answer, which is also what a full
+     * volume reports - the same thing to show the user either way. */
+    if (ncl == 0xFFFFFFFFU) {
+        return 0U;
+    }
+    *ok = 1U;
+    mib = ((uint32_t)ncl * (uint32_t)fs->csize) / (1024U * 2U);  /* -> MiB */
+    return mib;
+}
+
+/* Create progress, in place on one row. Same shape and the same
+ * discipline as term_progress_cb: throttle to a percentage change,
+ * and skip the repaint when the MSX has not drained the ring - a
+ * dropped cosmetic update is harmless, but a dropped one lands in the
+ * middle of the "done" line the caller prints afterwards.
+ *
+ * ImgImage_Create() calls this once per 8 MiB hop of the cluster-chain
+ * walk, so a 512 MB image is 64 callbacks: far below the rate that
+ * would need throttling to be cheap, and the throttle is kept anyway
+ * because the callback is the documented contract rather than an
+ * implementation detail of today's step size. */
+static void term_nextor_progress (uint32_t done, uint32_t total) {
+    uint32_t pct;
+
+    if (total == 0U) {
+        return;
+    }
+    pct = (uint32_t)(((uint64_t)done * 100ULL) / (uint64_t)total);
+    if (pct == s_nx_last_pct) {
+        return;
+    }
+    s_nx_last_pct = pct;
+    if (g_term_mbox.out_n > 1024U) {
+        return;         /* MSX is behind; see term_progress_cb */
+    }
+    draw_bar (TERM_NX_ROW_PROG, 1U, pct);
+}
+
+/* One action row. The number in column 2 is the shortcut that runs
+ * this row, so the digits and the labels cannot drift apart: both
+ * come from the row's index. */
+static void print_nx_action (const NextorAction *a, uint8_t idx) {
+    char b[30];
+
+    if (a->kind == NXA_CREATE) {
+        snprintf (b, sizeof (b), "  %u  create  %u MB",
+                  (unsigned)(idx + 1U), (unsigned)(a->sectors / 2048U));
+    } else if (a->kind == NXA_DELETE) {
+        const char *path = ImgImage_PrimaryPath ();
+        snprintf (b, sizeof (b), "  %u  delete %s",
+                  (unsigned)(idx + 1U), (path != (const char *)0) ? path : "(none)");
+    } else {
+        snprintf (b, sizeof (b), "  %u  rescan devices", (unsigned)(idx + 1U));
+    }
+    out_str (b);
+}
+
+/* The device-2 line under its description. MiB rather than sectors
+ * because a disk is thought of in megabytes; the exact sector count is
+ * what the kernel reads from CAPACITY and nobody types it in.
+ *
+ * "missing" rather than "(not present)" for the same reason every
+ * other line here is short: the MSX is 32 columns wide and a line that
+ * reaches the last column leaves the cursor wrapped, so the CR/LF
+ * after it skips a screen row. 30 characters is the budget, and the
+ * s_nx_msg / print_nx_action buffers are sized to truncate at it
+ * rather than wrap. */
+static void print_nx_img_line (void) {
+    if (ImgImage_IsPresent () != 0U) {
+        char b[30];
+        snprintf (b, sizeof (b), "   %s  %u MB",
+                  ImgImage_Path () ? ImgImage_Path () : "?",
+                  (unsigned)(ImgImage_SectorCount () / 2048U));
+        out_str (b);
+    } else {
+        char b[30];
+        const char *path = ImgImage_PrimaryPath ();
+        snprintf (b, sizeof (b), "   %s  missing",
+                  (path != (const char *)0) ? path : "(no name set)");
+        out_str (b);
+    }
+}
+
+static void print_nextor_menu (void) {
+    uint8_t i;
+    uint8_t have_free;
+    uint32_t free_mib;
+    char b[30];
+
+    /* Action list FIRST, because it decides how many rows there are
+     * and clamps s_menu.sel - the arrow below has to be placed against
+     * the post-clamp index, or a create (5 rows) followed by a redraw
+     * (2 rows) leaves the sprite parked on a row that is no longer
+     * highlighted. */
+    nextor_build_actions ();
+
+    /* Arrow first, same rationale as print_file_list / print_mapper_menu:
+     * the sprite is on-screen before any of the text that explains
+     * which row it is on. */
+    move_pointer (0, (uint8_t)(TERM_NX_ROW0 + s_menu.sel));
+
+    clear_screen ();
+    move_cursor (0, 0);
+    out_str (" NEXTOR   RET run  ESC back");
+    newline ();
+
+    /* Device 1. The name comes from the backend rather than being
+     * spelled out here, so this screen and nextor.c cannot end up
+     * describing different files. */
+    move_cursor (1, 0);
+    out_str (" D1 floppy 720K, read only");
+    newline ();
+    move_cursor (2, 1);
+    if (DskImage_IsPresent () != 0U) {
+        snprintf (b, sizeof (b), "   %s  %u sectors",
+                  DskImage_Path () ? DskImage_Path () : "?",
+                  (unsigned)DskImage_SectorCount ());
+    } else {
+        snprintf (b, sizeof (b), "   %s  missing",
+                  DskImage_PrimaryPath () ? DskImage_PrimaryPath ()
+                                          : "(no name set)");
+    }
+    out_str (b);
+    newline ();
+
+    /* Device 2. */
+    move_cursor (3, 0);
+    out_str (" D2 disk, read + write");
+    newline ();
+    move_cursor (4, 1);
+    print_nx_img_line ();
+    newline ();
+
+    /* Free space on the stick. */
+    free_mib = term_nx_free_mib (&have_free);
+    move_cursor (5, 0);
+    if (have_free != 0U) {
+        snprintf (b, sizeof (b), " free on stick: %u MB", (unsigned)free_mib);
+        out_str (b);
+    } else {
+        out_str (" free on stick: ?");
+    }
+    newline ();
+
+    for (i = 0U; i < s_nx_nact; i++) {
+        move_cursor ((uint8_t)(TERM_NX_ROW0 + i), 1);
+        print_nx_action (&s_nx_act[i], i);
+        newline ();
+    }
+
+    /* Progress row, blanked rather than left stale: the outcome line
+     * below it is what the user reads, and a half-drawn bar under a
+     * "failed" message is worse than no bar. */
+    move_cursor (TERM_NX_ROW_PROG, 0);
+    out_str ("                              ");
+    newline ();
+
+    move_cursor (TERM_NX_ROW_MSG, 1);
+    out_str (s_nx_msg);
+    newline ();
+
+    move_cursor (21, 1);
+    out_str (" RET run  ESC back to list");
+    newline ();
+    move_cursor (22, 1);
+    out_str (" N boots Nextor right now");
+    newline ();
+}
+
+/* Re-probe both devices, ignoring the outcome - the screen reports
+ * what is there afterwards, and a failure to open is exactly the
+ * "not present" case it renders. */
+static void nextor_rescan (void) {
+    (void)DskImage_Open ();
+    (void)ImgImage_Open ();
+    (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "rescanned the USB stick");
+}
+
+static void nextor_create (uint32_t sectors) {
+    const char *path = ImgImage_PrimaryPath ();
+    ImgErr       err;
+
+    if (path == (const char *)0) {
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "no image name configured");
+        print_nextor_menu ();
+        return;
+    }
+
+    /* Drop anything typed during the wait: those keys were meant for
+     * the screen the user was on before, and replaying them onto the
+     * freshly drawn one would look like the menu moved on its own. */
+    {
+        uint8_t junk;
+        while (kbd_pop (&junk)) { }
+    }
+
+    s_nx_last_pct = 0xFFFFU;
+    /* The "working" text goes on the outcome row, not the bar row: the
+     * bar redraws in place on its own row and would wipe whatever was
+     * written there. The two rows are adjacent for that reason. */
+    move_cursor (TERM_NX_ROW_MSG, 1);
+    out_str (" creating, please wait...");
+    draw_bar (TERM_NX_ROW_PROG, 1, 0U);
+
+    ImgImage_ProgressCB = term_nextor_progress;
+    err = ImgImage_Create (path, sectors);
+    ImgImage_ProgressCB = 0;
+
+    /* Re-open rather than leave the state half-updated: the screen
+     * below reports IsPresent(), and an image the screen calls
+     * "(not present)" while the kernel sees it is exactly the kind of
+     * disagreement that wastes an hour of debugging. ImgImage_Create
+     * leaves the file closed, so this is just a probe. */
+    ImgImage_Invalidate ();
+    (void)ImgImage_Open ();
+
+    printf ("TERM: nextor create '%s' %u sectors -> %d\r\n",
+            path, (unsigned)sectors, (int)err);
+
+    switch (err) {
+    case IMG_OK:
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
+                        "created %u MB image", (unsigned)(sectors / 2048U));
+        break;
+    case IMG_ERR_NO_SPACE:
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
+                        "not enough space on stick");
+        break;
+    case IMG_ERR_EXISTS:
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
+                        "image exists - delete first");
+        break;
+    case IMG_ERR_NOT_MOUNTED:
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "USB stick not mounted");
+        break;
+    case IMG_ERR_BAD_SIZE:
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
+                        "%u MB: bad FAT16 size",
+                        (unsigned)(sectors / 2048U));
+        break;
+    case IMG_ERR_FATFS:
+    default:
+        /* The specific FatFs error is on the UART log, which is where
+         * the FRESULT belongs; the screen cannot say more usefully. */
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
+                        "write failed - see UART log");
+        break;
+    }
+    /* The action list is a different list now (the create rows are
+     * gone, a delete row has appeared), so the old index means
+     * something else. Start at the top rather than let the clamp in
+     * nextor_build_actions() land the arrow on the last row. */
+    s_menu.sel = 0U;
+    print_nextor_menu ();
+}
+
+static void nextor_delete (void) {
+    const char *path = ImgImage_PrimaryPath ();
+    ImgErr       err;
+    uint8_t      junk;
+
+    if (path == (const char *)0) {
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "no image name configured");
+        print_nextor_menu ();
+        return;
+    }
+    while (kbd_pop (&junk)) { }
+
+    /* Drop the backend's view of the image BEFORE unlinking. Leaving
+     * it open would leave IsPresent() true and the cached sector count
+     * intact, so the redraw below would report a disk that is no
+     * longer there and offer "delete" instead of "create" - the screen
+     * and the stick disagreeing, which is worse than either alone. */
+    ImgImage_Invalidate ();
+    err = ImgImage_Delete (path);
+    if (err == IMG_OK) {
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg), "deleted the disk image");
+    } else {
+        (void)snprintf (s_nx_msg, sizeof (s_nx_msg),
+                        "delete failed - see UART log");
+    }
+    printf ("TERM: nextor delete '%s' -> %d\r\n", path, (int)err);
+    s_menu.sel = 0U;
+    print_nextor_menu ();
+}
+
+static void nextor_run (uint8_t idx) {
+    if (idx >= s_nx_nact) {
+        return;
+    }
+    switch (s_nx_act[idx].kind) {
+    case NXA_CREATE:
+        nextor_create (s_nx_act[idx].sectors);
+        break;
+    case NXA_DELETE:
+        nextor_delete ();
+        break;
+    case NXA_RESCAN:
+    default:
+        nextor_rescan ();
+        print_nextor_menu ();
+        break;
+    }
+}
+
+static void handle_nextor_key (uint8_t key) {
+    printf ("TERM: nextor key=0x%02X sel=%u nact=%u\r\n",
+            key, s_menu.sel, s_nx_nact);
+
+    if (key == 0x1E) {                   /* up */
+        if (s_menu.sel > 0U) s_menu.sel--;
+        move_pointer (0, (uint8_t)(TERM_NX_ROW0 + s_menu.sel));
+        return;
+    }
+    if (key == 0x1F) {                   /* down */
+        if ((int)s_menu.sel + 1 < (int)s_nx_nact) s_menu.sel++;
+        move_pointer (0, (uint8_t)(TERM_NX_ROW0 + s_menu.sel));
+        return;
+    }
+    if (key == 0x0D) {                   /* RET - run the highlighted row */
+        printf ("TERM: nextor RET -> action %u\r\n", s_menu.sel);
+        nextor_run ((uint8_t)s_menu.sel);
+        return;
+    }
+    if (key == 0x1B) {                   /* ESC - back to the file list */
+        printf ("TERM: nextor ESC -> file list\r\n");
+        s_menu.state = MENU_LIST;
+        /* Rescan: creating or deleting the image changes what the
+         * file list has to show, and the list is not otherwise
+         * refreshed on the way back. */
+        scan_usb ();
+        s_menu.page = 0;
+        s_menu.sel  = 0;
+        print_file_list ();
+        return;
+    }
+    if (key >= '1' && key <= '9') {
+        const uint8_t idx = (uint8_t)(key - '1');
+        if (idx < s_nx_nact) {
+            s_menu.sel = idx;
+            nextor_run (idx);
+        }
+        return;
+    }
+    if (key == 'N' || key == 'n') {
+        /* Booting from here is the point of the screen: the image the
+         * user just created is already open (nextor_create re-opens
+         * it), so the kernel finds device 2 on its first probe
+         * instead of waiting out the 2 s retry window. */
+        nextor_boot ();
+    }
+}
+
+
 
 /* ------------------------------------------------------------------ */
 /* FAT scan                                                             */
@@ -411,23 +1001,17 @@ static void scan_usb (void) {
 /* Boot path                                                            */
 /* ------------------------------------------------------------------ */
 
-/* Progress bar geometry - keep in sync with the header printed by
- * Terminal_BootCart: "  [--------------------]   0%" = 2 spaces + '['
- * + 20 blocks + ']' + 2 spaces + 3 digits + '%' = 30 chars. */
-#define TERM_PROG_BAR_BLOCKS  20U
-
 /* Redraws the progress bar in place on the fixed screen row the
  * header occupied. Called from USB_FileToPSRAM's read loop via the
  * USB_ProgressCB hook - keep it short. */
 static void term_progress_cb (uint32_t done, uint32_t total) {
+    static uint32_t s_last_pct = 0xFFFFU;
+
     if (total == 0U) return;
     /* Throttle: only redraw when the percentage changes. */
     uint32_t pct = (uint32_t)(((uint64_t)done * 100ULL) / total);
-    static uint32_t s_last_pct = 0xFFFFU;
     if (pct == s_last_pct) return;
     s_last_pct = pct;
-
-    uint32_t filled = (uint32_t)(((uint64_t)done * TERM_PROG_BAR_BLOCKS) / total);
 
     /* Backpressure: the ring is only 2048 bytes and the MSX drains at
      * ~50 µs/byte, so a bar redraw every 1% can outrun it. If out_n is
@@ -439,25 +1023,9 @@ static void term_progress_cb (uint32_t done, uint32_t total) {
      * leaves room for the launch sequence. */
     if (g_term_mbox.out_n > 1024U) return;
 
-    /* Move to the progress-bar row (row 3, column 0) and redraw in
-     * place - must match the header layout in Terminal_BootCart. */
-    move_cursor (3, 0);
-    out_push (' ');
-    out_push (' ');
-    out_push ('[');
-    for (uint32_t i = 0; i < TERM_PROG_BAR_BLOCKS; i++) {
-        out_push ((uint8_t)((i < filled) ? '#' : '-'));
-    }
-    out_push (']');
-    out_push (' ');
-    /* Percentage, 3 chars zero-padded so the column stays fixed. */
-    char num[4];
-    if (pct >= 100U) { num[0] = '1'; num[1] = '0'; num[2] = '0'; }
-    else if (pct >= 10U) { num[0] = (char)('0' + pct / 10U); num[1] = (char)('0' + pct % 10U); num[2] = ' '; }
-    else { num[0] = (char)('0' + pct); num[1] = ' '; num[2] = ' '; }
-    num[3] = '\0';
-    out_str (num);
-    out_push ('%');
+    /* Row 3, column 0 - must match the header layout in
+     * Terminal_BootCart. */
+    draw_bar (3U, 0U, pct);
 }
 
 static void soft_reset_into_cart (Cart_Mapper m) {
@@ -644,6 +1212,37 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
 /* Service - main-loop pump                                            */
 /* ------------------------------------------------------------------ */
 
+/* Boot the flash-served Nextor kernel. Reachable from two screens - the
+ * file list and the Nextor submenu - because the whole point of the
+ * submenu is arriving here with device 2 already set up. */
+static void nextor_boot (void) {
+    /* Boot the flash-served Nextor kernel (ASCII16K: 16 KiB banks of
+     * nextor_rom[] at 0x4000..0x7FFF selected by a bank number
+     * written to 0x6000, plus the driver mailbox at
+     * 0x7FF0..0x7FF5 serviced by nextor.c). Uses EXACTLY the
+     * proven game-launch dance (soft_reset_into_cart): push the
+     * launch byte, the MSX-side terminal's rom_start runs rst 0
+     * from MSX RAM, and the BIOS re-probe finds the armed cart -
+     * here the kernel's 'AB' at 0x4000 (nextor_rom bank 0 of the
+     * MSXSoftware/NextorDriver/Nextor-3.0.RISKYMSX2.ROM image).
+     * Physical F1 cannot be sniffed through the menu's CHGET
+     * forwarding (the BIOS turns F1 into its KEY string), so the
+     * menu accepts the letter N; the footer hints it. */
+    printf ("TERM: N -> NEXTOR\r\n");
+    clear_screen ();
+    out_str (" Booting Nextor...");
+    newline ();
+    /* Let the MSX print the launch text before the 0x03 byte and
+     * the mapper swap (same discipline as Terminal_BootCart).
+     * CRITICAL: keep the soft_reset_into_cart sequence exactly
+     * as for game ROMs - the Nextor kernel's init has the same
+     * "MSX slot probe 0x4000 within ~20 ms of RST 0" timing, so
+     * the 30 ms swap window in soft_reset_into_cart is what
+     * avoids the boot hang regression. */
+    term_wait_drain (600U);
+    soft_reset_into_cart (CART_MAP_NEXTOR);
+}
+
 static void handle_list_key (uint8_t key) {
     /* arrow up / down / RET / ESC / LEFT/RIGHT (page nav) */
     printf ("TERM: list key=0x%02X sel=%u count=%u page=%u\r\n",
@@ -717,31 +1316,41 @@ static void handle_list_key (uint8_t key) {
         (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
         return;
     } else if (key == 'N' || key == 'n') {
-        /* Boot the flash-served Nextor kernel (ASCII16K: 16 KiB banks of
-         * nextor_rom[] at 0x4000..0x7FFF selected by a bank number
-         * written to 0x6000, plus the driver mailbox at
-         * 0x7FF0..0x7FF5 serviced by nextor.c). Uses EXACTLY the
-         * proven game-launch dance (soft_reset_into_cart): push the
-         * launch byte, the MSX-side terminal's rom_start runs rst 0
-         * from MSX RAM, and the BIOS re-probe finds the armed cart -
-         * here the kernel's 'AB' at 0x4000 (nextor_rom bank 0 of the
-         * MSXSoftware/NextorDriver/Nextor-3.0.RISKYMSX2.ROM image).
-         * Physical F1 cannot be sniffed through the menu's CHGET
-         * forwarding (the BIOS turns F1 into its KEY string), so the
-         * menu accepts the letter N; the footer hints it. */
-        printf ("TERM: N -> NEXTOR\r\n");
-        clear_screen ();
-        out_str (" Booting Nextor...");
-        newline ();
-        /* Let the MSX print the launch text before the 0x03 byte and
-         * the mapper swap (same discipline as Terminal_BootCart).
-         * CRITICAL: keep the soft_reset_into_cart sequence exactly
-         * as for game ROMs - the Nextor kernel's init has the same
-         * "MSX slot probe 0x4000 within ~20 ms of RST 0" timing, so
-         * the 30 ms swap window in soft_reset_into_cart is what
-         * avoids the boot hang regression. */
-        term_wait_drain (600U);
-        soft_reset_into_cart (CART_MAP_NEXTOR);
+        nextor_boot ();
+        return;
+    } else if (key == 0x3C || key == 0x01 || key == 'D' || key == 'd') {
+        /* -> the Nextor submenu.
+         *
+         * 'D' is the documented key and F1 is a bonus, because F1
+         * cannot be relied on here. The MSX side forwards CHGET's
+         * return value verbatim (RomLoader/asm/terminal.asm) and
+         * CHGET only produces a byte for a function key if the
+         * machine's BIOS key buffer actually receives it. Measured on
+         * this hardware: pressing F1 forwards NOTHING - not 0x01, not
+         * the 0x3C matrix code, not any byte at all - while ordinary
+         * keys arrive normally. Something in the key path eats the
+         * F-keys before CHSNS can report them, and the fix for that
+         * belongs on the MSX side (scan the matrix directly, SNSMAT)
+         * rather than in a key guess here.
+         *
+         * So the entry point is a plain letter, which every BIOS
+         * delivers, and the two F1 encodings are still accepted for
+         * the machines where they do arrive:
+         *
+         *   0x3C  the raw key-matrix code, on a BIOS whose KEYB table
+         *          gives F1 a matrix code rather than a token
+         *   0x01  the KEY-string token, which is what a stock
+         *          MSX-BIOS returns for F1
+         *
+         * None of the three means anything else on this screen, so
+         * accepting all of them costs nothing - and picking the wrong
+         * one would leave the menu with an entry point the user can
+         * see advertised in the footer and never reach. */
+        printf ("TERM: key 0x%02X -> NEXTOR menu\r\n", key);
+        s_menu.sel   = 0;          /* first action row */
+        s_menu.state = MENU_NEXTOR;
+        s_nx_msg[0]  = '\0';       /* no stale outcome from a prior visit */
+        print_nextor_menu ();
         return;
     }
     /* redraw cursor + arrow on the line we landed on (in-page row) */
@@ -809,10 +1418,21 @@ void Terminal_Service (void) {
     /* Drain keyboard FIFO. */
     uint8_t key;
     while (kbd_pop (&key)) {
-        if (s_menu.state == MENU_LIST) {
-            handle_list_key (key);
-        } else {
+        switch (s_menu.state) {
+        case MENU_MAPPER:
             handle_mapper_key (key);
+            break;
+        case MENU_NEXTOR:
+            handle_nextor_key (key);
+            break;
+        case MENU_LIST:
+        default:
+            /* default, not a plain MENU_LIST: s_menu.state is only
+             * ever set to one of the three, so a corrupt value would
+             * otherwise land in the file list and quietly answer with
+             * file-selection behaviour. */
+            handle_list_key (key);
+            break;
         }
     }
 
@@ -822,7 +1442,8 @@ void Terminal_Service (void) {
      * via the boot gate render correctly too. */
     if (s_list_pending) {
         s_list_pending = 0;
-        printf ("TERM: first service - scanning USB\r\n");
+        printf ("TERM: %s - first service, scanning USB\r\n",
+                TERM_MENU_VERSION);
         scan_usb ();
         printf ("TERM: scan_usb -> count=%u\r\n", s_menu.count);
         print_file_list ();

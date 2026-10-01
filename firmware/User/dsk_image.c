@@ -216,6 +216,20 @@ static void drop (void) {
 }
 
 void DskImage_Init (void) {
+    /* Close before clearing, same as ImgImage_Init and for the same
+     * reason: Nextor_Init runs again on every swap to CART_MAP_NEXTOR,
+     * and a mapper swap is not a power cycle.
+     *
+     * The cost of skipping the f_close is not a leaked allocation (this
+     * build has FF_FS_LOCK == 0, so a FIL is not drawn from a pool) but
+     * the two things f_close actually returns: FatFs's sector window and
+     * the volume's dirty flags. Zeroing s makes the next probe re-open
+     * the same file while the stick's FAT is still marked dirty from
+     * whatever the previous owner wrote, and the window still attributed
+     * to a handle nobody will ever close again. */
+    if (s.open != 0U) {
+        (void)f_close (&s.fp);
+    }
     (void)memset (&s, 0, sizeof (s));
     s_candidates     = (const char *const *)0;
     s_candidate_count = 0U;
@@ -319,6 +333,11 @@ const DskGeometry *DskImage_Geometry (void) {
 
 const char *DskImage_Path (void) {
     return s.path[0] != '\0' ? s.path : (const char *)0;
+}
+
+const char *DskImage_PrimaryPath (void) {
+    return (s_candidates != (const char *const *)0 && s_candidate_count != 0U)
+           ? s_candidates[0] : (const char *)0;
 }
 
 uint8_t DskImage_LastFR (void) {

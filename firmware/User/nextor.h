@@ -27,24 +27,51 @@
  * (command dispatch, result FIFO, disk access) lives in nextor.c.
  *
  * ---------------------------------------------------------------------------
- * What device 1 is
+ * The device table
  * ---------------------------------------------------------------------------
- * Device 1 is NOT the raw USB stick. It is a fixed, read-only 720 KiB
- * MSX-DOS disk image (.dsk, a bare FAT12 2DD floppy image: 1440 x 512
- * byte sectors, no partition table) that the firmware reads out of the
- * stick through FatFs and hands to the kernel one sector at a time. The
- * driver flags it as a floppy disk drive, so the kernel maps a drive
- * straight onto its sector 0 instead of scanning for partitions it does
- * not have.
+ * The driver reports two devices to the kernel (driver query 5 answers
+ * 2, and the jump table in driver.asm is the only place that number is
+ * written down). Neither of them is the raw USB stick: each is one file
+ * on the stick, read out of FatFs one sector at a time, behind the
+ * mailbox.
  *
- * The file name and the geometry are hardcoded on purpose - one image,
- * one file, read only - and live in nextor.c (NEXTOR_IMG_*). Nothing
- * else in the firmware has to change to swap disks: write a new .dsk
- * under that name and reboot.
+ *   device 1   a fixed, read-only 720 KiB MSX-DOS floppy image
+ *              (NEXTOR.DSK: a bare 1440 x 512-byte FAT12 image with no
+ *              partition table). Flagged to the kernel as a floppy disk
+ *              drive, which is what makes it map a drive straight onto
+ *              sector 0 instead of scanning for partitions it does not
+ *              have. Backed by dsk_image.c.
  *
- * Exposing the raw stick as a second, writable device is a later step.
- * The command bytes below already keep room for it: the mailbox numbers
- * are the wire protocol, not the device table.
+ *   device 2   a read-write disk image (NEXTOR.IMG: a file whose length
+ *              IS the capacity, containing a partition table and a
+ *              FAT16 volume). Flagged removable and NOT flagged as a
+ *              floppy, so the kernel runs its normal partition scan and
+ *              finds the MBR. Backed by img_image.c, which can also
+ *              create and delete the file.
+ *
+ * Every device-scoped command carries the device number as its first
+ * argument, so the two share one command set and one driver entry point
+ * with no per-device branch on the firmware side beyond the dispatch
+ * table at the bottom of nextor.c. The device number is a wire field,
+ * not a compile-time constant, precisely so that adding a third device
+ * later is a table entry and a `ld b,3` - not a second protocol.
+ *
+ * ---------------------------------------------------------------------------
+ * Version 2 of the wire protocol
+ * ---------------------------------------------------------------------------
+ * v1 had a single device and no device byte. v2 prepends the device
+ * number to CAPACITY / STATUS / READ / WRITE / STAPEEK. The handshake
+ * answer carries the version byte and driver.asm checks it against
+ * MB_EXPECT, so a driver built against one revision and a firmware
+ * built against the other fails the handshake at boot - loudly, with
+ * the kernel skipping this driver - rather than answering every command
+ * for the wrong device.
+ *
+ * The mailbox window itself has NOT moved. It is decoded by address in
+ * every paged-in bank and the window test in cart.c keeps A0..A3, so
+ * the register layout is tied to the low address bits and changing it
+ * would mean changing the decode. It has been 0x7FF0..0x7FF5 since v1
+ * and stays there.
  */
 
 #ifndef __NEXTOR_H
@@ -116,26 +143,50 @@ extern "C" {
 #define NEXTOR_ERR_NO_MEDIA       0x01U
 #define NEXTOR_ERR_IO             0x02U
 #define NEXTOR_ERR_TIMEOUT        0x03U
-/* Device 1 is a read-only image, so a write is refused rather than
- * silently dropped. The driver never gets this far (it rejects writes
- * locally with .WPROT, which is a DOS error and not a mailbox round
- * trip); the code exists so a CMD_WRITE that arrives anyway gets a
- * truthful answer instead of DONE with an empty result. */
+/* Device 1 is a read-only image, so a write to it is refused rather
+ * than silently dropped. The driver never gets this far for that
+ * device (it rejects writes locally with .WPROT, which is a DOS error
+ * and not a mailbox round trip); the code exists so a CMD_WRITE naming
+ * device 1 that arrives anyway gets a truthful answer instead of DONE
+ * with an empty result. */
 #define NEXTOR_ERR_READONLY       0x04U
+/* The device byte named a device this firmware does not have. Only
+ * reachable from a driver built against a different device count than
+ * the firmware it is talking to. */
+#define NEXTOR_ERR_NODEV          0x05U
 
-/* Command bytes written to NEXTOR_MBOX_CMD. */
+/* Device numbers as they appear on the wire. These are the same numbers
+ * the kernel uses: driver query 5 (DO_DRVQ_GET_MAX_DEVICE) answers
+ * NEXTOR_DEVICE_COUNT, and that is the number the kernel counts up
+ * from. Both sides therefore have to agree, which is exactly why the
+ * constant is here and the driver repeats it in one place with a
+ * comment pointing at this line. */
+#define NEXTOR_DEV_FLANKY         1U   /* NEXTOR.DSK, read-only 720K      */
+#define NEXTOR_DEV_DISK           2U   /* NEXTOR.IMG, read-write          */
+#define NEXTOR_DEVICE_COUNT       2U
+
+/* Command bytes written to NEXTOR_MBOX_CMD.
+ *
+ * HANDSHAKE and ABORT take no arguments at all and are not scoped to a
+ * device. Every other command takes the device number as its FIRST
+ * argument, before anything else - the device byte is a wire field, not
+ * a compile-time constant, so that a third device is a table entry on
+ * the firmware side and one `ld` on the driver side rather than a
+ * second protocol. */
 #define NEXTOR_CMD_HANDSHAKE      0x00U
-#define NEXTOR_CMD_CAPACITY       0x01U
-#define NEXTOR_CMD_STATUS         0x02U
-#define NEXTOR_CMD_READ           0x03U
-#define NEXTOR_CMD_WRITE          0x04U   /* always refused: read-only device */
+#define NEXTOR_CMD_CAPACITY       0x01U   /* <- dev  -> 8 bytes             */
+#define NEXTOR_CMD_STATUS         0x02U   /* <- dev  -> 1 byte, CONSUMES the
+                                               *        change latch          */
+#define NEXTOR_CMD_READ           0x03U   /* <- dev + LBA(4) -> 512 bytes  */
+#define NEXTOR_CMD_WRITE          0x04U   /* <- dev + LBA(4) + 512 bytes    */
 #define NEXTOR_CMD_ABORT          0x05U
-#define NEXTOR_CMD_STAPEEK        0x06U
+#define NEXTOR_CMD_STAPEEK        0x06U   /* <- dev  -> 1 byte, does NOT
+                                               *        consume the latch     */
 #define NEXTOR_CMD_MAX            0x07U
 
 /* Handshake reply: "RNX2" + version byte. */
 #define NEXTOR_MAGIC              "RNX2"
-#define NEXTOR_VERSION            0x01U
+#define NEXTOR_VERSION            0x02U
 
 /* ========================================================================
  * Public API
@@ -152,9 +203,10 @@ void Nextor_Service (void);
 
 /* Called by the USB layer when the stick is removed/re-plugged (or the
  * volume is unmounted for any other reason). Drops the image file
- * handle and resets the PSRAM cache fill cursor, so the next main-loop
- * idle pass re-probes and restarts the streaming fill from the (new)
- * stick's file. Main-loop or service context only - NOT IRQ safe. */
+ * handles of BOTH devices and resets the PSRAM cache fill cursor, so
+ * the next main-loop idle pass re-probes and restarts the streaming
+ * fill from the (new) stick's file. Main-loop or service context only
+ * - NOT IRQ safe. */
 void Nextor_CacheInvalidate (void);
 
 /* --- Code entries for Cart_EXTI0_Nextor_Handler (IRQ context) ------- */
