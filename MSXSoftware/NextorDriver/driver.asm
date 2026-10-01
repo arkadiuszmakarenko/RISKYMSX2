@@ -360,10 +360,10 @@ DRIVER_QUERY:
 
 
 ; Driver query 1: Get driver version number
-; Out: A = RESULT_OK, version in B.C.D = 1.0.0
+; Out: A = RESULT_OK, version in B.C.D = 1.0.1
 
 DO_DRVQ_GET_VERSION:
-	ld	bc,0000h
+	ld	bc,0100h
 	ld	d,1
 	xor	a
 	ret
@@ -373,10 +373,8 @@ DO_DRVQ_GET_VERSION:
 ; In:  B = string index (1 = driver name), D = buffer size, HL = buffer
 ; Out: A = RESULT_OK / RESULT_TRUNCATED_STRING / RESULT_NOT_IMPLEMENTED
 ;
-; Indices 1-3 come from ROM, which is all this driver has to offer about
-; itself; 4 (hardware author) and 5 (serial number) do not exist for a
-; cartridge with no manufacturer behind it and are reported as not
-; implemented.
+; All five documented indices come from ROM: this driver identifies
+; itself with fixed strings and has no updatable identity.
 
 DO_DRVQ_GET_STRING:
 	ld	a,b
@@ -390,6 +388,12 @@ DO_DRVQ_GET_STRING:
 	jp	z,OUTPUT_STRING
 	dec	a
 	ld	hl,MSG_HARDWARE_NAME
+	jp	z,OUTPUT_STRING
+	dec	a
+	ld	hl,MSG_HARDWARE_AUTHOR
+	jp	z,OUTPUT_STRING
+	dec	a
+	ld	hl,MSG_SERIAL_NUMBER
 	jp	z,OUTPUT_STRING
 	ld	a,RESULT_NOT_IMPLEMENTED
 	ret
@@ -1863,7 +1867,7 @@ MB_EXPECT:
 
 INIT_MSG:
 	db	13,10
-	db	"  RISKYMSX2 USB drive driver 1.0"
+	db	"  RISKYMSX2 USB drive driver 1.0.1"
 	db	13,10,13,10,0
 
 MSG_DRIVER_NAME:
@@ -1874,6 +1878,12 @@ MSG_DRIVER_AUTHOR:
 
 MSG_HARDWARE_NAME:
 	db	"USB MSC mass storage",0
+
+MSG_HARDWARE_AUTHOR:
+	db	"Arek Makarenko",0
+
+MSG_SERIAL_NUMBER:
+	db	"00001",0
 
 MSG_DEVICE_NAME:
 	db	"USB drive",0
