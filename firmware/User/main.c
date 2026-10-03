@@ -23,6 +23,22 @@
 
 int main (void) {
 
+    /* NOTE on ~WAIT hold during init: the Subslots implementation
+     * asserts cartridge ~WAIT from the startup asm + main() boot path
+     * so a RAM-backed slotted handler can serve the MSX's first
+     * probe cycle. That model needs a handler that can serve the
+     * held cycle (which a ram-backed mapper trivially can; a flash-ROM
+     * mapper cannot, because the IRQ needs to fire to drive the data
+     * bus, but the held cycle never completes its falling-edge until
+     * WAIT is released - a chicken-and-egg). Terminal and Nextor are
+     * flash-ROM mappers, so the WAIT hold during boot provides no
+     * benefit and risks confusing the BIOS if the timing window is
+     * missed. The primitives stay in place for the slotted handler
+     * (which CAN serve the held cycle) and for runtime use (ROM swap
+     * atomicity). Cart_HoldMSXWait_Begin/End are NO-OPs at the main()
+     * boot path until step 2 of the migration adds the slotted
+     * mapper. */
+
     /* Heartbeat: toggle the LED in a tight loop so we can confirm
      * main() is reached even if USART is dead. PA0 = LEDFLASH. */
     {

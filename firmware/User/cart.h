@@ -12,8 +12,9 @@
  *   PE0  (pin 97)  ~SLTSL   slot select          -> EXTI0 trigger
  *   PE1  (pin 98)  RD
  *   PE2  (pin  1)  WR
- *   PE3  (pin  2)  ~WAIT     bus-cycle stretch   -> GPIO (open-drain out)
+ *   PE3  (pin  2)  ~WAIT     bus-cycle stretch   -> GPIO (low output/input)
  *   PE5  (pin  4)  MREQ
+ *   PE6  (pin  3)  M1        (low during opcode fetch)
  *
  *   PA0  (pin 23)  LEDFLASH (status LED)
  */
@@ -22,7 +23,9 @@
 #define CART_SLTSL_MASK   0x0001U  /* PE0  ~SLTSL  (slot select, EXTIO trigger) */
 #define CART_RD_MASK      0x0002U  /* PE1  ~RD */
 #define CART_WR_MASK      0x0004U  /* PE2  ~WR */
+#define CART_WAIT_MASK    0x0008U  /* PE3  ~WAIT (active-low cart output) */
 #define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
+#define CART_M1_MASK      0x0040U  /* PE6  M1 (low during opcode fetch) */
 #define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)
                                     * currently unused: the Sunrise IDE
                                     * mapper decodes the IDE register /
@@ -222,8 +225,23 @@ uint32_t Cart_GetImageSize (void);
  * driving it externally can damage the mainboard). See
  * Cart_SetMapper_Safe for the cart-swap primitive that closes the
  * race window without touching PE4, and loader.c::cmd_softreset for
- * the CMD_SOFTRESET reboot path. */
+ * the CMD_SOFTRESET reboot path.
+ *
+ * PE3 (~WAIT) is preserved as a low output when the startup wait hold
+ * is active (see Cart_HoldMSXWait_Begin); Init_Cart returns PE3 to a
+ * floating input otherwise. The bus-cycle handler also reads s_msx_wait_held
+ * to know it can short-circuit its post-cycle SLTSL spin. */
 void Init_Cart (void);
+
+/* Hold/release the Z80 using the standard cartridge ~WAIT input around
+ * cart startup. Begin drives PE3 low; End returns PE3 to a floating
+ * input and waits for the held bus cycle to finish. Must be called
+ * with global IRQs disabled around the End sequence so the held cycle
+ * is served exactly once. The startup assembler in startup_ch32v4x7.S
+ * asserts ~WAIT before any clock/peripheral setup runs; main() calls
+ * End after the slotted/flash handler is installed. */
+void Cart_HoldMSXWait_Begin (void);
+void Cart_HoldMSXWait_End (void);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that

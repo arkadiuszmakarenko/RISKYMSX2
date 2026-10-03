@@ -19,6 +19,16 @@ struct MSXState {
 volatile Cart_Mapper g_mapper = CART_MAP_NONE;
 
 static struct MSXState *const g_state = &s_state;
+
+/* ~WAIT hold flag. Set by the startup asm in startup_ch32v4x7.S
+ * (reset vector) and by Cart_HoldMSXWait_Begin(), cleared by
+ * Cart_HoldMSXWait_End(). While set, every bus-cycle handler MUST skip
+ * the post-cycle SLTSL spin (the cycle never finishes until End() releases
+ * ~WAIT), and Cart_SetMapper_Safe MUST NOT clear INTFR (the pending edge
+ * is the held cycle itself). The flag is also a public peek through the
+ * Cart_GetWaitHeld() helper so main()/CLI can show "WAIT: held" status. */
+static volatile uint8_t s_msx_wait_held;
+
 static void Cart_Banked_Dispatch (void) __attribute__((section(".ramfunc"), noinline,
                                                          interrupt("WCH-Interrupt-fast")));
 static void RunKonamiNOSCC (void) __attribute__((section(".ramfunc"), noinline));
@@ -206,8 +216,11 @@ int Cart_SetMapper_Safe (Cart_Mapper m) {
 
     /* Phase 2: wait for ~SLTSL to go high (no in-flight Z80 cycle).
      * Bounded loop so a stuck-low ~SLTSL doesn't wedge the firmware;
-     * we still drive the bus off and proceed after the timeout. */
-    {
+     * we still drive the bus off and proceed after the timeout.
+     * Skipped while the startup ~WAIT hold is active: the held cycle
+     * never completes until Cart_HoldMSXWait_End() releases ~WAIT,
+     * so spinning for ~SLTSL would deadlock the boot sequence. */
+    if (s_msx_wait_held == 0U) {
         uint32_t spin = 200000U;       /* ~2 ms at 200 MHz HCLK      */
         while (((GPIOE->INDR & CART_SLTSL_MASK) == 0U) && (--spin)) {
             __asm__ volatile ("nop");
@@ -223,8 +236,12 @@ int Cart_SetMapper_Safe (Cart_Mapper m) {
 
     /* Phase 5: clear any phantom EXTI0 edge that latched during the
      * wait. Writing 1 to the bit clears it (WCH edge-triggered IRQ
-     * design). */
-    EXTI->INTFR = EXTI_INTENR_MR0;
+     * design). Skipped while ~WAIT is held: the latched edge IS the
+     * held cycle, and clearing it would lose the one we are about to
+     * serve. */
+    if (s_msx_wait_held == 0U) {
+        EXTI->INTFR = EXTI_INTENR_MR0;
+    }
 
     /* Phase 6: serialise the writes - the VTFADDR[0] write inside
      * SetVTFIRQ needs an ISB so the next IRQ observable by the core
@@ -408,10 +425,20 @@ void Init_Cart (void) {
     GPIOD->CFGHR = 0x44444444U;
 
     /* Control bus PE0(SLTSL) PE1(RD) PE2(WR) PE5(MREQ) as floating
-     * inputs. PE3 = WAIT (left floating). PE4 = MSX ~RESET (floating
-     * - the firmware never drives it; see the cart.h note near
-     * Init_Cart). */
-    GPIOE->CFGLR = 0x44444444U;
+     * inputs. PE3 = WAIT: if the startup asm asserted ~WAIT before this
+     * function ran, preserve the low-output hold (otherwise the MSX's
+     * first probe cycle would slip past us during init). PE4 = MSX
+     * ~RESET stays a floating input - the firmware never drives it
+     * (see the cart.h note near Init_Cart). */
+    {
+        uint32_t control_cfg = 0x44444444U;
+        if (s_msx_wait_held != 0U) {
+            /* OUTDR bit 3 was already cleared by the startup asm; the
+             * push-pull output mode keeps it low. */
+            control_cfg = (control_cfg & ~(0xFU << 12)) | (0x3U << 12);
+        }
+        GPIOE->CFGLR = control_cfg;
+    }
 
     /* Data bus PB8..PB15 tri-stated (bus off) */
     GPIOB->CFGHR = CART_BUS_OFF;
@@ -449,25 +476,80 @@ void Init_Cart (void) {
      * enable bit in PFIC->IENR. Both must be done for VTF dispatch to
      * fire. */
     SetVTFIRQ ((uint32_t)Cart_EXTI0_None_Handler, EXTI0_IRQn, 0, ENABLE);
+    /* EXTI0 IRQ is ALWAYS enabled here, including during the startup
+     * ~WAIT hold. The held cycle needs to be served by the active VTF
+     * handler before Cart_HoldMSXWait_End() releases ~WAIT - otherwise
+     * the BIOS's probe cycle completes with floating data bus and
+     * reads 0xFF ("no cart present"). The None handler short-circuits
+     * its SLTSL spin on s_msx_wait_held so it returns immediately and
+     * leaves the data bus off; the terminal/flash/nextor handlers
+     * honour the same flag and serve the byte before returning. */
     NVIC_EnableIRQ (EXTI0_IRQn);
     NVIC_SetPriority (EXTI0_IRQn, 0x00);
     __enable_irq();
 }
 
 /* ------------------------------------------------------------------ */
-/* MSX ~RESET line (PE4) - NOT driven by this firmware.                */
+/* MSX ~WAIT line (PE3) - startup low-output hold.                      */
 /* ------------------------------------------------------------------ */
-/* The cart edge on most MSX2+ machines exposes ~RESET as a read-only
- * signal (the reset circuit lives inside the mainboard; the cart
- * edge is either unconnected or input-only). Driving PE4 low here
- * would not reboot those MSXs anyway, and on some designs it can
- * damage the mainboard's reset driver.
+/* ~WAIT is a cartridge-defined active-low input to the Z80, so unlike the
+ * optional cart-edge reset signal it is intended to be driven by a cart.
+ * The startup asm in startup_ch32v4x7.S drives ~WAIT low before any
+ * clock/peripheral setup, guaranteeing the bus is held from the very
+ * first Z80 cycle. main() calls Cart_HoldMSXWait_End() once the cart
+ * handler is installed and ready to serve the held cycle.
  *
- * PE4 is therefore left as a floating input at boot (Init_Cart below)
- * and is NEVER driven by Cart_SetMapper_Safe or any other firmware
- * path. The MSX-side loader's CMD_SOFTRESET slingshot
- * (loader.c / romloader.c) provides the reboot without touching
- * PE4. */
+ * Why a hold during boot: the MSX BIOS may already be leaving its own
+ * reset while the MCU is still coming up. Without a hold, the BIOS
+ * probes the cart slot before the mapper is armed and reads open bus
+ * (0xFF) at 0x4000 - which the BIOS interprets as "no cartridge
+ * present" and the boot falls through to BASIC without ever entering
+ * our terminal code. Holding ~WAIT stalls the BIOS's first probe
+ * cycle until the terminal/nextor mapper is fully wired up.
+ *
+ * Release contract: PMBH. Cart_HoldMSXWait_End() returns PE3 to a
+ * floating input. The firmware NEVER drives ~WAIT high (the bus is
+ * wired-OR on the cart edge; driving it high would fight any future
+ * secondary cart that wants to assert wait). */
+
+/* Assert cartridge ~WAIT (PE3) from C code. The startup asm already
+ * does this before any clock setup; this entry point exists so a
+ * secondary hold can be installed later (e.g. around a mapper swap
+ * that needs to span a cart cycle). Idempotent. */
+void Cart_HoldMSXWait_Begin (void) {
+    RCC_PB2PeriphClockCmd (RCC_PB2Periph_GPIOE, ENABLE);
+    /* Drop the output latch LOW before flipping PE3 to an output - any
+     * glitch high during the mode change would let the BIOS probe slip
+     * past our hold. */
+    GPIOE->OUTDR &= ~CART_WAIT_MASK;
+    /* 0x3 nibble = 50 MHz push-pull output. The pin stays low because
+     * OUTDR bit 3 was cleared above. */
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 12)) | (0x3U << 12);
+    s_msx_wait_held = 1U;
+}
+
+/* Release cartridge ~WAIT (PE3). Returns PE3 to a floating input,
+ * waits for the held bus cycle to actually finish (SLTSL rises), and
+ * drives the data bus off so no stale OUTDR value lingers after the
+ * cycle. Must be called with global IRQs disabled around the wait
+ * loop so the held cycle is served exactly once. */
+void Cart_HoldMSXWait_End (void) {
+    /* Release ~WAIT by returning PE3 to floating input, NEVER by
+     * driving it high (wired-OR bus; see comment above). */
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 12)) | (0x4U << 12);
+    /* Wait for the held Z80 cycle to actually finish. The previous
+     * handler entry (the one we are releasing) holds SLTSL low while
+     * ~WAIT is asserted; once we release ~WAIT the cycle completes
+     * in a few cycles. Bounded spin to avoid wedging the firmware if
+     * something is wrong (the spin-out path leaves s_msx_wait_held=0
+     * so subsequent cart cycles are served normally). */
+    uint32_t spin = 200000U;       /* ~2 ms at 200 MHz HCLK */
+    while (((GPIOE->INDR & CART_SLTSL_MASK) == 0U) && (--spin)) {
+        __asm__ volatile ("nop");
+    }
+    GPIOB->CFGHR = CART_BUS_OFF;
+    s_msx_wait_held = 0U;
+}
 
 /* ------------------------------------------------------------------ */
 /* Shared C-side helpers used by the bank-switching mappers.           */
@@ -507,9 +589,27 @@ void Cart_DriveByteFromFlash (const uint8_t *rom, uint32_t off) {
 static inline __attribute__((always_inline))
 void Cart_EndCycle (void) {
     EXTI->INTFR = EXTI_INTENR_MR0;
-    /* Release spin: poll GPIOE->INDR bit 0 until SLTSL goes high. */
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
+    /* Release spin: poll GPIOE->INDR bit 0 until SLTSL goes high.
+     * Skipped while the startup ~WAIT hold is active - Cart_HoldMSXWait_End()
+     * owns the bus-off after the held cycle completes. */
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
+}
+
+/* Half-tail variant of Cart_EndCycle for handlers that need to keep
+ * the data bus driven (e.g. the read path that has just placed a byte
+ * on PB8..15 and wants the Z80 to sample it before SLTSL rises).
+ * Clears INTFR and spins for SLTSL high, but does NOT drive the bus
+ * off - the caller does it. Honours s_msx_wait_held the same way as
+ * Cart_EndCycle. */
+static inline __attribute__((always_inline))
+void Cart_WaitForCycleEnd (void) {
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    }
 }
 
 /* Read the data-bus byte (write-data from Z80) on the way into a write
@@ -558,7 +658,9 @@ static void RunKonami (void) {
             GPIOB->CFGHR = CART_BUS_OFF;
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
         /* Bus already released above for the BIOS case; for the cart
          * case the read is done so we leave it driven until SLTSL
          * rises. */
@@ -571,6 +673,9 @@ static void RunKonami (void) {
      * SLTSL low for addresses we don't care about - ignore. */
     EXTI->INTFR = EXTI_INTENR_MR0;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (s_msx_wait_held != 0U) {
+            return;   /* held cycle: let Cart_HoldMSXWait_End finish */
+        }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
             /* Bank 0 -> page-2 low (offset 2). Bank 1 -> page-2 high.
@@ -618,14 +723,19 @@ static void RunKonamiNOSCC (void) {
             GPIOB->CFGHR = CART_BUS_OFF;
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
         return;
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
     if (address > 0xB000U) return;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (s_msx_wait_held != 0U) {
+            return;   /* held cycle: let Cart_HoldMSXWait_End finish */
+        }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
             const uint32_t page_start = (uint32_t)(address & 0xE000U);
@@ -721,8 +831,10 @@ static void RunKonamiSCC (void) {
             GPIOB->CFGHR = CART_BUS_OFF;
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
         return;
     }
 
@@ -736,6 +848,9 @@ static void RunKonamiSCC (void) {
 
     EXTI->INTFR = EXTI_INTENR_MR0;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (s_msx_wait_held != 0U) {
+            return;   /* held cycle: let Cart_HoldMSXWait_End finish */
+        }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             /* Latch data bus ONCE while ~WR is low (Z80 only drives
              * the data bus during the ~WR pulse; reading earlier
@@ -804,7 +919,9 @@ static void RunNEO8 (void) {
             GPIOB->CFGHR = CART_BUS_ON;
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
@@ -812,6 +929,9 @@ static void RunNEO8 (void) {
     /* WRITE: 12-bit bank number composed from sequential writes. */
     EXTI->INTFR = EXTI_INTENR_MR0;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (s_msx_wait_held != 0U) {
+            return;   /* held cycle: let Cart_HoldMSXWait_End finish */
+        }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
             uint32_t bank = ((uint32_t)(address >> 11) & 0x7U) - 2U;
@@ -849,7 +969,9 @@ static void RunNEO16 (void) {
             GPIOB->CFGHR = CART_BUS_ON;
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
@@ -857,6 +979,9 @@ static void RunNEO16 (void) {
     /* WRITE: 12-bit bank number composed from sequential writes. */
     EXTI->INTFR = EXTI_INTENR_MR0;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (s_msx_wait_held != 0U) {
+            return;   /* held cycle: let Cart_HoldMSXWait_End finish */
+        }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
             uint32_t bank = ((uint32_t)(address >> 12) & 0x3U) - 1U;
@@ -897,7 +1022,9 @@ static void Cart_Banked_Dispatch (void) {
     default:                 /* NONE or ROM mappers (shouldn't reach here) */
         GPIOB->CFGHR = CART_BUS_OFF;
         EXTI->INTFR  = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
         break;
     }
 }
@@ -1387,8 +1514,13 @@ void Cart_EXTI0_ROM16k_Handler (void) {
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
+    /* Skip the SLTSL spin while the startup ~WAIT hold is active -
+     * Cart_HoldMSXWait_End() owns the bus-off after the cycle
+     * completes. */
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
 }
 
 /* Mailbox window: cart address 0x7FF0..0x7FFF. Defined here so the
@@ -1450,8 +1582,10 @@ void Cart_EXTI0_ROM32k_Handler (void) {
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
 }
 
 /* ROM48k: 48 KiB image at 0x4000..0xFFFF. Bias = img_base - 0x4000 (same
@@ -1489,8 +1623,10 @@ void Cart_EXTI0_ROM48k_Handler (void) {
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
 }
 
 
@@ -1573,7 +1709,9 @@ void Cart_EXTI0_Flash_Handler (void) {
                      | ((uint32_t)v << 8);
         GPIOB->CFGHR = CART_BUS_ON;
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
@@ -1607,15 +1745,19 @@ void Cart_EXTI0_Flash_Handler (void) {
         }
         /* Other writes: ignore (the loader never writes elsewhere). */
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
         return;
     }
 
     /* Neither RD nor WR asserted - spurious; release. */
     EXTI->INTFR = EXTI_INTENR_MR0;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1719,8 +1861,10 @@ void Cart_EXTI0_Terminal_Handler (void) {
         } else {
             /* Out of the terminal's window: float. */
             EXTI->INTFR = EXTI_INTENR_MR0;
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-            GPIOB->CFGHR = CART_BUS_OFF;
+            if (s_msx_wait_held == 0U) {
+                while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
             return;
         }
         /* Drive the byte. */
@@ -1728,7 +1872,9 @@ void Cart_EXTI0_Terminal_Handler (void) {
                      | ((uint32_t)v << 8);
         GPIOB->CFGHR = CART_BUS_ON;
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
@@ -1754,15 +1900,19 @@ void Cart_EXTI0_Terminal_Handler (void) {
         }
         /* Other writes: ignore. */
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
         return;
     }
 
     /* Neither RD nor WR asserted - spurious; release. */
     EXTI->INTFR = EXTI_INTENR_MR0;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
 }
 /* ------------------------------------------------------------------ */
 /* Nextor mapper handler: ASCII16K + mailbox.                            */
@@ -1845,7 +1995,9 @@ void Cart_EXTI0_Nextor_Handler (void) {
             Cart_DriveByteFromFlash (nextor_rom, bias + (uint32_t)address);
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
@@ -1869,15 +2021,19 @@ void Cart_EXTI0_Nextor_Handler (void) {
          * read path's off < nextor_rom_len test then floats those
          * addresses to 0xFF instead of indexing out of bounds. */
         EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
         return;
     }
 
     /* Neither RD nor WR - spurious; release. */
     EXTI->INTFR = EXTI_INTENR_MR0;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
+    if (s_msx_wait_held == 0U) {
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1886,6 +2042,14 @@ void Cart_EXTI0_Nextor_Handler (void) {
 
 void Cart_EXTI0_None_Handler (void) {
     __asm__ volatile (
+        /* Read s_msx_wait_held (0x200004c5). While set, the cycle is
+         * held by Cart_HoldMSXWait_End - don't spin for SLTSL, just
+         * clear INTFR and return. Cart_HoldMSXWait_End() finishes
+         * the cycle (data bus off) once main() calls it. */
+        "li    a5, 0x20000                 \n"
+        "addi  a5, a5, 0x4c5               \n"
+        "lbu   a5, 0(a5)                   \n"
+        "bnez  a5, 4f                      \n"
         "lui   t0, 0x40011                 \n"
         "lui   t1, 0x40012                 \n"
         "lui   t2, 0x40010                 \n"
@@ -1905,6 +2069,14 @@ void Cart_EXTI0_None_Handler (void) {
         "lw    a6, -2040(t1)               \n"
         "andi  a6, a6, 1                   \n"
         "beqz  a6, 3b                      \n"
+        "j     2f                          \n"
+        /* Held cycle: clear INTFR, return immediately. */
+        "4:                                \n"
+        "addi  a5, zero, 1                 \n"
+        /* EXTI INTFR @ 0x40010414 */
+        "li    a6, 0x40010                 \n"
+        "addi  a6, a6, 0x414               \n"
+        "sw    a5, 0(a6)                   \n"
         "2:                                \n"
         : : : "t0", "t1", "t2", "a5", "a6", "a7", "memory");
 }

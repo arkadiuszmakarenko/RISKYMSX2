@@ -322,12 +322,23 @@ DMA2_Channel11_IRQHandler:
 	.weak	handle_reset
 	.align	1
 handle_reset:
-.option push 
-.option	norelax 
+.option push
+.option	norelax
 	la gp, __global_pointer$
-.option	pop 
+.option	pop
 
-	la sp, _eusrstack 
+	la sp, _eusrstack
+
+/* NOTE on cartridge ~WAIT: the Subslots implementation asserted ~WAIT
+ * here, before any clock/peripheral configuration. That model only
+ * works when a RAM-backed mapper is installed before ~WAIT is released
+ * (so the IRQ can serve the held cycle). Terminal and Nextor are
+ * flash-ROM mappers and can't serve a held cycle, so leaving ~WAIT
+ * asserted through init would prevent the BIOS from completing its
+ * first slot probe - the held probe never gets data on the bus and the
+ * BIOS sees 0xFF. The startup asm therefore no longer asserts ~WAIT
+ * unconditionally; Cart_HoldMSXWait_Begin/End primitives remain for
+ * the slotted (RAM-backed) mapper and for runtime ROM-swap atomicity. */
 
 /* Load data section from flash to RAM */
 	la a0, _data_lma
