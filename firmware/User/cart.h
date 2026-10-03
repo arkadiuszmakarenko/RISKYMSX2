@@ -43,11 +43,13 @@
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
 
-/* RAM-backed subslots exposed by CART_MAP_SLOTTED. With the default
- * sub-slot 0 served by the embedded tiny_rom[] (flash) and sub-slot 1
- * served by ram_banks[1] (SRAM), only bit 1 is set here. Sub-slots 2
- * and 3 float as empty slots. Override at build time when a different
- * RAM/ROM layout is needed. */
+/* Sub-slots exposed by CART_MAP_SLOTTED.
+ *
+ * Sub-slot 0 is served by the embedded tiny_rom[] (flash, read-only).
+ * Sub-slot 1 is served by MCU SRAM (read/write, zero wait states).
+ * Sub-slots 2 and 3 float as empty slots.
+ *
+ * CART_SLOTTED_RAM_SUBSLOT_MASK selects the RAM-backed slots. */
 #ifndef CART_SLOTTED_RAM_SUBSLOT_MASK
 #define CART_SLOTTED_RAM_SUBSLOT_MASK 0x02U
 #endif

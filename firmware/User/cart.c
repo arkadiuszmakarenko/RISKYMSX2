@@ -93,16 +93,12 @@ extern const uint32_t tiny_rom_len;
  * return the inverted value (the MSX slot-decoder expects ~latch). */
 volatile uint8_t g_subslot_reg = 0x00U;
 
-/* RAM storage: four 16 KiB subslot banks. Cart reads/writes go
- * through ram_banks[subslot_bank(address)][address & 0x3FFF].
- *
- * Banks 0 and 1 start with a minimal valid MSX cartridge header. This is
- * essential for a COLD boot: the BIOS has no previous slot table to trust
- * and will reject the expanded slot unless the selected page-1 subslot
- * returns "AB" at 0x4000. Banks 2 and 3 deliberately have no header: the
- * handler also floats those subslots, making them electrically empty. */
+/* Sub-slot 1 is ordinary MCU SRAM again. Sub-slot 0 is the flash-backed
+ * tiny_rom[] image; sub-slots 2 and 3 are intentionally empty. The AB
+ * bytes in bank 1 let the cold BIOS recognize the RAM-backed subslot before
+ * it starts its write/read RAM test. */
 uint8_t ram_banks[4][16 * 1024] = {
-    [0] = { [0x0000] = 0x41, [0x0001] = 0x42, [0x0020] = 0x00 },
+    [0] = { [0x0000] = 0x41, [0x0001] = 0x42 },
     [1] = { [0x0000] = 0x41, [0x0001] = 0x42, [0x0020] = 0x11 },
     [2] = { [0x0020] = 0x22 },
     [3] = { [0x0020] = 0x33 },

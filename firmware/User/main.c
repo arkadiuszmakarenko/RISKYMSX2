@@ -67,10 +67,6 @@ int main (void) {
     printf ("SystemClk:%d\r\n", SystemCoreClock);
     printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
-    /* Bring up PSRAM after the flash selector is already armed. It is
-     * only needed later when the user loads a cartridge image. */
-//    PSRAM_Init();
-
     /* USBHS host init. Powers up the controller so it's ready. */
   //  USB_Initialization ();
 
