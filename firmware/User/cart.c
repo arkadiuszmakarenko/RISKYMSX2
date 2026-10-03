@@ -75,6 +75,14 @@ extern const uint8_t  nextor_rom[];
 extern const uint32_t nextor_rom_len;
 extern const uint32_t terminal_rom_len;
 
+/* Sub-slot 0 image (16 KiB, generated from ../tiny.ROM). The BIOS
+ * sees this ROM at 0x4000..0x7FFF whenever it is expanded from the
+ * expanded-slot probe - the 'AB' header at offset 0 + 0x4010 init
+ * address are the BIOS-required invariants. Like nextor_rom[] the
+ * bytes live in flash via the .cartrom section. */
+extern const uint8_t  tiny_rom[];
+extern const uint32_t tiny_rom_len;
+
 /* Sub-slot select register. Mirrors a real MSX primary-slot register
  * packed into one byte: 2 bits per 16 KiB subslot.
  *   bits[1:0]   -> bank id for 0x0000..0x3FFF
@@ -2228,7 +2236,16 @@ void Cart_EXTI0_Slotted_Handler (void) {
                 const unsigned slot  = (address >> 14) & 0x3U;          /* 0..3 */
                 const unsigned bank  = (g_subslot_reg >> (slot * 2)) & 0x3U;
 
-                if ((CART_SLOTTED_RAM_SUBSLOT_MASK & (1U << bank)) != 0U) {
+                if (bank == 0U) {
+                    /* Sub-slot 0 = embedded tiny_rom[] (flash). Bounds
+                     * check matches the nextor_rom / terminal_rom pattern
+                     * in Cart_DriveByteFromFlash / Cart_EXTI0_Terminal_Handler:
+                     * an out-of-range offset floats the bus to 0xFF so a
+                     * stub or wrong-size image never indexes past the end
+                     * of the image. */
+                    const uint32_t off = (uint32_t)address & 0x3FFFU;
+                    v = (off < tiny_rom_len) ? tiny_rom[off] : 0xFFU;
+                } else if ((CART_SLOTTED_RAM_SUBSLOT_MASK & (1U << bank)) != 0U) {
                     v = ram_banks[bank][address & 0x3FFFU];
                 } else {
                     /* Empty subslot: do not enable the data drivers. */
@@ -2264,7 +2281,9 @@ void Cart_EXTI0_Slotted_Handler (void) {
                 if ((CART_SLOTTED_RAM_SUBSLOT_MASK & (1U << bank)) != 0U) {
                     ram_banks[bank][address & 0x3FFFU] = b;
                 } else {
-                    /* Empty subslot: ignore writes and leave the bus off. */
+                    /* Empty subslot OR flash-backed sub-slot 0: ignore
+                     * the write and leave the bus off. tiny_rom[] is
+                     * read-only by design. */
 
                 }
             }

@@ -43,11 +43,13 @@
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
 
-/* RAM-backed subslots exposed by CART_MAP_SLOTTED. Bits 0 and 1 mean
- * subslots 0 and 1 are populated; subslots 2 and 3 float as empty slots.
- * Override at build time when a different pair is needed. */
+/* RAM-backed subslots exposed by CART_MAP_SLOTTED. With the default
+ * sub-slot 0 served by the embedded tiny_rom[] (flash) and sub-slot 1
+ * served by ram_banks[1] (SRAM), only bit 1 is set here. Sub-slots 2
+ * and 3 float as empty slots. Override at build time when a different
+ * RAM/ROM layout is needed. */
 #ifndef CART_SLOTTED_RAM_SUBSLOT_MASK
-#define CART_SLOTTED_RAM_SUBSLOT_MASK 0x03U
+#define CART_SLOTTED_RAM_SUBSLOT_MASK 0x02U
 #endif
 
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at

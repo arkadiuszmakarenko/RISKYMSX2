@@ -94,10 +94,33 @@ SIZE          := $(TOOLCHAIN_DIR)/$(TRI)-size
 ARCH_FLAGS    ?= $(RISKY_ARCH)
 
 CFLAGS_COMMON  = $(ARCH_FLAGS) \
-                 -fmax-errors=20 -Os -fmessage-length=0 \
+                 -fmax-errors=20 -O2 -fmessage-length=0 \
                  -fsigned-char -ffunction-sections -fdata-sections -fno-common \
                  -Wunused -Wuninitialized \
                  -g -gdwarf-4 -std=gnu99
+
+# cart.c is the Z80 bus-cycle hot path. The flash-resident EXTI0
+# handlers (.ramfunc bodies and the asm handlers installed in VTF
+# slots) execute on every cart memory cycle. Apply extra flags so the
+# compiler keeps them tight and inlined where the source already marks
+# always_inline. -O2 alone would do most of the work; the rest are
+# cheap wins specifically for hand-written cycle-critical code:
+#
+#   -fomit-frame-pointer       : saves 1 lw/sw pair on entry/exit per
+#                                function, removes fp setup in every
+#                                .ramfunc IRQ handler
+#   -fno-stack-protector       : no canary read/write on entry/exit of
+#                                every IRQ body; the IRQ runs with
+#                                interrupts disabled so a stack smash
+#                                is not the threat model
+#   -fno-asynchronous-unwind-tables : shrinks .eh_frame; not needed in
+#                                 a no-newlib embedded binary
+#
+# The override is consumed only by the explicit per-file rule below
+# (obj/User/cart.o); every other translation unit keeps CFLAGS_COMMON.
+CFLAGS_CART     = $(filter-out -O2,$(CFLAGS_COMMON)) \
+                  -O3 -fomit-frame-pointer -fno-stack-protector \
+                  -fno-asynchronous-unwind-tables
 
 # --- Game base (PSRAM placement diagnostic) ----------------------------------
 # Where inside the 8 MiB PSRAM window the served cart image starts, in
@@ -183,11 +206,21 @@ ROM_LOADER_DIR   := $(MSX_SOFTWARE_DIR)/RomLoader
 #
 # terminal_rom.c reads MSXSoftware/RomLoader/terminal.bin, produced by
 # the terminal.asm build under MSXSoftware/RomLoader/asm/.
-ROM_EMBED_SRCS   := User/terminal_rom.c User/nextor_rom.c
+#
+# tiny_rom.c embeds the project's own tiny.ROM (16 KiB), served as
+# sub-slot 0 by Cart_EXTI0_Slotted_Handler. The file is a hand-crafted
+# "Hello, World" MSX program so the BIOS's slot-probe path can be
+# observed end-to-end without PSRAM.
+ROM_EMBED_SRCS   := User/terminal_rom.c User/nextor_rom.c User/tiny_rom.c
 ROM_EMBED_SRC    := $(ROM_EMBED_SRCS)
 ROM_EMBED_DEPS   := $(MSX_SOFTWARE_DIR)/RomLoader/asm/Makefile \
 					$(MSX_SOFTWARE_DIR)/RomLoader/asm/terminal.asm \
 					$(CURDIR)/../tools/rom2c.py
+
+# tiny.ROM is shipped as a flat binary under the project root (not
+# built from sources); the rule below re-embeds it whenever the file
+# itself changes. Override TINY_ROM to point at a different image.
+TINY_ROM        ?= $(CURDIR)/../tiny.ROM
 
 # Nextor kernel ROM. Built from the driver sources in
 # MSXSoftware/NextorDriver (N80 -> driver.bin/chgbnk.bin, then
@@ -302,7 +335,7 @@ all: $(ELF) $(HEX) $(LST) showsize
 #   --specs=nano.specs / nosys.specs are WCH's default newlib configs.
 $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 	@echo "  LD    $@"
-	@"$(CC)" $(ARCH_FLAGS) -Os -g -gdwarf-4 \
+	@"$(CC)" $(ARCH_FLAGS) -O2 -g -gdwarf-4 \
 		-T "$(CURDIR)/$(LINKER)" \
 		-nostartfiles \
 		-Xlinker --gc-sections \
@@ -360,6 +393,16 @@ User/terminal_rom.c: $(ROM_EMBED_DEPS)
 	    "$(ROM_LOADER_DIR)/terminal.bin" \
 	    "$@" "MSX terminal ROM"
 
+# tiny_rom.c is embedded from the project's tiny.ROM (no .asm build
+# step). Like terminal_rom.c / nextor_rom.c, this is an ordinary
+# file target (not .PHONY) so obj/User/tiny_rom.o's dependency on it
+# serialises the embed before the compile.
+User/tiny_rom.c: $(TINY_ROM) $(ROM2C)
+	@echo "  EMBED $(notdir $@)"
+	@python3 "$(ROM2C)" \
+	    "$(TINY_ROM)" \
+	    "$@" "tiny.ROM sub-slot 0 image"
+
 $(HEX): $(ELF)
 	@echo "  HEX   $@"
 	@"$(OBJCOPY)" -O ihex "$<" "$@"
@@ -375,6 +418,17 @@ $(OBJDIR)/%.o: %.c
 	@echo "  CC    $<"
 	@mkdir -p "$(dir $@)"
 	@"$(CC)" $(CFLAGS_COMMON) $(INCDIRS) -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" \
+		-c -o "$@" "$<"
+
+# cart.c override: -O3 + frame-pointer off + no-stack-protector. The
+# rule must be defined AFTER the pattern rule above so make picks the
+# more specific match for obj/User/cart.o (the .o pattern matches
+# everything, but make's pattern resolution picks the rule with the
+# shorter stem — explicit rule with no stem wins).
+$(OBJDIR)/User/cart.o: User/cart.c
+	@echo "  CC    $<  (hot-path -O3)"
+	@mkdir -p "$(dir $@)"
+	@"$(CC)" $(CFLAGS_CART) $(INCDIRS) -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" \
 		-c -o "$@" "$<"
 
 # Hand-written .S startup file (uses preprocessor, so -x assembler-with-cpp).
