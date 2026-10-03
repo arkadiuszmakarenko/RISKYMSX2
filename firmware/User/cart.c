@@ -24,8 +24,6 @@ static void Cart_Banked_Dispatch (void) __attribute__((section(".ramfunc"), noin
 static void RunKonamiNOSCC (void) __attribute__((section(".ramfunc"), noinline));
 static void RunKonami  (void) __attribute__((section(".ramfunc"), noinline));
 static void RunKonamiSCC (void) __attribute__((section(".ramfunc"), noinline));
-static void Run8kASCII (void) __attribute__((section(".ramfunc"), noinline));
-static void Run16kASCII(void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO8    (void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO16   (void) __attribute__((section(".ramfunc"), noinline));
 
@@ -46,9 +44,8 @@ void Cart_EXTI0_ROM32k_Handler (void) __attribute__((section(".ramfunc"), noinli
                                                        interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                        interrupt("WCH-Interrupt-fast")));
-
-
-
+void Cart_EXTI0_Flash_Handler (void) __attribute__((section(".ramfunc"), noinline,
+                                                     interrupt("WCH-Interrupt-fast")));
 
 /* Embedded terminal ROM image (flash-resident, generated from
  * MSXSoftware/RomLoader/terminal.bin). Served by CART_MAP_TERMINAL
@@ -74,13 +71,12 @@ extern const uint8_t  nextor_rom[];
 extern const uint32_t nextor_rom_len;
 extern const uint32_t terminal_rom_len;
 
-/* Flash-selector mapper: serves the embedded ROM-selector image
- * (selector_rom[]) for ordinary cart reads, and decodes the mailbox
- * window 0x7FF0..0x7FFF that the RAM-resident loader uses to talk to
- * the firmware (see loader.h / MSXSoftware/RomLoader). Keep this
- * handler in flash: the cart flash path is zero-wait, so there is no
- * reason to delay boot on PSRAM configuration just to reach the
- * selector. */
+/* Flash mapper (CART_MAP_FLASH): decodes the mailbox window 0x7FF0..0x7FFF
+ * used by the loader protocol (see loader.h / MSXSoftware/RomLoader).
+ * The embedded ROM image (selector_rom[]) was removed; this handler now
+ * serves 0xFF (open bus) for ordinary cart reads, and only intercepts
+ * the mailbox window for loader communication. Kept in flash for fast
+ * access during the loader workflow. */
 
 /* Terminal mapper: serves the embedded terminal ROM (terminal_rom[])
  * for ordinary cart reads, and decodes the v303-style 3-byte mailbox
@@ -280,6 +276,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
 
+    case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
     default:                   return -1;
@@ -603,9 +600,10 @@ static void RunKonami (void) {
  * Bank bias: bankOffsets[page] = (data << 13) - page_start, where
  * page_start = page * 0x2000.
  *
- * NOTE: this C body is kept as a reference / fallback. The asm
- * Cart_EXTI0_KonamiNOSCC_Handler is installed directly in the VTF
- * slot for KONAMINOSCC, so this C function is never called at runtime.
+ * This C handler is invoked via Cart_Banked_Dispatch for
+ * CART_MAP_KONAMINOSCC. The hand-optimized asm version
+ * Cart_EXTI0_KonamiNOSCC_Handler is kept for reference but is not
+ * currently installed (the VTF slot holds Cart_Banked_Dispatch).
  */
 static void RunKonamiNOSCC (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
@@ -784,125 +782,6 @@ static void RunKonamiSCC (void) {
 }
 
 /*
- * ASCII 8k mapper (port of legacy v303 Run8kASCII).
- *
- * Four 8 KiB windows cover 0x4000..0xBFFF. Window N (8 KiB starting at
- * 0x4000 + 0x2000*N) is served from bankOffsets[N]; its bank register
- * is the 2 KiB-aligned write address 0x4000 + 0x2000*N, i.e. any write
- * into that window's own 2 KiB page - 0x6000/0x6800/0x7000/0x7800 for
- * the standard registers (slot = (addr >> 11) & 3):
- *
- *   0x4000..0x5FFF <- bankOffsets[0], register @ 0x6000
- *   0x6000..0x7FFF <- bankOffsets[1], register @ 0x6800
- *   0x8000..0x9FFF <- bankOffsets[2], register @ 0x7000
- *   0xA000..0xBFFF <- bankOffsets[3], register @ 0x7800
- *
- * The boot biases pre-map each window to image offset 0 (so the 'AB'
- * header is visible at 0x4000): [0]=-0x4000 [1]=-0x6000 [2]=-0x8000
- * [3]=-0xA000, identical to the v303 defaults.
- */
-static void Run8kASCII (void) {
-    const uint16_t address = (uint16_t)GPIOD->INDR;
-    const uint32_t ctrl    = GPIOE->INDR;
-
-    /* Cycle qualifier: the cart is a memory-mapped device and must NOT
-     * respond on ~IORQ (port I/O), INTA, RFSH, or any other cycle type
-     * that happens to assert SLTSL. ~MREQ is the canonical "this is a
-     * memory access" signal - low during memory read/write and during
-     * opcode fetch (M1). If MREQ is high, release the bus and clear
-     * INTFR; the slot's other devices (or the bus itself) handle it. */
-    if ((ctrl & CART_MREQ_MASK) != 0U) {
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
-        return;
-    }
-
-    if ((ctrl & CART_RD_MASK) == 0U) {
-        /* READ. Read slot = v303 formula ((addr >> 12) - 4) >> 1, i.e.
-         * the 8 KiB window starting at 0x4000 + 0x2000*slot is served
-         * from bankOffsets[slot] - the bank register written at
-         * 0x6000/0x6800/0x7000/0x7800 respectively:
-         *   0x4000..0x5FFF -> slot 0 (register @ 0x6000)
-         *   0x6000..0x7FFF -> slot 1 (register @ 0x6800)
-         *   0x8000..0x9FFF -> slot 2 (register @ 0x7000)
-         *   0xA000..0xBFFF -> slot 3 (register @ 0x7800)
-         * 0x4000..0x5FFF IS bank-switched on ASCII 8k: the cart header
-         * ('AB') lives there, so slot 0 must be served or the MSX BIOS
-         * reads 0xFF at 0x4000 and never detects the cartridge. */
-        if (address < 0x4000U || address >= 0xC000U) {
-            /* Pages 0/3 belong to the BIOS/RAM. SLTSL should never
-             * assert there; if it ever does, keep the bus off so the
-             * real device answers. */
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR  = EXTI_INTENR_MR0;
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-            return;
-        }
-        const uint32_t rslot = (address >= 0xA000U) ? 3U
-                             : (address >= 0x8000U) ? 2U
-                             : (address >= 0x6000U) ? 1U : 0U;
-        const uint32_t bias = g_state->bankOffsets[rslot];
-        Cart_DriveByteFromPSRAM (address, bias);
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
-        return;
-    }
-
-    /* WRITE: writes to 0x6000/0x6800/0x7000/0x7800 select a bank. slot =
-     * (addr >> 11) & 3 -> 0..3. Same guard as v303: ignore writes
-     * outside the cart window. */
-    EXTI->INTFR = EXTI_INTENR_MR0;
-    if (address > 0xB000U) return;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
-        if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
-            const uint8_t w = Cart_ReadWriteData();
-            const uint32_t slot = (uint32_t)((address >> 11) & 0x3U);
-            const uint32_t base  = 0x4000U + (0x2000U * slot);
-            g_state->bankOffsets[slot] = ((uint32_t)w << 13) - base;
-            return;
-        }
-    }
-}
-
-/*
- * ASCII 16k mapper.
- *
- *   writes to 0x6000 select the 16 KiB bank at 0x4000..0x7FFF (page 1)
- *   writes to 0x7000 (or 0x77FF) select the 16 KiB bank at 0x8000..0xBFFF
- *   page 3 mirrors page 2 by the BIOS slot logic.
- */
-static void Run16kASCII (void) {
-    const uint16_t address = (uint16_t)GPIOD->INDR;
-    const uint32_t ctrl    = GPIOE->INDR;
-
-    if ((ctrl & CART_RD_MASK) == 0U) {
-        const uint32_t bias = (address < 0x8000U)
-                              ? g_state->bankOffsets[0]
-                              : g_state->bankOffsets[8];
-        Cart_DriveByteFromPSRAM (address, bias);
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
-        return;
-    }
-
-    EXTI->INTFR = EXTI_INTENR_MR0;
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
-        if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
-            const uint8_t w = Cart_ReadWriteData();
-            if (address == 0x6000U) {
-                g_state->bankOffsets[0] = ((uint32_t)w << 14) - 0x4000U;
-            } else if (address == 0x7000U || address == 0x77FFU) {
-                g_state->bankOffsets[8] = ((uint32_t)w << 14) - 0x8000U;
-            }
-            return;
-        }
-    }
-}
-
-/*
  * NEO 8 mapper. Three 8 KiB banks at 0x4000/0x6000/0x8000/0xA000.
  * Bank number is 12 bits, composed from sequential writes:
  *   write to addr+0   -> low byte of bank for bank @ (addr>>13)-1
@@ -1013,8 +892,6 @@ static void Cart_Banked_Dispatch (void) {
     case CART_MAP_KONAMI:       RunKonami();       break;
     case CART_MAP_KONAMISCC:    RunKonamiSCC();    break;
     case CART_MAP_KONAMINOSCC:  RunKonamiNOSCC();  break;
-    case CART_MAP_ASCII8k:      Run8kASCII();      break;
-    case CART_MAP_ASCII16k:     Run16kASCII();     break;
     case CART_MAP_NEO8:         RunNEO8();         break;
     case CART_MAP_NEO16:        RunNEO16();        break;
     default:                 /* NONE or ROM mappers (shouldn't reach here) */
@@ -1189,8 +1066,8 @@ void Cart_EXTI0_KonamiNOSCC_Handler (void) {
               "a4", "a5", "a6", "a7", "memory");
 }
 
-/* ASCII 8k, hand-scheduled asm. Port of Run8kASCII. Direct VTF entry -
- * no Cart_Banked_Dispatch hop on any cycle.
+/* ASCII 8k, hand-scheduled asm. Direct VTF entry - no Cart_Banked_Dispatch
+ * hop on any cycle. Logic derived from the legacy v303 Run8kASCII.
  *
  *   t0 = 0x40011000  GPIOB (INDR -0x3F8, CFGHR -0x3FC, OUTDR -0x3F4)
  *                    + GPIOD (INDR +0x408)
@@ -1199,7 +1076,7 @@ void Cart_EXTI0_KonamiNOSCC_Handler (void) {
  *   t5 = 0x33333333 (BusOn)   t6 = 0x44444444 (BusOff)
  *   a2 = %hi(s_state) [+ slot*4] base for bankOffsets[] access
  *
- * Semantics (identical to the C body):
+ * Semantics (matches legacy v303 Run8kASCII):
  *   if (SLTSL already high) { bus off; INTFR clear; return; }  // late
  *   if (~MREQ high)        { bus off; INTFR clear; spin SLTSL; return; }
  *                                              // not a memory cycle:
@@ -1339,8 +1216,8 @@ void Cart_EXTI0_ASCII8k_Handler (void) {
               "a4", "a5", "a6", "a7", "memory");
 }
 
-/* ASCII 16k, hand-scheduled asm. Port of Run16kASCII. Direct VTF entry
- * - no Cart_Banked_Dispatch hop on any cycle.
+/* ASCII 16k, hand-scheduled asm. Direct VTF entry - no Cart_Banked_Dispatch
+ * hop on any cycle. Logic derived from the legacy v303 Run16kASCII.
  *
  *   t0 = 0x40011000  GPIOB (INDR -0x3F8, CFGHR -0x3FC, OUTDR -0x3F4)
  *                    + GPIOD (INDR +0x408)
@@ -1352,7 +1229,7 @@ void Cart_EXTI0_ASCII8k_Handler (void) {
  *   a5 = 1 (INTFR write-1-to-clear value)
  *   a2 = %hi(s_state) [+ byteOffset] base for bankOffsets[] access
  *
- * Semantics (identical to the C body):
+ * Semantics (matches legacy v303 Run16kASCII):
  *   if (SLTSL already high) { bus off; INTFR clear; return; }  // late
  *   if (RD low) {                       // read cycle (NO range check -
  *       byteOffset = (addr<0x8000) ? 0 : 32     C serves every read)
@@ -1899,7 +1776,7 @@ void Cart_EXTI0_Terminal_Handler (void) {
 /*   0x77FF (W)     : alias of 0x7000                                  */
 /*   0x7FF0..0x7FF5 : mailbox -> nextor.c                              */
 /*                                                                     */
-/* ASCII16K data flow, same as Run16kASCII /                             */
+/* ASCII16K data flow, same as the legacy v303 Run16kASCII /           */
 /* Cart_EXTI0_ASCII16k_Handler, with two differences:                   */
 /*                                                                     */
 /*   1. The served bytes come from nextor_rom[] in FLASH, not from a   */

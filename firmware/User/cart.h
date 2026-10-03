@@ -233,17 +233,6 @@ void Init_Cart (void);
  * Runs in IRQ context (EXTI0) - must not printf/block. */
 int Cart_SCC_ReadByte (uint16_t address);
 
-/* EXTI0 IRQ: dispatcher. Reads g_mapper and the bus state, calls the
- * active Run<Mapper>() function. Runs from .ramfunc (zero-wait-state
- * SRAM). Marked noinline + WCH-Interrupt-fast so the VTF dispatch path
- * works as documented. */
-void Cart_EXTI0_Dispatch (void) __attribute__((section(".ramfunc"), noinline,
-                                                interrupt("WCH-Interrupt-fast")));
-
-/* Legacy alias: keep the old name working in case something else links
- * to it. Maps to the dispatcher. */
-#define Cart_EXTI0_Handler Cart_EXTI0_Dispatch
-
 /* Diagnostic / CLI polling cart service. Retained for compatibility but
  * unused by the EXTI-driven path. Must be called with global IRQs
  * disabled. */
