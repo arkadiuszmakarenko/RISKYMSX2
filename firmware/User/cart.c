@@ -81,6 +81,45 @@ extern const uint8_t  nextor_rom[];
 extern const uint32_t nextor_rom_len;
 extern const uint32_t terminal_rom_len;
 
+/* Until the dedicated expanded-slot ROM is migrated, sub-slot 0 reuses
+ * the existing terminal ROM image. It already contains the valid "AB"
+ * cartridge signature; the full sub-slot ROM can be substituted without
+ * changing the RAM mapper path. */
+
+/* Expanded-slot state. The sub-slot register follows the MSX convention:
+ * two bits select the sub-slot for each 16 KiB CPU page. Sub-slot 0 is
+ * flash-backed/read-only, sub-slot 1 is the PSRAM mapper-RAM window, and
+ * sub-slots 2/3 are electrically empty. */
+volatile uint8_t g_subslot_reg = 0x00U;
+static volatile uint8_t s_slotted_psram_ready;
+static volatile uint8_t s_slotted_bank_regs[4] = { 0U, 0U, 0U, 0U };
+
+void Cart_SetSlottedPSRAMReady (uint8_t ready) {
+    s_slotted_psram_ready = (ready != 0U) ? 1U : 0U;
+}
+
+static inline __attribute__((always_inline))
+void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page) {
+    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
+                       + ((uint32_t)s_slotted_bank_regs[page]
+                          * CART_SLOTTED_BANK_SIZE)
+                       + ((uint32_t)address & 0x3FFFU);
+    const uint8_t value = *(const volatile uint8_t *)(PSRAM_CART_BASE + off);
+    GPIOB->OUTDR = (uint32_t)value << 8;
+    GPIOB->CFGHR = CART_BUS_ON;
+}
+
+static inline __attribute__((always_inline))
+void Cart_WriteSlottedPSRAMByte (uint16_t address, unsigned page,
+                                  uint8_t value) {
+    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
+                       + ((uint32_t)s_slotted_bank_regs[page]
+                          * CART_SLOTTED_BANK_SIZE)
+                       + ((uint32_t)address & 0x3FFFU);
+    *(volatile uint8_t *)(PSRAM_CART_BASE + off) = value;
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
+}
+
 /* Flash mapper (CART_MAP_FLASH): decodes the mailbox window 0x7FF0..0x7FFF
  * used by the loader protocol (see loader.h / MSXSoftware/RomLoader).
  * The embedded ROM image (selector_rom[]) was removed; this handler now
@@ -108,6 +147,11 @@ void Cart_EXTI0_Terminal_Handler (void) __attribute__((noinline,
 void Cart_EXTI0_Nextor_Handler (void) __attribute__((noinline,
                                                       interrupt("WCH-Interrupt-fast")));
 
+void Cart_EXTI0_Slotted_Handler (void) __attribute__((noinline,
+                                                      interrupt("WCH-Interrupt-fast")));
+void EXTI9_5_IRQHandler (void) __attribute__((section(".ramfunc"), noinline,
+                                               interrupt("WCH-Interrupt-fast")));
+
 /* No-mapper fallback: just clears the pending bit and releases the bus.
  * The Z80 reads 0xFF (floating bus). */
 void Cart_EXTI0_None_Handler (void) __attribute__((section(".ramfunc"), noinline,
@@ -132,6 +176,7 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "FLASH",
     "TERMINAL",
     "NEXTOR",
+    "SLOTTED",
 };
 
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
@@ -265,6 +310,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         && m != CART_MAP_FLASH
         && m != CART_MAP_TERMINAL
         && m != CART_MAP_NEXTOR
+        && m != CART_MAP_SLOTTED
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -275,6 +321,14 @@ int Cart_SetMapper (Cart_Mapper m) {
     }
 
     g_mapper = m;
+
+    if (m == CART_MAP_SLOTTED) {
+        /* Never carry page or sub-slot selections across mapper swaps. */
+        g_subslot_reg = 0x00U;
+        for (unsigned page = 0U; page < 4U; page++) {
+            s_slotted_bank_regs[page] = 0U;
+        }
+    }
 
     /* Install the matching handler in VTF slot 0. SetVTFIRQ writes
      * VTFADDR[0] and VTFIDR[0] - the VTF dispatcher uses VTFADDR[0]
@@ -293,12 +347,25 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
 
+    case CART_MAP_SLOTTED:    h = (uint32_t)Cart_EXTI0_Slotted_Handler; break;
     case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
     default:                   return -1;
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
+
+    /* Only the slotted mapper owns the PE8/~IORQ bank-register decoder.
+     * Keep EXTI9_5 disabled for Terminal/Nextor and all legacy mappers. */
+    EXTI->INTFR = EXTI_INTENR_MR8;
+    if (m == CART_MAP_SLOTTED) {
+        EXTI->INTENR |= EXTI_INTENR_MR8;
+        NVIC_SetPriority (EXTI9_5_IRQn, 0x01);
+        NVIC_EnableIRQ (EXTI9_5_IRQn);
+    } else {
+        EXTI->INTENR &= ~EXTI_INTENR_MR8;
+        NVIC_DisableIRQ (EXTI9_5_IRQn);
+    }
 
     /* Flash selector mappers: reset the mailbox so the loader starts clean. */
     if (m == CART_MAP_ROM32k || m == CART_MAP_FLASH) {
@@ -458,17 +525,18 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR0) | EXTI_FTENR_TR0;
     EXTI->INTFR = EXTI_INTENR_MR0;
 
-    /* The legacy ASCII16+mailbox NEXTOR mapper used a Cart_EXTI95_IORQ
-     * handler on PE8 (/IORQ) to decode ports 0xFC..0xFF and adopt the
-     * cart as the kernel's primary memory mapper. The Nextor kernel
-     * booted here uses its own internal mapper (RAM-backed, not a cart
-     * mapper) so it never touches 0xFC..0xFF; bank switching and the
-     * driver mailbox are decoded purely by address inside the cart
-     * EXTI0 handler. The IORQ decoder is therefore removed.
-     *
-     * PE8 is still wired on the cart edge and not used; the EXTI8 path
-     * is left disabled so spurious /IORQ transitions from other MSX
-     * expansions do not generate spurious IRQs. */
+    /* PE8 (/IORQ) is reserved for the optional slotted mapper's bank
+     * registers at ports FC..FF. Configure the EXTI route now, but keep
+     * the line disabled until CART_MAP_SLOTTED is installed so Terminal
+     * and Nextor retain their existing interrupt behavior. */
+    GPIOE->CFGHR = (GPIOE->CFGHR & ~0xFU) | 0x4U;
+    AFIO->EXTICR[2] = (AFIO->EXTICR[2] & ~0xFU)
+                    | (AFIO_EXTICR3_EXTI8_PE << 0);
+    EXTI->RTENR &= ~EXTI_RTENR_TR8;
+    EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
+    EXTI->INTENR &= ~EXTI_INTENR_MR8;
+    EXTI->INTFR = EXTI_INTENR_MR8;
+    NVIC_DisableIRQ (EXTI9_5_IRQn);
 
     /* Install the no-mapper handler by default. main()/CLI installs the
      * real mapper via Cart_SetMapper() once PSRAM_Init() has succeeded.
@@ -617,6 +685,38 @@ void Cart_WaitForCycleEnd (void) {
 static inline __attribute__((always_inline))
 uint8_t Cart_ReadWriteData (void) {
     return (uint8_t)((GPIOB->INDR >> 8) & 0xFFU);
+}
+
+/* MSX memory-mapper bank-register capture. OUT (0xFC..0xFF),A is an
+ * I/O cycle and therefore never asserts ~SLTSL; PE8/~IORQ is its EXTI
+ * trigger. Each port selects one 16 KiB bank for a CPU page. The handler
+ * only samples the write and never drives the data bus. */
+void EXTI9_5_IRQHandler (void) {
+    if ((EXTI->INTFR & EXTI_INTENR_MR8) == 0U) return;
+    EXTI->INTFR = EXTI_INTENR_MR8;
+
+    if (g_mapper != CART_MAP_SLOTTED) return;
+
+    uint32_t ctrl = GPIOE->INDR;
+    if ((ctrl & CART_IORQ_MASK) != 0U) return;
+
+    /* /IORQ can lead /WR by a short gate delay. Wait briefly for the
+     * write strobe, abandoning the edge if /IORQ is released first. */
+    uint32_t spin = 4096U;
+    while ((ctrl & CART_WR_MASK) != 0U
+           && (ctrl & CART_IORQ_MASK) == 0U
+           && spin-- != 0U) {
+        ctrl = GPIOE->INDR;
+    }
+    if ((ctrl & CART_WR_MASK) != 0U) return;
+
+    const uint8_t port = (uint8_t)(GPIOD->INDR & 0x00FFU);
+    if (port < CART_SLOTTED_BANK_PORT_BASE
+        || port >= CART_SLOTTED_BANK_PORT_BASE + 4U) return;
+
+    s_slotted_bank_regs[port - CART_SLOTTED_BANK_PORT_BASE] =
+        Cart_ReadWriteData ();
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
 }
 
 /* ------------------------------------------------------------------ */
@@ -2034,6 +2134,105 @@ void Cart_EXTI0_Nextor_Handler (void) {
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Slotted mapper: expanded slot plus 4 MiB PSRAM mapper RAM.          */
+/* ------------------------------------------------------------------ */
+
+void Cart_EXTI0_Slotted_Handler (void) {
+    const uint16_t entry_address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl = GPIOE->INDR;
+
+    /* A late VTF entry must not drive a stale byte onto the bus. */
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    /* RD/WR settle after ~SLTSL. This also makes the address sample
+     * below stable for the cold-boot slot probe. */
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) ==
+           (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+
+    uint16_t address = (uint16_t)GPIOD->INDR;
+    /* A write to FFFF can lose its address by the time /WR settles on
+     * some MSX bus implementations. Preserve the entry FFFF sample. */
+    if ((ctrl & CART_WR_MASK) == 0U
+        && entry_address == 0xFFFFU
+        && address != 0xFFFFU) {
+        address = 0xFFFFU;
+    }
+
+    if ((ctrl & CART_MREQ_MASK) == 0U) {
+        if ((ctrl & CART_RD_MASK) == 0U) {
+            uint8_t value = 0xFFU;
+            const unsigned page = (unsigned)(address >> 14);
+            const unsigned subslot =
+                (g_subslot_reg >> (page * 2U)) & 0x3U;
+
+            /* The expanded-slot register is read inverted, as required
+             * by the MSX primary-slot decoder. M1 low means opcode fetch;
+             * do not reinterpret an ordinary FFFF instruction fetch as
+             * an SSR read. */
+            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+                value = (uint8_t)~g_subslot_reg;
+                GPIOB->OUTDR = (uint32_t)value << 8;
+                GPIOB->CFGHR = CART_BUS_ON;
+            } else if (subslot == 0U) {
+                /* Temporary sub-slot-0 ROM source. The dedicated
+                 * Subslots tiny ROM can replace this image later. */
+                const uint32_t off = (uint32_t)address & 0x3FFFU;
+                if (off < terminal_rom_len) {
+                    value = terminal_rom[off];
+                }
+                GPIOB->OUTDR = (uint32_t)value << 8;
+                GPIOB->CFGHR = CART_BUS_ON;
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                Cart_DriveSlottedPSRAMByte (address, page);
+            } else {
+                /* Empty sub-slot: leave the data bus floating. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        } else if ((ctrl & CART_WR_MASK) == 0U) {
+            const uint8_t value = Cart_ReadWriteData ();
+            const unsigned page = (unsigned)(address >> 14);
+
+            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+                g_subslot_reg = value;
+            } else {
+                const unsigned subslot =
+                    (g_subslot_reg >> (page * 2U)) & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    Cart_WriteSlottedPSRAMByte (address, page, value);
+                }
+            }
+            /* The Z80 owns the data bus during writes. */
+            GPIOB->CFGHR = CART_BUS_OFF;
+        } else {
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+    } else {
+        /* Ignore I/O/refresh/interrupt-ack cycles. */
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
+
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    if (s_msx_wait_held != 0U) {
+        /* The caller owns the final bus-off while a startup hold is
+         * active; never wait for SLTSL here or the hold deadlocks. */
+        return;
+    }
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+    GPIOB->CFGHR = CART_BUS_OFF;
 }
 
 /* ------------------------------------------------------------------ */

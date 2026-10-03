@@ -44,12 +44,25 @@
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
 
+/* RAM-backed MSX mapper window used by CART_MAP_SLOTTED. Four MiB is
+ * exposed as 256 x 16 KiB banks selected through I/O ports FC..FF.
+ * Keep this region separate from the normal game-image area. */
+#define CART_SLOTTED_BANK_PORT_BASE   0xFCU
+#define CART_SLOTTED_BANK_COUNT       256U
+#define CART_SLOTTED_BANK_SIZE        (16U * 1024U)
+#define CART_SLOTTED_BANK_BASE_OFFSET (4U * 1024U * 1024U)
+
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
  * image window. Konami/ASCII mappers can map up to 1 MiB; NEO up to 256
  * KiB; the unused upper portion is just not mapped to a Z80 bank. */
 #define PSRAM_CART_BASE   0x80000000UL
 #define PSRAM_CART_SIZE   (8U * 1024U * 1024U)   /* 8 MiB */
+
+#if (CART_SLOTTED_BANK_BASE_OFFSET \
+     + (CART_SLOTTED_BANK_COUNT * CART_SLOTTED_BANK_SIZE)) > PSRAM_CART_SIZE
+#error "CART_SLOTTED mapper region exceeds PSRAM_CART_SIZE"
+#endif
 
 /* ------------------------------------------------------------------ */
 /* GAME BASE (PSRAM placement diagnostic)                             */
@@ -156,7 +169,8 @@ typedef enum {
  * image. Reached via the terminal menu's N key
  * (handle_list_key -> soft_reset_into_cart
  * (CART_MAP_NEXTOR)). */
-    CART_MAP_MAX        = 14,
+    CART_MAP_SLOTTED    = 14,  /* expanded slot + 4 MiB mapper RAM */
+    CART_MAP_MAX        = 15,
 } Cart_Mapper;
 
 /* Mapper names used by `MAP ?` and CLI error messages. */
@@ -242,6 +256,10 @@ void Init_Cart (void);
  * End after the slotted/flash handler is installed. */
 void Cart_HoldMSXWait_Begin (void);
 void Cart_HoldMSXWait_End (void);
+
+/* Mark the PSRAM-backed slotted mapper available after PSRAM_Init(). The
+ * mapper remains inactive until Cart_SetMapper(CART_MAP_SLOTTED) is called. */
+void Cart_SetSlottedPSRAMReady (uint8_t ready);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that
