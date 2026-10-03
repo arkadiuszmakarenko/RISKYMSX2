@@ -92,17 +92,41 @@ extern const uint32_t tiny_rom_len;
  * Writes at cart address 0xFFFF latch the byte; reads at 0xFFFF
  * return the inverted value (the MSX slot-decoder expects ~latch). */
 volatile uint8_t g_subslot_reg = 0x00U;
+static volatile uint8_t s_slotted_psram_ready;
 
-/* Sub-slot 1 is ordinary MCU SRAM again. Sub-slot 0 is the flash-backed
- * tiny_rom[] image; sub-slots 2 and 3 are intentionally empty. The AB
- * bytes in bank 1 let the cold BIOS recognize the RAM-backed subslot before
- * it starts its write/read RAM test. */
-uint8_t ram_banks[4][16 * 1024] = {
-    [0] = { [0x0000] = 0x41, [0x0001] = 0x42 },
-    [1] = { [0x0000] = 0x41, [0x0001] = 0x42, [0x0020] = 0x11 },
-    [2] = { [0x0020] = 0x22 },
-    [3] = { [0x0020] = 0x33 },
-};
+void Cart_SetSlottedPSRAMReady (uint8_t ready) {
+    s_slotted_psram_ready = (ready != 0U) ? 1U : 0U;
+}
+
+/* Sub-slot 1 is PSRAM-backed. Sub-slot 0 is the flash-backed tiny_rom[]
+ * image; sub-slots 2 and 3 are intentionally empty. PSRAM is initialized
+ * before this mapper is armed while the Z80 is held by ~WAIT. */
+#define CARTA_SUBSLOT_RAM_BANK_REG 1U
+
+/* One 8-bit MSX mapper register per CPU page. These are changed only by
+ * the PE8/~IORQ IRQ handler, so each byte is atomic on RV32. */
+static volatile uint8_t s_slotted_bank_regs[4] = { 0U, 0U, 0U, 0U };
+
+static inline __attribute__((always_inline))
+void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page) {
+    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
+                       + ((uint32_t)s_slotted_bank_regs[page]
+                          * CART_SLOTTED_BANK_SIZE)
+                       + ((uint32_t)address & 0x3FFFU);
+    const uint8_t value = *(const volatile uint8_t *)(PSRAM_CART_BASE + off);
+    GPIOB->OUTDR = (uint32_t)value << 8;
+    GPIOB->CFGHR = CART_BUS_ON;
+}
+
+static inline __attribute__((always_inline))
+void Cart_WriteSlottedPSRAMByte (uint16_t address, unsigned page, uint8_t value) {
+    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
+                       + ((uint32_t)s_slotted_bank_regs[page]
+                          * CART_SLOTTED_BANK_SIZE)
+                       + ((uint32_t)address & 0x3FFFU);
+    *(volatile uint8_t *)(PSRAM_CART_BASE + off) = value;
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
+}
 
 
 
@@ -139,6 +163,8 @@ void Cart_EXTI0_Nextor_Handler (void) __attribute__((noinline,
  * The Z80 reads 0xFF (floating bus). */
 void Cart_EXTI0_None_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                     interrupt("WCH-Interrupt-fast")));
+void EXTI9_5_IRQHandler (void) __attribute__((section(".ramfunc"), noinline,
+                                               interrupt("WCH-Interrupt-fast")));
 
 void Cart_EXTI0_Slotted_Handler (void) __attribute__((noinline,
                                                       interrupt("WCH-Interrupt-fast")));
@@ -351,6 +377,13 @@ int Cart_SetMapper (Cart_Mapper m) {
      * session. Cart_SetMapper_Safe() keeps this reset outside a bus cycle. */
     if (m == CART_MAP_SLOTTED) {
         g_subslot_reg = 0x00U;
+        for (unsigned page = 0U; page < 4U; page++) {
+            s_slotted_bank_regs[page] = 0U;
+        }
+        /* Sub-slot 1 uses the first 16 KiB of the PSRAM cart image at
+         * address 0x4000; keep the same wrapped-bias convention as the
+         * other PSRAM mappers. */
+        s_state.bankOffsets[CARTA_SUBSLOT_RAM_BANK_REG] = 0U - 0x4000U;
     }
 
     /* Install the matching handler in VTF slot 0. SetVTFIRQ writes
@@ -542,9 +575,19 @@ void Init_Cart (void) {
      * driver mailbox are decoded purely by address inside the cart
      * EXTI0 handler. The IORQ decoder is therefore removed.
      *
-     * PE8 is still wired on the cart edge and not used; the EXTI8 path
-     * is left disabled so spurious /IORQ transitions from other MSX
-     * expansions do not generate spurious IRQs. */
+     * PE8 is wired on the cart edge and is used by CART_MAP_SLOTTED for
+     * the MSX memory-mapper bank-register writes at ports FC..FF. */
+
+    /* PE8 (~IORQ) -> EXTI8, falling edge. EXTI8 shares the EXTI9_5 IRQ. */
+    GPIOE->CFGHR = (GPIOE->CFGHR & ~(0xFU << 0)) | (0x4U << 0);
+    AFIO->EXTICR[2] = (AFIO->EXTICR[2] & ~(0xFU << 0)) |
+                      (AFIO_EXTICR3_EXTI8_PE << 0);
+    EXTI->INTENR = (EXTI->INTENR & ~EXTI_INTENR_MR8) | EXTI_INTENR_MR8;
+    EXTI->RTENR &= ~EXTI_RTENR_TR8;
+    EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
+    EXTI->INTFR = EXTI_INTENR_MR8;
+    NVIC_SetPriority (EXTI9_5_IRQn, 0x01);
+    NVIC_EnableIRQ (EXTI9_5_IRQn);
 
     /* Install the no-mapper handler by default. main()/CLI installs the
      * real mapper via Cart_SetMapper() once PSRAM_Init() has succeeded.
@@ -639,6 +682,39 @@ void Cart_EndCycle (void) {
 static inline __attribute__((always_inline))
 uint8_t Cart_ReadWriteData (void) {
     return (uint8_t)((GPIOB->INDR >> 8) & 0xFFU);
+}
+
+/* MSX memory-mapper bank-register capture. OUT (0xFC..0xFF),A has no
+ * ~SLTSL memory strobe, so it cannot reach EXTI0; PE8/~IORQ is the trigger.
+ * Ports FC..FF select one 16 KiB bank for pages 0..3 respectively. The
+ * handler samples the data while ~WR is active and never drives the data
+ * bus, so it is safe even when another mapper owns unrelated I/O ports. */
+void EXTI9_5_IRQHandler (void) {
+    if ((EXTI->INTFR & EXTI_INTENR_MR8) == 0U) return;
+    EXTI->INTFR = EXTI_INTENR_MR8;
+
+    if (g_mapper != CART_MAP_SLOTTED) return;
+
+    uint32_t ctrl = GPIOE->INDR;
+    if ((ctrl & CART_IORQ_MASK) != 0U) return;
+
+    /* IORQ can lead WR by a short gate delay. Wait only for WR to become
+     * active, and abandon the edge if IORQ is already released. */
+    uint32_t spin = 4096U;
+    while ((ctrl & CART_WR_MASK) != 0U
+           && (ctrl & CART_IORQ_MASK) == 0U
+           && spin-- != 0U) {
+        ctrl = GPIOE->INDR;
+    }
+    if ((ctrl & CART_WR_MASK) != 0U) return;
+
+    const uint8_t port = (uint8_t)(GPIOD->INDR & 0x00FFU);
+    if (port < CART_SLOTTED_BANK_PORT_BASE
+        || port >= (CART_SLOTTED_BANK_PORT_BASE + 4U)) return;
+
+    const uint8_t page = (uint8_t)(port - CART_SLOTTED_BANK_PORT_BASE);
+    s_slotted_bank_regs[page] = Cart_ReadWriteData ();
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
 }
 
 /* ------------------------------------------------------------------ */
@@ -2241,8 +2317,9 @@ void Cart_EXTI0_Slotted_Handler (void) {
                      * of the image. */
                     const uint32_t off = (uint32_t)address & 0x3FFFU;
                     v = (off < tiny_rom_len) ? tiny_rom[off] : 0xFFU;
-                } else if ((CART_SLOTTED_RAM_SUBSLOT_MASK & (1U << bank)) != 0U) {
-                    v = ram_banks[bank][address & 0x3FFFU];
+                } else if (bank == 1U && s_slotted_psram_ready != 0U) {
+                    Cart_DriveSlottedPSRAMByte (address, slot);
+                    goto slotted_cycle_end;
                 } else {
                     /* Empty subslot: do not enable the data drivers. */
 
@@ -2274,8 +2351,8 @@ void Cart_EXTI0_Slotted_Handler (void) {
                 const unsigned slot = (address >> 14) & 0x3U;           /* 0..3 */
                 const unsigned bank = (g_subslot_reg >> (slot * 2)) & 0x3U;
 
-                if ((CART_SLOTTED_RAM_SUBSLOT_MASK & (1U << bank)) != 0U) {
-                    ram_banks[bank][address & 0x3FFFU] = b;
+                if (bank == 1U && s_slotted_psram_ready != 0U) {
+                    Cart_WriteSlottedPSRAMByte (address, slot, b);
                 } else {
                     /* Empty subslot OR flash-backed sub-slot 0: ignore
                      * the write and leave the bus off. tiny_rom[] is

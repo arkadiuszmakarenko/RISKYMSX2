@@ -49,6 +49,14 @@ int main (void) {
    //         (unsigned long)GPIOE->CFGLR,
     //        (unsigned long)GPIOE->INDR);
     Init_Cart ();
+    /* Initialize PSRAM before arming the slotted mapper or releasing
+     * ~WAIT. The BIOS performs its RAM write/read probe immediately after
+     * startup and must never see an uninitialized PSRAM controller. */
+    const uint8_t psram_status = PSRAM_Init ();
+    printf ("PSRAM startup: status=%02x mirror=%08lx\r\n",
+            (unsigned)psram_status,
+            (unsigned long)PSRAM_GetRomMirrorBase());
+    Cart_SetSlottedPSRAMReady (psram_status == PSRAM_OK);
    // SCC_Init ();
     /* Reset the terminal mailbox before installing the mapper so the
      * EXTI0 handler starts with empty FIFOs. */

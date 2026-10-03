@@ -25,34 +25,29 @@
 #define CART_WAIT_MASK    0x0008U  /* PE3  ~WAIT (active low output) */
 #define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
 #define CART_M1_MASK      0x0040U  /* PE6  M1 (low during opcode fetch) */
-#define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)
-                                    * currently unused: the Sunrise IDE
-                                    * mapper decodes the IDE register /
-                                    * data window purely by address, not
-                                    * by qualifying ~IORQ. The bit is
-                                    * still wired on the cart edge (PE8)
-                                    * but the EXTI8 IORQ decoder was
-                                    * removed together with the legacy
-                                    * ASCII16 memory-mapper protocol
-                                    * (the new Sunrise IDE kernel
-                                    * doesn't adopt the cart as a
-                                    * primary mapper). */
+#define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ (MSX mapper bank IRQ) */
 
 /* Data bus drive config for GPIOB CFGHR (pins 8..15).
  * 0x3 nibble = 50MHz push-pull output, 0x4 nibble = floating input. */
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
 
+/* MSX memory-mapper bank registers used by CART_MAP_SLOTTED. One 8-bit
+ * register selects one 16 KiB bank for each CPU page: FC->page 0,
+ * FD->page 1, FE->page 2, FF->page 3. Four MiB = 256 x 16 KiB banks.
+ * Keep this mapper image in the second half of the 8 MiB PSRAM window. */
+#define CART_SLOTTED_BANK_PORT_BASE   0xFCU
+#define CART_SLOTTED_BANK_COUNT       256U
+#define CART_SLOTTED_BANK_SIZE        (16U * 1024U)
+#define CART_SLOTTED_BANK_BASE_OFFSET (4U * 1024U * 1024U)
+
 /* Sub-slots exposed by CART_MAP_SLOTTED.
  *
  * Sub-slot 0 is served by the embedded tiny_rom[] (flash, read-only).
- * Sub-slot 1 is served by MCU SRAM (read/write, zero wait states).
+ * Sub-slot 1 is served by PSRAM (read/write, initialized before startup)
+ * and uses the MSX mapper registers above.
  * Sub-slots 2 and 3 float as empty slots.
- *
- * CART_SLOTTED_RAM_SUBSLOT_MASK selects the RAM-backed slots. */
-#ifndef CART_SLOTTED_RAM_SUBSLOT_MASK
-#define CART_SLOTTED_RAM_SUBSLOT_MASK 0x02U
-#endif
+ */
 
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
@@ -60,6 +55,10 @@
  * KiB; the unused upper portion is just not mapped to a Z80 bank. */
 #define PSRAM_CART_BASE   0x80000000UL
 #define PSRAM_CART_SIZE   (8U * 1024U * 1024U)   /* 8 MiB */
+
+#if (CART_SLOTTED_BANK_BASE_OFFSET + (CART_SLOTTED_BANK_COUNT * CART_SLOTTED_BANK_SIZE)) > PSRAM_CART_SIZE
+#error "CART_SLOTTED mapper region exceeds PSRAM_CART_SIZE"
+#endif
 
 /* ------------------------------------------------------------------ */
 /* GAME BASE (PSRAM placement diagnostic)                             */
@@ -203,12 +202,9 @@ int  Cart_SetMapper_Safe (Cart_Mapper m);
  * main context so the Z80 bus cycle is not blocked by UART output. */
 
 
-/* MSX memory-mapper I/O decoder: REMOVED. The Sunrise IDE kernel does
- * not adopt the cart as a primary memory mapper (it serves its own
- * mapper internally and uses the IDE register window as its I/O
- * surface). The legacy ASCII16+mailbox NEXTOR mapper that did need
- * 0xFC..0xFF decoding is gone. If a future mapper needs the protocol
- * the EXTI95 handler should be reinstated in cart.c::Init_Cart. */
+/* CART_MAP_SLOTTED owns the MSX memory-mapper ports 0xFC..0xFF through
+ * the PE8/~IORQ handler. Each port selects one 16 KiB PSRAM bank for a
+ * corresponding CPU page. */
 
 /* Get the base address of the cart image window in PSRAM. Always
  * PSRAM_CART_BASE. Kept for API symmetry with the previous SRAM/PSRAM
@@ -236,6 +232,7 @@ void Init_Cart (void);
  * and waits for the held bus cycle to finish. */
 void Cart_HoldMSXWait_Begin (void);
 void Cart_HoldMSXWait_End (void);
+void Cart_SetSlottedPSRAMReady (uint8_t ready);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that
