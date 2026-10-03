@@ -322,12 +322,45 @@ DMA2_Channel11_IRQHandler:
 	.weak	handle_reset
 	.align	1
 handle_reset:
-.option push 
-.option	norelax 
+.option push
+.option	norelax
 	la gp, __global_pointer$
-.option	pop 
+.option	pop
 
-	la sp, _eusrstack 
+	la sp, _eusrstack
+
+/* ------------------------------------------------------------------ */
+/* Assert cartridge ~WAIT (PE3) IMMEDIATELY on reset, before any      */
+/* other clock or peripheral configuration. The MSX Z80 leaves reset  */
+/* only after its own power-on-reset delay, and we must guarantee the  */
+/* bus is held from the very first cycle.                             */
+/*                                                                    */
+/* Steps (all done from HSI 8 MHz from reset, no PLL yet):           */
+/*   1. Enable GPIOE peripheral clock (RCC->PB2PCENR, bit 6)         */
+/*   2. Reset PE3 output latch (OUTDR bit 3) before changing mode     */
+/*   3. Configure PE3 as 50 MHz push-pull output (CFGLR nibble = 3)  */
+/* The atomic-clear of OUTDR bit 3 brings WAIT active; the firmware   */
+/* later releases it via Cart_HoldMSXWait_End() returning PE3 to     */
+/* floating input.                                                   */
+/* ------------------------------------------------------------------ */
+	li	t0, 0x40			/* RCC_IOPEEN */
+	li	t1, 0x40021018			/* RCC->PB2PCENR */
+	sw	t0, 0(t1)
+
+	li	t1, 0x4001180C			/* GPIOE->OUTDR */
+	lw	t0, 0(t1)
+	li	t2, 0x08			/* PE3 mask (CART_WAIT_MASK) */
+	not	t2, t2				/* ~PE3 */
+	and	t0, t0, t2
+	sw	t0, 0(t1)			/* OUTDR bit 3 = 0  (WAIT asserted) */
+
+	li	t1, 0x40011800			/* GPIOE->CFGLR */
+	lw	t0, 0(t1)
+	li	t2, ~(0xFU << 12)		/* clear PE3 nibble */
+	and	t0, t0, t2
+	li	t2, (0x3U << 12)			/* 0x3 = 50 MHz push-pull */
+	or	t0, t0, t2
+	sw	t0, 0(t1) 
 
 /* Load data section from flash to RAM */
 	la a0, _data_lma

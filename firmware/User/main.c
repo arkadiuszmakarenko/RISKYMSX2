@@ -22,16 +22,12 @@
 
 int main (void) {
 
-    /* Heartbeat: toggle the LED in a tight loop so we can confirm
-     * main() is reached even if USART is dead. PA0 = LEDFLASH. */
-    {
-        RCC_PB2PeriphClockCmd(RCC_PB2Periph_GPIOA, ENABLE);
-        GPIOA->CFGLR &= ~(0xFu << 0);
-        GPIOA->CFGLR |=  (0x3u << 0);
-        for (volatile int i = 0; i < 200000; i++) {
-            GPIOA->OUTDR ^= (1u << 0);
-        }
-    }
+    /* Assert the cartridge ~WAIT hold before clock, UART, or peripheral
+     * initialization. The MSX may already be leaving reset while the MCU
+     * starts; delaying this until after USART setup lets the BIOS get past
+     * the first slot-probe cycles. */
+    Cart_HoldMSXWait_Begin ();
+
 
     /* Run clock diagnostics BEFORE SystemCoreClockUpdate so we can see
      * the raw RCC state. USART_Printf_Init uses SystemCoreClock for
@@ -46,21 +42,26 @@ int main (void) {
     USART_Printf_Init (921600);
     PWR_VDD18LevelConfig(PWR_VDD18_Level1);
 
-    /* Init_Cart configures PE4 as a floating input - the firmware
-     * never drives MSX ~RESET (read-only on most MSX2+ machines;
-     * driving it can damage the mainboard). The MSX is therefore
-     * running while we boot; its BIOS will probe 0x4000 as soon as
-     * we enable GPIO clocks. Init_Cart -> Cart_SetMapper(TERMINAL)
-     * below gets the terminal cart armed before any cart access
-     * can land, so the BIOS reads the terminal ROM and runs the
-     * MSX-side terminal program (which copies itself to RAM and
-     * polls the firmware's output FIFO). */
+    /* Hold the Z80 with the cartridge ~WAIT input while the GPIO/mapper
+     * path is installed. Release it only after the slotted cart is ready. */
+
+   // printf ("WAIT: asserted CFG=%08lx INDR=%08lx\r\n",
+   //         (unsigned long)GPIOE->CFGLR,
+    //        (unsigned long)GPIOE->INDR);
     Init_Cart ();
-    SCC_Init ();
+   // SCC_Init ();
     /* Reset the terminal mailbox before installing the mapper so the
      * EXTI0 handler starts with empty FIFOs. */
-    Terminal_Reset ();
-    Cart_SetMapper (CART_MAP_TERMINAL);
+   // Terminal_Reset ();
+    /* The MSX may still be running while the MCU is reprogrammed. Close the
+     * handoff window so a cart cycle cannot land between g_mapper, the VTF
+     * address and the freshly reset secondary-slot state. */
+    Cart_SetMapper_Safe (CART_MAP_SLOTTED);
+    Delay_Ms (100);
+    Cart_HoldMSXWait_End ();
+    printf ("WAIT: released CFG=%08lx INDR=%08lx\r\n",
+            (unsigned long)GPIOE->CFGLR,
+            (unsigned long)GPIOE->INDR);
 
 
     printf ("SystemClk:%d\r\n", SystemCoreClock);
@@ -68,19 +69,19 @@ int main (void) {
 
     /* Bring up PSRAM after the flash selector is already armed. It is
      * only needed later when the user loads a cartridge image. */
-    PSRAM_Init();
+//    PSRAM_Init();
 
     /* USBHS host init. Powers up the controller so it's ready. */
-    USB_Initialization ();
+  //  USB_Initialization ();
 
     /* Initialise the Nextor mapper state so a swap to CART_MAP_NEXTOR
      * from the terminal menu (N key) starts with a clean bank select +
      * ATA register file + PATA device signature. The actual USB
      * enumeration is driven by Nextor_Service() from the main loop;
      * this only primes the in-RAM state struct. */
-    Nextor_Init ();
+    //Nextor_Init ();
 
-    printf ("\r\n=== boot complete (terminal mapper active) ===\r\n");
+     printf ("\r\n=== boot complete (slotted mapper active) ===\r\n");
 
     /* Idle loop: service both mailboxes. The current active mapper
      * is g_mapper; the FLASH loader mailbox only fires its IRQ when
@@ -103,9 +104,11 @@ int main (void) {
      * CART_MAP_NEXTOR the kernel has already-enumerated stick data
      * waiting. */
     for (;;) {
-        Nextor_Service ();
-        Loader_Service ();
-        Terminal_Service ();
+
+
+ //       Nextor_Service ();
+   //     Loader_Service ();
+     //   Terminal_Service ();
 
         /* No WFI — while the Nextor kernel's driver is polling a
          * register in a tight loop, each cart read generates an EXTI0

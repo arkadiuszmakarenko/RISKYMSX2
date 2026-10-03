@@ -19,6 +19,7 @@ struct MSXState {
 volatile Cart_Mapper g_mapper = CART_MAP_NONE;
 
 static struct MSXState *const g_state = &s_state;
+static volatile uint8_t s_msx_wait_held;
 static void Cart_Banked_Dispatch (void) __attribute__((section(".ramfunc"), noinline,
                                                          interrupt("WCH-Interrupt-fast")));
 static void RunKonamiNOSCC (void) __attribute__((section(".ramfunc"), noinline));
@@ -74,6 +75,34 @@ extern const uint8_t  nextor_rom[];
 extern const uint32_t nextor_rom_len;
 extern const uint32_t terminal_rom_len;
 
+/* Sub-slot select register. Mirrors a real MSX primary-slot register
+ * packed into one byte: 2 bits per 16 KiB subslot.
+ *   bits[1:0]   -> bank id for 0x0000..0x3FFF
+ *   bits[3:2]   -> bank id for 0x4000..0x7FFF
+ *   bits[5:4]   -> bank id for 0x8000..0xBFFF
+ *   bits[7:6]   -> bank id for 0xC000..0xFFFF
+ * Writes at cart address 0xFFFF latch the byte; reads at 0xFFFF
+ * return the inverted value (the MSX slot-decoder expects ~latch). */
+volatile uint8_t g_subslot_reg = 0x00U;
+
+/* RAM storage: four 16 KiB subslot banks. Cart reads/writes go
+ * through ram_banks[subslot_bank(address)][address & 0x3FFF].
+ *
+ * Banks 0 and 1 start with a minimal valid MSX cartridge header. This is
+ * essential for a COLD boot: the BIOS has no previous slot table to trust
+ * and will reject the expanded slot unless the selected page-1 subslot
+ * returns "AB" at 0x4000. Banks 2 and 3 deliberately have no header: the
+ * handler also floats those subslots, making them electrically empty. */
+uint8_t ram_banks[4][16 * 1024] = {
+    [0] = { [0x0000] = 0x41, [0x0001] = 0x42, [0x0020] = 0x00 },
+    [1] = { [0x0000] = 0x41, [0x0001] = 0x42, [0x0020] = 0x11 },
+    [2] = { [0x0020] = 0x22 },
+    [3] = { [0x0020] = 0x33 },
+};
+
+
+
+
 /* Flash-selector mapper: serves the embedded ROM-selector image
  * (selector_rom[]) for ordinary cart reads, and decodes the mailbox
  * window 0x7FF0..0x7FFF that the RAM-resident loader uses to talk to
@@ -107,6 +136,48 @@ void Cart_EXTI0_Nextor_Handler (void) __attribute__((noinline,
 void Cart_EXTI0_None_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                     interrupt("WCH-Interrupt-fast")));
 
+void Cart_EXTI0_Slotted_Handler (void) __attribute__((noinline,
+                                                      interrupt("WCH-Interrupt-fast")));
+
+/* Slotted IRQ diagnostics. These are deliberately snapshots rather than
+ * printf calls: UART output from EXTI0 would hold the MSX bus for far too
+ * long. Cart_Slotted_DebugService() prints the accumulated state every few
+ * seconds from the main loop. The counters are diagnostic only and may be
+ * compiled out while measuring the final cycle timing. */
+#ifndef CART_SLOTTED_DEBUG
+#define CART_SLOTTED_DEBUG 1
+#endif
+
+#if CART_SLOTTED_DEBUG
+static volatile uint32_t s_slotdbg_irq;
+static volatile uint32_t s_slotdbg_late;
+static volatile uint32_t s_slotdbg_waits;
+static volatile uint32_t s_slotdbg_wait_late;
+static volatile uint32_t s_slotdbg_settled;
+static volatile uint32_t s_slotdbg_mreq;
+static volatile uint32_t s_slotdbg_non_mreq;
+static volatile uint32_t s_slotdbg_reads;
+static volatile uint32_t s_slotdbg_writes;
+static volatile uint32_t s_slotdbg_neither;
+static volatile uint32_t s_slotdbg_ssr_reads;
+static volatile uint32_t s_slotdbg_ssr_writes;
+static volatile uint32_t s_slotdbg_ssr_write_fallbacks;
+static volatile uint32_t s_slotdbg_header_reads;
+static volatile uint32_t s_slotdbg_empty_reads;
+static volatile uint32_t s_slotdbg_empty_writes;
+static volatile uint32_t s_slotdbg_m1_low_ffff;
+static volatile uint16_t s_slotdbg_last_entry_ctrl;
+static volatile uint16_t s_slotdbg_last_wait_ctrl;
+static volatile uint16_t s_slotdbg_last_ctrl;
+static volatile uint16_t s_slotdbg_last_address;
+static volatile uint8_t  s_slotdbg_last_data;
+static volatile uint8_t  s_slotdbg_last_read;
+static volatile uint8_t  s_slotdbg_last_header_byte;
+static volatile uint8_t  s_slotdbg_last_ssr;
+static volatile uint8_t  s_slotdbg_last_page;
+static volatile uint8_t  s_slotdbg_last_bank;
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
@@ -126,6 +197,7 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "FLASH",
     "TERMINAL",
     "NEXTOR",
+    "SLOTTED",
 };
 
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
@@ -210,8 +282,10 @@ int Cart_SetMapper_Safe (Cart_Mapper m) {
 
     /* Phase 2: wait for ~SLTSL to go high (no in-flight Z80 cycle).
      * Bounded loop so a stuck-low ~SLTSL doesn't wedge the firmware;
-     * we still drive the bus off and proceed after the timeout. */
-    {
+     * we still drive the bus off and proceed after the timeout. During
+     * the startup ~WAIT hold the current cycle is intentionally stalled;
+     * do not wait for ~SLTSL until the new handler has been installed. */
+    if (s_msx_wait_held == 0U) {
         uint32_t spin = 200000U;       /* ~2 ms at 200 MHz HCLK      */
         while (((GPIOE->INDR & CART_SLTSL_MASK) == 0U) && (--spin)) {
             __asm__ volatile ("nop");
@@ -226,9 +300,12 @@ int Cart_SetMapper_Safe (Cart_Mapper m) {
     printf ("CART: SetMapper(%d) -> rc=%d\r\n", (int)m, rc);
 
     /* Phase 5: clear any phantom EXTI0 edge that latched during the
-     * wait. Writing 1 to the bit clears it (WCH edge-triggered IRQ
-     * design). */
-    EXTI->INTFR = EXTI_INTENR_MR0;
+     * wait. Preserve a pending edge during the startup ~WAIT hold: it is
+     * the cycle that must be served by the newly installed handler after
+     * the mapper swap. */
+    if (s_msx_wait_held == 0U) {
+        EXTI->INTFR = EXTI_INTENR_MR0;
+    }
 
     /* Phase 6: serialise the writes - the VTFADDR[0] write inside
      * SetVTFIRQ needs an ISB so the next IRQ observable by the core
@@ -252,6 +329,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         && m != CART_MAP_FLASH
         && m != CART_MAP_TERMINAL
         && m != CART_MAP_NEXTOR
+        && m != CART_MAP_SLOTTED
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -262,6 +340,14 @@ int Cart_SetMapper (Cart_Mapper m) {
     }
 
     g_mapper = m;
+
+    /* A newly armed slotted cartridge starts with every page in sub-slot 0.
+     * This also matters when the MCU is reprogrammed while the MSX keeps
+     * running: the old secondary-slot value must not leak into the new
+     * session. Cart_SetMapper_Safe() keeps this reset outside a bus cycle. */
+    if (m == CART_MAP_SLOTTED) {
+        g_subslot_reg = 0x00U;
+    }
 
     /* Install the matching handler in VTF slot 0. SetVTFIRQ writes
      * VTFADDR[0] and VTFIDR[0] - the VTF dispatcher uses VTFADDR[0]
@@ -279,7 +365,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_NEO16:       h = (uint32_t)Cart_Banked_Dispatch; break;
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
-
+    case CART_MAP_SLOTTED:      h = (uint32_t)Cart_EXTI0_Slotted_Handler; break;
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
     default:                   return -1;
@@ -411,10 +497,20 @@ void Init_Cart (void) {
     GPIOD->CFGHR = 0x44444444U;
 
     /* Control bus PE0(SLTSL) PE1(RD) PE2(WR) PE5(MREQ) as floating
-     * inputs. PE3 = WAIT (left floating). PE4 = MSX ~RESET (floating
-     * - the firmware never drives it; see the cart.h note near
-     * Init_Cart). */
-    GPIOE->CFGLR = 0x44444444U;
+     * inputs. PE3 = WAIT; preserve the startup low-output hold if
+     * Cart_HoldMSXWait_Begin() was called before this initialization.
+     * PE4 = MSX ~RESET remains a floating input. */
+    {
+        uint32_t control_cfg = 0x44444444U;
+        if (s_msx_wait_held != 0U) {
+            GPIOE->OUTDR &= ~CART_WAIT_MASK;
+            /* 0x3 = 50 MHz push-pull, used only while asserting WAIT low.
+             * Release still changes PE3 back to floating input; the
+             * firmware never drives WAIT high. */
+            control_cfg = (control_cfg & ~(0xFU << 12)) | (0x3U << 12);
+        }
+        GPIOE->CFGLR = control_cfg;
+    }
 
     /* Data bus PB8..PB15 tri-stated (bus off) */
     GPIOB->CFGHR = CART_BUS_OFF;
@@ -452,25 +548,44 @@ void Init_Cart (void) {
      * enable bit in PFIC->IENR. Both must be done for VTF dispatch to
      * fire. */
     SetVTFIRQ ((uint32_t)Cart_EXTI0_None_Handler, EXTI0_IRQn, 0, ENABLE);
-    NVIC_EnableIRQ (EXTI0_IRQn);
+    if (s_msx_wait_held == 0U) {
+        NVIC_EnableIRQ (EXTI0_IRQn);
+    }
     NVIC_SetPriority (EXTI0_IRQn, 0x00);
     __enable_irq();
 }
 
 /* ------------------------------------------------------------------ */
-/* MSX ~RESET line (PE4) - NOT driven by this firmware.                */
+/* MSX ~WAIT line (PE3) - startup low-output hold.                      */
 /* ------------------------------------------------------------------ */
-/* The cart edge on most MSX2+ machines exposes ~RESET as a read-only
- * signal (the reset circuit lives inside the mainboard; the cart
- * edge is either unconnected or input-only). Driving PE4 low here
- * would not reboot those MSXs anyway, and on some designs it can
- * damage the mainboard's reset driver.
- *
- * PE4 is therefore left as a floating input at boot (Init_Cart below)
- * and is NEVER driven by Cart_SetMapper_Safe or any other firmware
- * path. The MSX-side loader's CMD_SOFTRESET slingshot
- * (loader.c / romloader.c) provides the reboot without touching
- * PE4. */
+/* ~WAIT is a cartridge-defined active-low input to the Z80, so unlike the
+ * optional cart-edge reset signal it is intended to be driven by a cart.
+ * It is asserted before Init_Cart enables EXTI0. The first pending memory
+ * cycle is served by Cart_EXTI0_Slotted_Handler while the hold is active;
+ * Cart_HoldMSXWait_End() then releases the cycle and turns the data bus off. */
+
+void Cart_HoldMSXWait_Begin (void) {
+    RCC_PB2PeriphClockCmd (RCC_PB2Periph_GPIOE, ENABLE);
+    /* Set the output latch low before changing the mode, avoiding a high
+     * glitch when PE3 becomes an output. */
+    GPIOE->OUTDR &= ~CART_WAIT_MASK;
+    /* 0x3 = 50 MHz push-pull-low; release later returns PE3 to input. */
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 12)) | (0x3U << 12);
+    s_msx_wait_held = 1U;
+}
+
+void Cart_HoldMSXWait_End (void) {
+    /* Release ~WAIT by returning PE3 to floating input, never by driving
+     * it high. Keep the diagnostic/served read data driven until the held
+     * cycle actually finishes. */
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 12)) | (0x4U << 12);
+    uint32_t spin = 200000U;
+    while (((GPIOE->INDR & CART_SLTSL_MASK) == 0U) && (--spin)) {
+        __asm__ volatile ("nop");
+    }
+    GPIOB->CFGHR = CART_BUS_OFF;
+    s_msx_wait_held = 0U;
+}
 
 /* ------------------------------------------------------------------ */
 /* Shared C-side helpers used by the bank-switching mappers.           */
@@ -2041,5 +2156,152 @@ void CartServiceLoop (void) {
     /* No-op stub. The actual cart serving happens in Cart_EXTI0_*. */
     __asm__ volatile ("wfi");
 }
+
+/* ------------------------------------------------------------------ */
+/* Slotted cart handler: MSX secondary-slot register plus RAM banks.  */
+/* ------------------------------------------------------------------ */
+
+void Cart_EXTI0_Slotted_Handler (void) {
+
+    /* Keep an entry-time address sample for writes. On the cold-boot BIOS
+     * probe, the address bus can already leave FFFFh by the time WR/RD has
+     * settled. Reads use the later, stable sample; SSR writes use the entry
+     * sample as a narrowly targeted fallback when it says FFFFh. */
+    const uint16_t entry_address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl = GPIOE->INDR;
+
+    /* Late entry: SLTSL already high, this cycle is already over. */
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
+     * bail if SLTSL rises first. */
+
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+
+    /* The strobe is now active, so the Z80 address bus has had time to
+     * settle. Use this sample for all decoding. */
+    uint16_t address = (uint16_t)GPIOD->INDR;
+
+    if ((ctrl & CART_WR_MASK) == 0U
+        && address != 0xFFFFU && entry_address == 0xFFFFU) {
+
+        address = 0xFFFFU;
+    }
+
+
+
+    /* Verify this is a legitimate Memory Request (MREQ) */
+    if ((ctrl & CART_MREQ_MASK) == 0U) {
+
+
+        // =====================================================================
+        // 1. READ CYCLE
+        // =====================================================================
+        if ((ctrl & CART_RD_MASK) == 0U) {
+
+            /* MSX sub-slot select read at 0xFFFF returns the inverted
+             * register (the BIOS slot-decoder expects ~latch on read).
+             * Any other read in the cart window indexes the subslot
+             * bank selected by g_subslot_reg. */
+            uint8_t v;
+            /* M1 is high for a normal memory data read. Do not decode an
+             * opcode fetch at FFFF as an SSR read; page 3 may contain the
+             * selected sub-slot's ordinary RAM there. */
+            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+                v = (uint8_t)~g_subslot_reg;
+
+            } else {
+
+                const unsigned slot  = (address >> 14) & 0x3U;          /* 0..3 */
+                const unsigned bank  = (g_subslot_reg >> (slot * 2)) & 0x3U;
+
+                if ((CART_SLOTTED_RAM_SUBSLOT_MASK & (1U << bank)) != 0U) {
+                    v = ram_banks[bank][address & 0x3FFFU];
+                } else {
+                    /* Empty subslot: do not enable the data drivers. */
+
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    goto slotted_cycle_end;
+                }
+            }
+
+            GPIOB->OUTDR = (uint32_t)v << 8;
+            GPIOB->CFGHR = CART_BUS_ON; // Enable data bus drivers for read output
+        }
+        // =====================================================================
+        // 2. WRITE CYCLE
+        // =====================================================================
+        else if ((ctrl & CART_WR_MASK) == 0U) {
+            uint8_t b = Cart_ReadWriteData(); // Fetch raw data byte from MSX bus
+
+
+
+            /* MSX sub-slot select write at 0xFFFF latches the byte in
+             * g_subslot_reg; any other write in the cart window goes
+             * to the selected subslot bank. */
+            /* SSR writes are memory data cycles, never opcode fetches. */
+            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+                g_subslot_reg = b;
+
+            } else {
+
+                const unsigned slot = (address >> 14) & 0x3U;           /* 0..3 */
+                const unsigned bank = (g_subslot_reg >> (slot * 2)) & 0x3U;
+
+                if ((CART_SLOTTED_RAM_SUBSLOT_MASK & (1U << bank)) != 0U) {
+                    ram_banks[bank][address & 0x3FFFU] = b;
+                } else {
+                    /* Empty subslot: ignore writes and leave the bus off. */
+
+                }
+            }
+
+            // Keep MCU pins in input/Hi-Z mode while MSX drives data bus
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        else {
+
+        }
+    } else {
+
+    }
+
+slotted_cycle_end:
+    // =========================================================================
+    // 3. CRITICAL CYCLE END LOCK
+    // =========================================================================
+    EXTI->INTFR = EXTI_INTENR_MR0;
+
+    /* During startup ~WAIT is holding the current bus cycle. The handler
+     * must return so main() can release ~WAIT; waiting here for ~SLTSL would
+     * deadlock the startup sequence. Cart_HoldMSXWait_End() performs the
+     * final bus-off after the Z80 completes the cycle. */
+    if (s_msx_wait_held != 0U) {
+        return;
+    }
+
+    /* MANDATORY: Wait until the Z80 finishes the cycle and lifts SLTSL HIGH.
+     * Modifying bus configurations before this completes will instantly crash the MSX! */
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+
+    /* Safely turn off bus pins only after the transaction is fully complete */
+    GPIOB->CFGHR = CART_BUS_OFF;
+}
+
+
+
 
 #pragma GCC pop_options

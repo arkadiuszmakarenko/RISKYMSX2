@@ -12,7 +12,7 @@
  *   PE0  (pin 97)  ~SLTSL   slot select          -> EXTI0 trigger
  *   PE1  (pin 98)  RD
  *   PE2  (pin  1)  WR
- *   PE3  (pin  2)  ~WAIT     bus-cycle stretch   -> GPIO (open-drain out)
+ *   PE3  (pin  2)  ~WAIT     bus-cycle stretch   -> GPIO (low output/input)
  *   PE5  (pin  4)  MREQ
  *
  *   PA0  (pin 23)  LEDFLASH (status LED)
@@ -22,7 +22,9 @@
 #define CART_SLTSL_MASK   0x0001U  /* PE0  ~SLTSL  (slot select, EXTIO trigger) */
 #define CART_RD_MASK      0x0002U  /* PE1  ~RD */
 #define CART_WR_MASK      0x0004U  /* PE2  ~WR */
+#define CART_WAIT_MASK    0x0008U  /* PE3  ~WAIT (active low output) */
 #define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
+#define CART_M1_MASK      0x0040U  /* PE6  M1 (low during opcode fetch) */
 #define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)
                                     * currently unused: the Sunrise IDE
                                     * mapper decodes the IDE register /
@@ -40,6 +42,13 @@
  * 0x3 nibble = 50MHz push-pull output, 0x4 nibble = floating input. */
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
+
+/* RAM-backed subslots exposed by CART_MAP_SLOTTED. Bits 0 and 1 mean
+ * subslots 0 and 1 are populated; subslots 2 and 3 float as empty slots.
+ * Override at build time when a different pair is needed. */
+#ifndef CART_SLOTTED_RAM_SUBSLOT_MASK
+#define CART_SLOTTED_RAM_SUBSLOT_MASK 0x03U
+#endif
 
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
@@ -140,20 +149,12 @@ typedef enum {
                                   * the FLASH mapper if the user prefers
                                   * the existing mailbox-driven loader. */
     CART_MAP_NEXTOR     = 13,  /* Nextor kernel mapper: ASCII16K over the
- * embedded Nextor 3.0 kernel ROM (nextor_rom[],
- * flash-resident). The 16 KiB bank visible at 0x4000..0x7FFF
- * is selected by writing the bank number to 0x6000;
- * 0x7000/0x77FF do the same for the page-2 window at
- * 0x8000..0xBFFF. The mailbox window at 0x7FF0..0x7FF5 is
- * punched out of page 1 in every bank - it is the only path
- * the kernel's driver (MSXSoftware/NextorDriver/driver.asm)
- * has to the disk. Bank decode + ROM read path live in
- * Cart_EXTI0_Nextor_Handler; the mailbox command dispatch
- * and result FIFO live in nextor.c. Flash served: no PSRAM
- * image. Reached via the terminal menu's N key
- * (handle_list_key -> soft_reset_into_cart
- * (CART_MAP_NEXTOR)). */
-    CART_MAP_MAX        = 14,
+                                   * embedded Nextor 3.0 kernel ROM
+                                   * (nextor_rom[], flash-resident). The
+                                   * mailbox window at 0x7FF0..0x7FF5 is
+                                   * handled by nextor.c. */
+    CART_MAP_SLOTTED    = 14,  /* MSX expanded slot with four RAM subslots */
+    CART_MAP_MAX        = 15,
 } Cart_Mapper;
 
 /* Mapper names used by `MAP ?` and CLI error messages. */
@@ -193,6 +194,11 @@ uint32_t Cart_GetWrCycles (void);
  * Returns the same value as Cart_SetMapper(). */
 int  Cart_SetMapper_Safe (Cart_Mapper m);
 
+/* Print throttled diagnostics for the expanded-slot IRQ path. The handler
+ * only records counters/snapshots; this function performs the printf from
+ * main context so the Z80 bus cycle is not blocked by UART output. */
+
+
 /* MSX memory-mapper I/O decoder: REMOVED. The Sunrise IDE kernel does
  * not adopt the cart as a primary memory mapper (it serves its own
  * mapper internally and uses the IDE register window as its I/O
@@ -217,13 +223,15 @@ uint32_t Cart_GetImageSize (void);
  * mapper handler. PSRAM_Init() must have been called first (or the
  * handler reads from an unmapped address and hangs the MSX).
  *
- * NOTE: PE4 (MSX ~RESET) is configured here as a floating input only.
- * The firmware never drives it (read-only on most MSX2+ machines;
- * driving it externally can damage the mainboard). See
- * Cart_SetMapper_Safe for the cart-swap primitive that closes the
- * race window without touching PE4, and loader.c::cmd_softreset for
- * the CMD_SOFTRESET reboot path. */
+ * PE3 (~WAIT) is preserved as a low output when the startup wait hold is
+ * active; PE4 (~RESET) remains a floating input. */
 void Init_Cart (void);
+
+/* Hold/release the Z80 using the standard cartridge ~WAIT input around
+ * cart startup. Begin drives PE3 low. End returns PE3 to a floating input
+ * and waits for the held bus cycle to finish. */
+void Cart_HoldMSXWait_Begin (void);
+void Cart_HoldMSXWait_End (void);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that
@@ -248,11 +256,5 @@ void Cart_EXTI0_Dispatch (void) __attribute__((section(".ramfunc"), noinline,
  * unused by the EXTI-driven path. Must be called with global IRQs
  * disabled. */
 void CartServiceLoop(void) __attribute__((section(".ramfunc"), noinline));
-
-/* NOTE: there is intentionally no Cart_AssertMSXReset* API in this
- * header. The firmware never drives MSX ~RESET (PE4 is read-only on
- * most MSX2+ machines; driving it externally can damage the
- * mainboard). Reboot is via the MSX-side loader's CMD_SOFTRESET
- * slingshot (loader.c). */
 
 #endif
