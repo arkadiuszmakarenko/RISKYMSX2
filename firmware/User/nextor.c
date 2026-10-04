@@ -1483,22 +1483,22 @@ uint8_t Nextor_ReadByte (uint16_t address) {
          * floating-bus pattern) so a driver that over-pops sees a
          * stable wrong value and bails instead of spinning forever. */
         uint8_t *p   = s_mb.res_r;
-        uint8_t *end = s_mb.res_end;
-        uint8_t v;
-        if (p < end) {
-            v = *p;
-        } else {
-            v = 0xFFU;
+        const uint8_t *end = s_mb.res_end;
+
+        /* Keep this as one compare.  This function runs once per byte of
+         * every sector and the old two-test form made the compiler reload
+         * the volatile FIFO pointers on the second test. */
+        if (p >= end) {
+            return 0xFFU;
         }
-        if (p < end) {
-            s_mb.res_r = ++p;
+        {
+            const uint8_t v = *p++;
+            s_mb.res_r = p;
             if (p == end) {
                 s_mb.status &= (uint8_t)~NEXTOR_STAT_RX_AVAIL;
             }
-        } else {
-            v = 0xFFU;
+            return v;
         }
-        return v;
     }
 
     case NEXTOR_MBOX_RXCNT_LO:

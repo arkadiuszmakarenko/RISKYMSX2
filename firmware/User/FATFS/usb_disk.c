@@ -590,8 +590,8 @@ uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size) {
  * into `buf`.  For high-speed sticks the bulk pipe is a 512-byte
  * multi-packet stream; we loop on the per-packet size (512) until
  * `block_size` bytes have been received. */
-static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
-                                      uint32_t block_size) {
+static uint8_t scsi_read_sectors_once (uint32_t lba, uint8_t *buf,
+                                       uint16_t blocks, uint32_t block_size) {
     CBW_t cbw;
     CSW_t csw;
     uint8_t  res;
@@ -602,6 +602,7 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
     memset (&cbw, 0, sizeof (cbw));
     cbw.dCBWSignature          = 0x43425355;
     cbw.dCBWTag                = 0xCAFEBABE;
+    transfer_len *= blocks;
     cbw.dCBWDataTransferLength = transfer_len;
     cbw.bmCBWFlags             = 0x80;  /* IN */
     cbw.bCBWLUN                = 0;
@@ -611,8 +612,8 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
     cbw.CBWCB[3] = (lba >> 16) & 0xFF;
     cbw.CBWCB[4] = (lba >> 8)  & 0xFF;
     cbw.CBWCB[5] = (lba)       & 0xFF;
-    cbw.CBWCB[7] = 0;          /* 1 block */
-    cbw.CBWCB[8] = 1;
+    cbw.CBWCB[7] = (uint8_t)(blocks >> 8);
+    cbw.CBWCB[8] = (uint8_t)blocks;
 
     int cbw_send_retries = 0;
     do {
@@ -652,8 +653,14 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
 }
 
 uint8_t usb_scsi_read_sector (uint32_t lba, uint8_t *buf, uint32_t block_size) {
+    return usb_scsi_read_sectors (lba, buf, 1U, block_size);
+}
+
+uint8_t usb_scsi_read_sectors (uint32_t lba, uint8_t *buf,
+                               uint16_t count, uint32_t block_size) {
+    if (count == 0U) return 0U;
     for (int attempt = 0; attempt < 2; attempt++) {
-        uint8_t r = scsi_read_sector_once (lba, buf, block_size);
+        uint8_t r = scsi_read_sectors_once (lba, buf, count, block_size);
         if (r == 0) return 0;
         uint8_t sense[18] = {0};
         (void)usb_scsi_request_sense (sense, sizeof(sense));

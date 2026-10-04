@@ -1187,15 +1187,28 @@ RW_ONE_READ:
 RW_BUF_OK:
 	;--- Fast drain. The result port is a single fixed address, so read
 	;    it through HL with `ld a,(hl)` (7 T-states) instead of the
-	;    absolute form (13 T-states), and unroll 4x so the DJNZ is paid
-	;    once per four bytes: 23 T-states/byte against the old loop's 52.
+	;    absolute form (13 T-states), and unroll 8x so the DJNZ is paid
+	;    once per eight bytes. This is the dominant Z80-side cost after
+	;    the USB sector has arrived.
 	;    DE is the caller's live per-sector pointer and IS the
 	;    destination, so the drain advances DE rather than HL; HL is free
 	;    for the port address. The buffer origin the probes below need is
 	;    recovered from the frame (iy+16), not from HL.
 	ld	hl,MBOX_DATA
-	ld	b,128			;128 x 4 = 512 bytes
+	ld	b,64			;64 x 8 = 512 bytes
 RW_DRAIN_L:
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
 	ld	a,(hl)
 	ld	(de),a
 	inc	de

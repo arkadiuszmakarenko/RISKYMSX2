@@ -347,7 +347,7 @@ all: $(ELF) $(HEX) $(LST) showsize
 #   --specs=nano.specs / nosys.specs are WCH's default newlib configs.
 $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 	@echo "  LD    $@"
-	@"$(CC)" $(ARCH_FLAGS) -Os -g -gdwarf-4 $(QUIET_LDFLAGS) \
+	@"$(CC)" $(ARCH_FLAGS) -O3 -g -gdwarf-4 $(QUIET_LDFLAGS) \
 		-T "$(CURDIR)/$(LINKER)" \
 		-nostartfiles \
 		-Xlinker --gc-sections \

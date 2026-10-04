@@ -38,6 +38,7 @@ static struct {
      * valid for the lifetime of the module. */
     char     manufacturer[9];
     char     model[21];
+
 } s;
 
 /* Why the last transfer failed, in words.
