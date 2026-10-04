@@ -138,7 +138,20 @@ extern "C" {
 #define NEXTOR_MBOX_REG(address) \
     ((uint8_t)((uint16_t)(address) - NEXTOR_MBOX_BASE))
 
-/* STATUS bits (bit7 MSB first - the driver tests them as a byte). */
+/* STATUS bits (bit7 MSB first - the driver tests them as a byte).
+ *
+ * READY is set once at init and never cleared, so it is only ever clear
+ * when nothing is servicing this window at all.
+ *
+ * There is deliberately no "the firmware is still working on this request"
+ * bit. It is the obvious way to stop a watchdog from mistaking a slow sector
+ * read for a dead mailbox, and it was written and then removed again: a
+ * driver deployed without its matching firmware would read the bit clear,
+ * conclude no request was claimed, and fail every request immediately - a
+ * worse failure than the watchdog it was meant to replace. The driver side
+ * of that reasoning also rules out testing READY itself for the same
+ * purpose. The ownership problem is solved without any of it; see s_mb.cap
+ * and res_publish() in nextor.c, and MB_RESOLVE in driver.asm. */
 #define NEXTOR_STAT_READY         0x80U   /* firmware alive            */
 #define NEXTOR_STAT_DONE          0x40U   /* command finished           */
 #define NEXTOR_STAT_ERR           0x20U   /* command failed             */

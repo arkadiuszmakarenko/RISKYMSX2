@@ -130,11 +130,30 @@ MBOX_VER	equ	7FF5h	;protocol revision byte
 ; flag and looks at nothing else - but all four are named so this copy
 ; of the protocol is complete and can be checked against nextor.h by
 ; reading rather than by memory.
+;
+; MBST_READY is deliberately NOT tested, even though it looks like it should
+; be: the firmware sets it once at init and never clears it, so testing it
+; looks like a free way to tell a slow firmware from a dead one. It is not
+; free. If it is ever clear - a mapper installed without Nextor_Init having
+; run, say - every MB_POLL silently gives up after one pass instead of
+; three, so the change makes a slow answer fail where it used to succeed,
+; and it buys nothing in the case it was aimed at: the driver only runs when
+; the Nextor mapper is already installed, which is the same condition that
+; makes Nextor_Init run. Left named here so the protocol copy stays complete.
 
 MBST_READY	equ	80h
 MBST_DONE	equ	40h
 MBST_ERR	equ	20h
 MBST_RXAVL	equ	10h
+
+; MB_POLL's budget, in passes of a 16-bit counter; one pass is about a second
+; at 3.58 MHz, so 3 is ~2.75 s. Unchanged from what it always was, on
+; purpose: with the ownership fixes in place a request that overruns this is
+; no longer able to corrupt the next one, so the remaining question is only
+; how long a caller is willing to spin, and that is a hardware-timing
+; decision, not something to change while chasing a protocol bug. Raise it
+; for a stick that is genuinely slower than the budget.
+MB_POLL_PASSES	equ	3
 
 ; Commands. MB_ABORT is never issued: no mailbox request is ever left
 ; in flight, because MB_POLL is bounded and the firmware is not allowed
@@ -1473,6 +1492,84 @@ MB_MARK:
 	ret
 
 
+;--- MB_RESOLVE: take the mailbox back before issuing a new command.
+;
+;    Defined up here rather than beside MB_SEND because MB_MARK_WAIT and
+;    MB_FRAME_TRACE write the command register directly and therefore call
+;    it too.
+;
+;    Why it exists. The mailbox has a single DONE bit and no request id, so
+;    an answer does not say which request it belongs to. MB_POLL gives up
+;    when the firmware stops answering - and if the firmware was merely slow
+;    rather than gone, it goes on to publish the answer to the request the
+;    driver has just abandoned. The next request's DONE is then raised over
+;    those bytes and the driver drains one sector into another sector's
+;    buffer. There is nothing to detect it with: the driver has no id to
+;    check, and every exchange in the log looks like it succeeded. What the
+;    kernel sees is a directory entry full of sector data, reported as an
+;    unrecognised volume.
+;
+;    So the driver takes the mailbox back first. Anything still in the
+;    result FIFO belongs to a request nobody is waiting for, and throwing it
+;    away is exactly right - an abandoned answer is worthless either way.
+;    The length is read from the mailbox's own count register rather than
+;    from anything the caller predicted, because the length of an abandoned
+;    answer is by definition not the length this caller is expecting.
+;
+;    This also retires two places that used to depend on the firmware's
+;    res_begin() silently discarding the leftovers on the next command byte:
+;    DQS_INQ's D=0 early exit, which deliberately leaves 28 bytes unread,
+;    and MB_RESULT_IS's mismatch bail-out. Both are now harmless leftovers
+;    that get consumed here instead of being quietly overwritten.
+;
+;    Preserves every register: it runs inside MB_SEND, where A is the command
+;    byte, B the argument count and HL the argument source, and there is no
+;    other register free to count in. HL in particular is pushed rather than
+;    left alone - MB_RESOLVE needs it to reach the result port, and MB_SEND
+;    is the one caller that cannot afford to lose it.
+;
+;    The count is clamped first, and it has to be. The firmware's result
+;    FIFO is one 512-byte sector, so the high byte is 0, 1, or 2 and that
+;    only for an exact sector read. A larger value means the window is not
+;    being serviced at all - against a mapper that does not exist the port
+;    reads 0xFF - and honouring it would cost 65535 reads on every MB_SEND,
+;    which is a third of a second apiece of pure spin. Clamping loses
+;    nothing real, because one sector is the largest answer this protocol
+;    can produce, and it keeps the openMSX/C-BIOS path (no mailbox at all)
+;    a handful of milliseconds rather than a hang.
+
+MB_RESOLVE:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	a,(MBOX_RXCH)
+	ld	d,a			;D = count high
+	ld	a,(MBOX_RXCL)
+	ld	c,a			;C = count low
+	or	d
+	jr	z,MB_RESOLVE_DONE	;FIFO empty: the mailbox owes us nothing
+	ld	a,d
+	cp	3
+	jr	c,MB_RESOLVE_GO		;0..2 covers every real answer
+	ld	d,2			;bus noise: clamp to the maximum
+	ld	c,0			;answer the protocol can produce
+MB_RESOLVE_GO:
+	ld	hl,MBOX_DATA
+MB_RESOLVE_L:
+	ld	a,(hl)			;HL is the fixed result port; 7 T-states
+	dec	c			;against 13 for the absolute form
+	ld	a,c
+	or	d
+	jr	nz,MB_RESOLVE_L
+MB_RESOLVE_DONE:
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+
+
 ;--- MB_MARK_WAIT: an ACKNOWLEDGED marker - emit and wait for DONE.
 ;    Unlike the fire-and-forget MB_MARK (which stays a silent no-op so the
 ;    old breadcrumb storm cannot return), this one performs the whole
@@ -1483,7 +1580,8 @@ MB_MARK:
 
 MB_MARK_WAIT:
 	add	a,20h
-	ld	(MBOX_CMD),a
+	call	MB_RESOLVE		;same mailbox rule as MB_SEND, which this
+	ld	(MBOX_CMD),a	;bypasses by writing the register itself
 	ld	a,b
 	ld	(MBOX_DATA),a
 	call	MB_POLL
@@ -1497,6 +1595,7 @@ MB_MARK_WAIT:
 
 MB_FRAME_TRACE:
 	add	a,20h
+	call	MB_RESOLVE
 	ld	(MBOX_CMD),a
 	ld	a,b
 	ld	(MBOX_DATA),a
@@ -1520,8 +1619,14 @@ MB_FRAME_TRACE:
 ;
 ;    Note also that a Z80 `di` does NOT stop the firmware seeing the bus
 ;    writes; it only keeps a Z80-side ISR out of the middle of the burst.
+;
+;    MB_RESOLVE runs first, outside the DI, because it can pop a whole
+;    abandoned sector (512 reads) and holding the Z80's interrupts off that
+;    long would be worse than the race it closes. See MB_RESOLVE for what
+;    the race is.
 
 MB_SEND:
+	call	MB_RESOLVE
 	di
 	ld	(MBOX_CMD),a
 	ld	a,b
@@ -1581,43 +1686,138 @@ MB_PUSH_L:
 	ret
 
 
+;--- MB_SPIN: bounded wait for the DONE bit in STATUS.
+;    In:  BC = iteration budget. 0xFFFF is about a second at 3.58 MHz.
+;    Out: Cy=0 = DONE seen. Cy=1 = budget exhausted.
+;    Trashes: AF, BC.
+;
+;    A function rather than an inline loop because MB_POLL now spins on DONE
+;    and on READY in the same place, and two copies of that loop is how one
+;    of them ends up disagreeing with the other.
+
+MB_SPIN:
+MB_SPIN_L:
+	ld	a,(MBOX_STAT)
+	and	MBST_DONE
+	jr	nz,MB_SPIN_OK
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,MB_SPIN_L
+	scf
+	ret
+MB_SPIN_OK:
+	or	a			;A is already MBST_DONE; clear Cy
+	ret
+
+
 ;--- MB_POLL: wait for DONE in STATUS.
-;    Bounded: 3 passes of a 16-bit poll counter (~0.8 s total at 3.58 MHz).
 ;    Out: on DONE: A = STATUS bits, Cy=0.  On timeout: Cy=1.
-;    Trashes AF, BC. The pass counter uses B' because BC is the main-set
-;    poll counter. The kernel parks its live registers in the shadow set
+;    Trashes AF, BC. The pass counter uses B' because BC in the main set is
+;    the spin counter. The kernel parks its live registers in the shadow set
 ;    across inter-slot driver calls, so preserve shadow BC around the poll.
+;
+;    *** REQUEST OWNERSHIP. Read this before changing anything here. ***
+;
+;    The mailbox is a two-wire channel with one DONE bit and no owner: an
+;    answer carries nothing that says which request it belongs to. That is
+;    what makes a watchdog dangerous, and this routine used to be one. It
+;    gave up after a fixed ~2.75 s whether or not the firmware was still
+;    working, and a USB sector read on a slow stick can outlast that. When
+;    it did, the two sides overlapped:
+;
+;      1. the driver gives up on request N and sends request N+1;
+;      2. the firmware finishes N and publishes it, raising DONE;
+;      3. the driver - now polling for N+1 - sees DONE and drains N's 512
+;         bytes as if they were N+1's answer.
+;
+;    Nothing downstream can detect that, because there is no id to check and
+;    every exchange in the log looks like it succeeded. What the kernel sees
+;    is a directory entry full of sector data, which it reports as an
+;    unrecognised volume. The same overlap is what makes the machine look
+;    hung on a bulk read: the scan then spends a full watchdog per sector on
+;    requests the firmware was in the middle of answering.
+;
+;    The fix is on both sides, and both halves are needed because they close
+;    opposite orderings of the same race:
+;
+;      firmware  res_publish() refuses to publish an answer for a request
+;                that has since been superseded, and answers the pending one
+;                instead. This covers the answer arriving AFTER the next
+;                command byte has been written.
+;      driver    MB_RESOLVE drains the FIFO before every command byte. This
+;                covers the answer having arrived BEFORE it - which the
+;                firmware side cannot see, because by then the driver has
+;                already moved on and there is nothing left to refuse.
+;
+;    Neither half needed a protocol change. A "the firmware is still working
+;    on this" status bit was considered and rejected: it would have been the
+;    only way for the driver to tell a slow firmware from a dead one without
+;    a timer, but a driver that shipped without its firmware half would read
+;    the bit clear, decide nothing was claimed, and fail every request at
+;    once. Turning a slow read into a fast failure on a mismatched pair is
+;    worse than the watchdog it was meant to replace. For the same reason
+;    MB_POLL does not consult MBST_READY either - see the note by that bit.
+;
+;    *** REGISTER-SET DISCIPLINE. The loop below spans two register sets
+;    *** because the pass counter and the spin counter are both B-sized and
+;    *** BC is needed in the main set. That is easy to get wrong in a way
+;    *** that only misbehaves after the first pass, so it is spelled out.
+;    ***
+;    *** MB_POLL_P is the ONLY entry into the spin, and every path into it
+;    *** must be in the MAIN set. DJNZ counts in the set it executes in, so
+;    *** the test has to happen in the shadow set with B' holding the pass
+;    *** count - which means the taken branch is still in the shadow set when
+;    *** it lands, and needs its own EXX before it can re-enter MB_POLL_P.
+;    *** Losing that EXX returns from MB_POLL with the register sets swapped
+;    *** and one stack word leaked, and it does it only on the second pass,
+;    *** so a fast firmware never sees it. This is exactly what happened the
+;    *** first time round.
+;
+;    Out of budget this request is a failure, but the mailbox must not be
+;    left holding the answer: whatever is in the FIFO belongs to a request
+;    nobody is waiting for, and the next command byte would deliver it as
+;    the next request's answer. MB_RESOLVE is the same drain MB_SEND does on
+;    the way in, so the residue is consumed here too.
+;
+;    One exit, MB_POLL_DONE, so the shadow BC saved at the top is restored
+;    exactly once. It is reached from the main set on every path.
 
 MB_POLL:
 	exx
 	push	bc			;save caller's shadow BC, including kernel B'
-	ld	b,3
-	exx
+	ld	b,MB_POLL_PASSES
+	exx				;back to the main set for the spin
 MB_POLL_P:
-	ld	bc,0FFFFh
-MB_POLL_L:
-	ld	a,(MBOX_STAT)
-	and	MBST_DONE
-	jr	nz,MB_POLL_OK
-	dec	bc
-	ld	a,b
-	or	c
-	jr	nz,MB_POLL_L
-	exx
-	djnz	MB_POLL_GO	;inner pass done, next pass
-	pop	bc			;restore caller's shadow BC (still in shadow set)
-	exx
-	scf			;passes exhausted: timeout
-	ret
-MB_POLL_GO:
-	exx
+	ld	bc,0FFFFh		;~1 s per pass
+	call	MB_SPIN
+	jr	nc,MB_POLL_OK		;main set: MB_POLL_DONE swaps back correctly
+	exx				;shadow set: B' is the pass counter
+	djnz	MB_POLL_NEXT
+	exx				;budget spent; main set, and the saved
+					;shadow BC is deliberately left on the
+					;stack for MB_POLL_DONE to pop - the
+					;single exit owns that, so it must not
+					;also be popped here
+	call	MB_RESOLVE		;discard the abandoned answer
+	scf				;report the timeout. This has to be set
+					;here rather than left to the spin:
+					;MB_RESOLVE ends on a POP AF and so
+					;returns whatever flags were passed
+					;in, and every caller decides what to
+					;do next on Cy.
+	jr	MB_POLL_DONE
+MB_POLL_NEXT:
+	exx				;main set again - see the note above
 	jr	MB_POLL_P
-MB_POLL_OK:
+MB_POLL_DONE:
 	exx
-	pop	bc			;restore caller's shadow BC on success too
+	pop	bc
 	exx
-	or	a		;clear Cy (A = STATUS bits, DONE set)
 	ret
+MB_POLL_OK:
+	or	a			;clear Cy (A = STATUS bits, DONE set)
+	jr	MB_POLL_DONE
 
 
 ;--- MB_CMD0_1BYTE: send a zero-argument command and pop its 1-byte answer.

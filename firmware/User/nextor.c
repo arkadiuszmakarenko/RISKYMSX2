@@ -265,6 +265,19 @@ static struct {
     volatile uint8_t  raw;       /* the byte as written, unnormalised  */
     volatile uint8_t  armed;     /* 1 = burst complete, answer pending */
     volatile uint8_t  seq;       /* requests captured, wraps at 256   */
+    /* Command BYTES seen, not requests completed. seq is bumped when a
+     * burst finishes, which makes it useless as a "has anything new
+     * arrived?" test: for a READ there are five bus cycles between the
+     * command byte and the moment seq moves, and for a WRITE there are 512
+     * of them. Answering inside that window hands the driver the previous
+     * sector under the new request's DONE, and nothing on either side can
+     * see it - the driver has no request id to compare and the exchange
+     * looks well formed in the log.
+     *
+     * `cap` is bumped the instant a command byte lands, so it covers the
+     * whole capture including the part where armed is still 0. See the
+     * publish check in Nextor_Service. */
+    volatile uint8_t  cap;       /* command bytes captured, wraps 256  */
 
     /* --- result FIFO (Service writes, IRQ pops) --- */
     uint8_t * volatile res_r;    /* next byte the driver will pop     */
@@ -575,6 +588,7 @@ void Nextor_Init (void) {
     s_mb.raw     = NEXTOR_CMD_NONE;
     s_mb.armed   = 0U;
     s_mb.seq     = 0U;
+    s_mb.cap     = 0U;
     s_mb.status  = NEXTOR_STAT_READY;
     s_mb.err     = NEXTOR_ERR_NONE;
     s_mb.last_seq = 0U;
@@ -649,10 +663,24 @@ static void res_begin (void) {
     s_mb.status &= (uint8_t)~NEXTOR_STAT_RX_AVAIL;
 }
 
-/* Publish the result FIFO and release the driver. s_mb.res_end must
- * become visible before DONE, or MB_POLL can return and MB_GETRES can
- * read against a stale end pointer. */
-static void res_publish (void) {
+/* Publish the result FIFO and release the driver - but only if `cap` is
+ * still the generation this answer was built for.
+ *
+ * The check and the DONE store are one transaction on purpose. The only
+ * writer that can invalidate an answer is the interrupt handler, which bumps
+ * `cap` on a command byte; masking IRQs across the comparison and the store
+ * means no command byte can land between them. s_mb.res_end must also become
+ * visible before DONE, or MB_POLL can return and MB_GETRES can read against
+ * a stale end pointer.
+ *
+ * Out: 1 = published, 0 = a newer request was captured and this answer is
+ * stale; the caller must answer that one instead. Never both, never neither.
+ *
+ * Why the generation is checked at all, and why a stale answer is not simply
+ * thrown away, is spelled out at the call site in Nextor_Service. */
+static uint8_t res_publish (uint8_t cap) {
+    uint8_t published;
+
     /* DONE is the acquire point for the Z80: once it sees DONE, the cart
      * interrupt may immediately serve DATA reads. Make the result bytes,
      * res_r/res_end, and ERR visible before publishing that status bit on
@@ -661,14 +689,50 @@ static void res_publish (void) {
      * FIFO state, even though the service-side log already shows 512 bytes.
      */
     __asm__ volatile ("fence rw, rw" ::: "memory");
-    if (s_mb.res_end != s_mb.res_r) {
-        s_mb.status |= NEXTOR_STAT_RX_AVAIL;
+
+    __disable_irq ();
+    if (s_mb.cap != cap) {
+        __enable_irq ();
+        return 0U;
     }
-    if (s_mb.err != NEXTOR_ERR_NONE) {
-        s_mb.status |= NEXTOR_STAT_ERR;
+
+    /* The status byte is built in a register and stored ONCE.
+     *
+     * The single store is what makes DONE, ERR and RX_AVAIL move together,
+     * which is the property the driver's MB_POLL reads the byte for.
+     * Separate read-modify-writes would put a window in the middle of the
+     * update where STATUS reads as something that means nothing, and would
+     * also race the interrupt handler's own write of the same byte - the
+     * mask above is what stops that, not the store.
+     *
+     * DONE and ERR are deliberately the only bits touched. Nothing here
+     * clears DONE on the way out, and res_begin() owns RX_AVAIL: the request
+     * this answer belongs to may already have been superseded (which is what
+     * the cap check above is about), and clearing its status bits on the way
+     * out would destroy the state of a request this pass is not answering. */
+    {
+        uint8_t status = (uint8_t)(s_mb.status
+                                   & (uint8_t)~NEXTOR_STAT_RX_AVAIL);
+
+        if (s_mb.res_end != s_mb.res_r) {
+            status |= NEXTOR_STAT_RX_AVAIL;
+        }
+        if (s_mb.err != NEXTOR_ERR_NONE) {
+            status |= NEXTOR_STAT_ERR;
+        }
+        status |= NEXTOR_STAT_DONE;
+
+        s_mb.status = status;
     }
-    s_mb.status |= NEXTOR_STAT_DONE;
+    published = 1U;
+    __enable_irq ();
+
+    return published;
 }
+
+/* How many times one Nextor_Service() pass may rebuild its answer because
+ * the driver moved on mid-answer. See the call site. */
+#define NEXTOR_ANSWER_REBUILDS      2U
 
 /* Record one mailbox write. IRQ context, one caller site, no branches
  * that depend on anything but tr_pos: this runs in the middle of a bus
@@ -856,6 +920,15 @@ static void ident_pad (uint8_t *out, const char *src, uint8_t width) {
  * happen - the driver is spinning in MB_POLL on the DONE bit for the
  * whole of this function. */
 void Nextor_Service (void) {
+    /* How many times one pass may rebuild its answer because the driver
+     * moved on while the answer was being built. Two is generous: each
+     * rebuild means the driver's MB_POLL expired on the previous attempt,
+     * which is milliseconds of Z80 spin per attempt. The bound is what makes
+     * this terminate - without it a driver that keeps timing out would hold
+     * the main loop here forever and starve every other service. */
+    unsigned rebuild = NEXTOR_ANSWER_REBUILDS;
+
+next_request:
     /* Nothing to answer, so use the time to get the medium ready. The
      * only slow work outside a command is enumeration + READ CAPACITY +
      * INQUIRY in RawDisk_Probe (driven from raw_probe); READs and
@@ -895,6 +968,7 @@ void Nextor_Service (void) {
     uint8_t  snap_seq;
     uint8_t  snap_raw;
     uint8_t  snap_arg;
+    uint8_t  snap_cap;
     uint16_t snap_nargs;
     uint32_t snap_lba;
     log_snap snap;
@@ -904,6 +978,7 @@ void Nextor_Service (void) {
         cmd        = s_mb.cmd;
         snap_raw   = s_mb.raw;
         snap_seq   = s_mb.seq;
+        snap_cap   = s_mb.cap;
         snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
         snap_lba   = arg_lba ();
         /* A breadcrumb's payload is args[0]. Read it in the same critical
@@ -1130,8 +1205,49 @@ void Nextor_Service (void) {
     snap.nres  = (uint16_t)(s_mb.res_end - s_mb.res_r);
     snap.media = s_mb.res[0];
 
-    res_publish ();
+    /* Publish, but only if this answer is still the answer the driver is
+     * waiting for.
+     *
+     * The answer above was built with IRQ enabled and it contains a USB
+     * transfer, so it takes milliseconds - long enough for the driver's
+     * MB_POLL to expire and for the driver to abandon this request and send
+     * a different one. The new command byte has already cleared DONE, so
+     * raising DONE here publishes THIS answer under the NEW request: 512
+     * bytes of sector where a one-byte STATUS was expected. The driver
+     * reads the sector's first byte as the media state, gets something that
+     * is neither 0, 1 nor 2, and the volume is reported as an unrecognised
+     * command - with every exchange in the log looking like it worked.
+     *
+     * `cap` is the test, and not `armed`, because `armed` only goes up when
+     * a burst *completes*. A WRITE's argument burst is 512 bus cycles long,
+     * so for most of it the new request exists and armed is still 0; testing
+     * armed would let exactly the answer that cannot be delivered slip
+     * through. `cap` moves the instant a command byte lands, so it covers
+     * the whole capture. See s_mb.cap.
+     *
+     * The check and the DONE store are one transaction with respect to the
+     * only writer that can invalidate this answer - the interrupt handler,
+     * which bumps `cap` - because res_publish() masks IRQs across its own
+     * store. Nothing can slip in between.
+     *
+     * A stale answer is NOT simply dropped. Dropping it is what an earlier
+     * attempt at this fix did, and it made the drive disappear entirely:
+     * the request the driver is actually waiting for never got an answer,
+     * MB_POLL expired on it too, and the mailbox was left claiming work it
+     * had thrown away. Instead the pass restarts and builds the answer for
+     * the request that is pending now, so the driver's next poll is served
+     * immediately and correctly. Only if the rebuilds run out is the answer
+     * deferred - and even then the request stays armed, so the next
+     * main-loop pass picks it up. Nothing is ever dropped. */
+    if (res_publish (snap_cap) != 0U) {
+        return;
+    }
 
+    if (rebuild == 0U) {
+        return;             /* deferred, not lost: s_mb.armed is still set */
+    }
+    rebuild--;
+    goto next_request;
 }
 
 /* ========================================================================
@@ -1153,10 +1269,27 @@ void Nextor_WriteByte (uint16_t address, uint8_t value) {
     if (reg == NEXTOR_MBOX_CMD) {
         uint8_t cmd = value;
 
-        /* DONE must fall here, not in Service: MB_POLL returns the
-         * instant DONE is visible, so clearing it late would let the
-         * driver read the PREVIOUS answer. */
-        s_mb.status &= (uint8_t)~NEXTOR_STAT_DONE;
+        /* DONE and ERR are read by the driver out of the same byte, so they
+         * are cleared by one read-modify-write and move together. Clearing
+         * them in two steps would open a window in which STATUS shows the new
+         * request as already failed while it has not even been answered.
+         *
+         * ERR is cleared HERE and not in res_begin, because res_begin runs
+         * from the main loop - a driver that read STATUS in between would
+         * still see the previous request's failure. More to the point, ERR
+         * used to be only ever set and never cleared by anything at all,
+         * which is not a cosmetic latch: the driver tests MBST_ERR after
+         * every READ and turns it into .DISK, so the first failed sector - a
+         * transient USB stall, which a bulk FAT scan will eventually hit -
+         * made every subsequent sector fail as well, and the drive stayed
+         * dead for the rest of the session. A scan through the directory then
+         * never completed, which is what this looked like from the outside.
+         *
+         * DONE must also fall here, not in Service: MB_POLL returns the
+         * instant DONE is visible, so clearing it late would let the driver
+         * read the PREVIOUS answer. */
+        s_mb.status &= (uint8_t)~(NEXTOR_STAT_DONE | NEXTOR_STAT_ERR);
+        s_mb.cap++;
 
         if (cmd >= NEXTOR_CMD_MAX) {
             /* Park the sink at the empty range. The burst that follows
