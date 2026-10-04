@@ -329,16 +329,29 @@ handle_reset:
 
 	la sp, _eusrstack
 
-/* NOTE on cartridge ~WAIT: the Subslots implementation asserted ~WAIT
- * here, before any clock/peripheral configuration. That model only
- * works when a RAM-backed mapper is installed before ~WAIT is released
- * (so the IRQ can serve the held cycle). Terminal and Nextor are
- * flash-ROM mappers and can't serve a held cycle, so leaving ~WAIT
- * asserted through init would prevent the BIOS from completing its
- * first slot probe - the held probe never gets data on the bus and the
- * BIOS sees 0xFF. The startup asm therefore no longer asserts ~WAIT
- * unconditionally; Cart_HoldMSXWait_Begin/End primitives remain for
- * the slotted (RAM-backed) mapper and for runtime ROM-swap atomicity. */
+/* Assert cartridge ~WAIT before the MSX can reach the cartridge probe.
+ * The C startup path synchronizes the hold flag, installs Nextor, brings
+ * up USB/RawDisk, and releases WAIT only after the mailbox backend is
+ * ready. The active cart handler serves the held ROM cycle and skips its
+ * normal SLTSL wait while the hold flag is set. */
+	li	t0, 0x40			/* RCC_IOPEEN */
+	li	t1, 0x40021018			/* RCC->PB2PCENR */
+	sw	t0, 0(t1)
+
+	li	t1, 0x4001180C			/* GPIOE->OUTDR */
+	lw	t0, 0(t1)
+	li	t2, 0x08			/* PE3 /WAIT */
+	not	t2, t2
+	and	t0, t0, t2
+	sw	t0, 0(t1)			/* output latch low before mode change */
+
+	li	t1, 0x40011800			/* GPIOE->CFGLR */
+	lw	t0, 0(t1)
+	li	t2, ~(0xFU << 12)
+	and	t0, t0, t2
+	li	t2, (0x3U << 12)		/* PE3 push-pull output, low */
+	or	t0, t0, t2
+	sw	t0, 0(t1)
 
 /* Load data section from flash to RAM */
 	la a0, _data_lma
@@ -385,5 +398,4 @@ handle_reset:
 	la t0, main
 	csrw mepc, t0
 	mret
-
 

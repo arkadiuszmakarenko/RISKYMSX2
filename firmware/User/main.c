@@ -23,21 +23,10 @@
 
 int main (void) {
 
-    /* NOTE on ~WAIT hold during init: the Subslots implementation
-     * asserts cartridge ~WAIT from the startup asm + main() boot path
-     * so a RAM-backed slotted handler can serve the MSX's first
-     * probe cycle. That model needs a handler that can serve the
-     * held cycle (which a ram-backed mapper trivially can; a flash-ROM
-     * mapper cannot, because the IRQ needs to fire to drive the data
-     * bus, but the held cycle never completes its falling-edge until
-     * WAIT is released - a chicken-and-egg). Terminal and Nextor are
-     * flash-ROM mappers, so the WAIT hold during boot provides no
-     * benefit and risks confusing the BIOS if the timing window is
-     * missed. The primitives stay in place for the slotted handler
-     * (which CAN serve the held cycle) and for runtime use (ROM swap
-     * atomicity). Cart_HoldMSXWait_Begin/End are NO-OPs at the main()
-     * boot path until step 2 of the migration adds the slotted
-     * mapper. */
+    /* Synchronize the C-side hold flag with the low PE3 output asserted
+     * by startup_ch32v4x7.S. The MSX is held while the Nextor mapper and
+     * the USB backend are brought up. */
+    Cart_HoldMSXWait_Begin ();
 
     /* Heartbeat: toggle the LED in a tight loop so we can confirm
      * main() is reached even if USART is dead. PA0 = LEDFLASH. */
@@ -76,34 +65,53 @@ int main (void) {
     SCC_Init ();
     /* Reset the terminal mailbox before installing the mapper so the
      * EXTI0 handler starts with empty FIFOs. */
-    Terminal_Reset ();
-    Cart_SetMapper (CART_MAP_TERMINAL);
+  //  Terminal_Reset ();
+    /* Preserve the pending BIOS probe edge while atomically installing
+     * the Nextor handler. The handler serves the held ROM read and
+     * returns without waiting for SLTSL. */
+    Cart_SetMapper_Safe (CART_MAP_SLOTTED);
 
 
     printf ("SystemClk:%d\r\n", SystemCoreClock);
     printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
-    /* Bring up PSRAM after the flash selector is already armed. It is
-     * only needed later when the user loads a cartridge image. */
-    PSRAM_Init();
+    /* Bring up PSRAM after the cart mapper is already armed. It backs the
+     * expanded-slot mapper RAM (sub-slot 1, 4 MiB at
+     * CART_SLOTTED_BANK_BASE_OFFSET) and every PSRAM-backed cart mapper.
+     * The result MUST be published with Cart_SetSlottedPSRAMReady():
+     * until it is, the EXTI0 handler treats sub-slot 1 as an empty slot
+     * and leaves the data bus floating, which makes the BIOS/Nextor report
+     * "slot is expanded but nothing inside". */
+    {
+        const uint8_t psram_status = PSRAM_Init ();
+        Cart_SetSlottedPSRAMReady (psram_status == PSRAM_OK);
+        if (psram_status != PSRAM_OK) {
+            printf ("PSRAM init failed: status 0x%02X - sub-slot 1 stays "
+                    "empty\r\n", psram_status);
+        } else {
+            printf ("PSRAM ready: mapper RAM window at PSRAM+0x%08X "
+                    "(%u x %u KiB)\r\n",
+                    (unsigned)(PSRAM_CART_BASE
+                               + CART_SLOTTED_BANK_BASE_OFFSET),
+                    (unsigned)(CART_SLOTTED_BANK_COUNT),
+                    (unsigned)(CART_SLOTTED_BANK_SIZE / 1024U));
+        }
+    }
 
     /* USBHS host init. Powers up the controller so it's ready. */
     USB_Initialization ();
 
-    /* Initialise the Nextor mapper state so a swap to CART_MAP_NEXTOR
-     * from the terminal menu (N key) starts with a clean bank select +
-     * ATA register file + PATA device signature. The actual USB
-     * enumeration is driven by Nextor_Service() from the main loop;
-     * this only primes the in-RAM state struct.
-     *
-     * RawDisk_Init() is a power-on call, and it has to be here rather than
-     * in Nextor_Init(): a mapper swap does not change whether a USB stick
-     * is plugged in, so re-initialising the medium on every swap just
-     * throws away a good enumeration and makes the next session start
-     * with a multi-hundred-millisecond re-probe competing with the Z80's
-     * first HANDSHAKE. */
+    /* RawDisk_Init() is a power-on call. Cart_SetMapper(NEXTOR) already
+     * initialized the Nextor mailbox before the BIOS started executing;
+     * do NOT call Nextor_Init() again here, because the kernel may already
+     * have queued its first command and a second reset would discard it.
+     * A mapper swap later from the terminal menu performs its own single
+     * Nextor_Init() at the swap point. */
     RawDisk_Init ();
-    Nextor_Init ();
+
+    /* USB and the disk backend are now ready for the first Nextor
+     * mailbox request. Release WAIT and let the held BIOS cycle finish. */
+    Cart_HoldMSXWait_End ();
 
     printf ("\r\n=== boot complete (terminal mapper active) ===\r\n");
 
