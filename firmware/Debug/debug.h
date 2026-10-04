@@ -20,6 +20,12 @@
 #include "stdio.h"
 #include "ch32v4x7.h"
 
+/* Firmware diagnostics are selected by the top-level makefile.  Keep a
+ * source-level default for small host/unit-test builds that do not use it. */
+#ifndef RISKY_DEBUG
+#define RISKY_DEBUG 0
+#endif
+
 /* USART Printf Definition */
 #define DEBUG_USART1    1
 #define DEBUG_USART2    2
@@ -50,6 +56,5 @@ void SDI_Printf_Enable(void);
 #endif
 
 #endif 
-
 
 

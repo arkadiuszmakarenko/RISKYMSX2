@@ -100,8 +100,16 @@
 #include "nextor.h"
 #include "raw_disk.h"
 #include "ch32v4x7_conf.h"
+#include "debug.h"
 #include <stdio.h>
 #include <string.h>
+
+/* Diagnostics are deliberately absent from the normal image.  This is a
+ * compile-time switch rather than a runtime flag: formatting a line and
+ * walking a 512-byte sector must not remain on the USB read path. */
+#if !RISKY_DEBUG
+#define printf(...) do { } while (0)
+#endif
 
 /* ========================================================================
  * Wire contract
@@ -1376,7 +1384,11 @@ void Nextor_Service (void) {
 void Nextor_WriteByte (uint16_t address, uint8_t value) {
     const uint8_t reg = NEXTOR_MBOX_REG (address);
 
+#if RISKY_DEBUG
     trace_put (reg, value);
+#else
+    (void)value;
+#endif
 
     if (reg == NEXTOR_MBOX_CMD) {
         uint8_t cmd = value;

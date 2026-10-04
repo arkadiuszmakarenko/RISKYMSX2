@@ -32,12 +32,19 @@
  *********************************************************************************/
 
 #include "usb_disk.h"
+#include "debug.h"
 #include "cart.h"
 #include "psram.h"
 #include "nextor.h"
 #include "ch32v4x7.h"
 #include "ch32v4x7_psram.h"
 #include <string.h>
+
+/* USB diagnostics are a separate build feature.  In particular, successful
+ * sector transfers never pay for printf argument evaluation in release. */
+#if !RISKY_DEBUG
+#define printf(...) do { } while (0)
+#endif
 
 /* ------------------------------------------------------------------------ */
 /* Buffer placement (PSRAM)                                                 */

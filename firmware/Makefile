@@ -15,6 +15,7 @@
 #   make flash      # program the chip with OpenOCD (WCH-Link E)
 #   make prog       # alias for flash
 #   make flash QUIET=1  # rebuild/flash with printf completely bypassed
+#   make DEBUG=1       # retain firmware diagnostics (release default is 0)
 #   make rebuild QUIET=1 # explicit quiet rebuild
 #
 # Toolchain:
@@ -97,7 +98,7 @@ SIZE          := $(TOOLCHAIN_DIR)/$(TRI)-size
 ARCH_FLAGS    ?= $(RISKY_ARCH)
 
 CFLAGS_COMMON  = $(ARCH_FLAGS) \
-                 -fmax-errors=20 -Os -fmessage-length=0 \
+                 -fmax-errors=20 -O3 -fmessage-length=0 \
                  -fsigned-char -ffunction-sections -fdata-sections -fno-common \
                  -Wunused -Wuninitialized \
                  -g -gdwarf-4 -std=gnu99
@@ -107,12 +108,20 @@ CFLAGS_COMMON  = $(ARCH_FLAGS) \
 # quiet build wraps printf at link time, so formatting and UART transmission
 # are both skipped while the firmware behavior remains otherwise identical.
 QUIET           ?= 0
+DEBUG           ?= 0
+ifeq ($(DEBUG),1)
+  CFLAGS_COMMON += -DRISKY_DEBUG=1
+  DEBUG_MODE     := debug
+else
+  CFLAGS_COMMON += -DRISKY_DEBUG=0
+  DEBUG_MODE     := release
+endif
 ifeq ($(QUIET),1)
   CFLAGS_COMMON += -DRISKY_QUIET=1
   QUIET_LDFLAGS  := -Wl,--wrap=printf
-  BUILD_MODE     := quiet
+  BUILD_MODE     := $(DEBUG_MODE)-quiet
 else
-  BUILD_MODE     := debug
+  BUILD_MODE     := $(DEBUG_MODE)
 endif
 
 # PROBES=1 forwards -ds RW_PROBES to the driver build, re-enabling the
@@ -254,12 +263,16 @@ DEPS           := $(OBJS:.o=.d)
 # Make changes to QUIET rebuild every object automatically, so `make flash
 # QUIET=1` cannot accidentally flash an old debug build. The mode stamp is
 # deliberately separate from the generated ROM dependencies.
-BUILD_MODE_STAMP := $(OBJDIR)/.build-mode-$(BUILD_MODE)
+BUILD_MODE_STAMP := $(OBJDIR)/.build-mode
 $(OBJS): $(BUILD_MODE_STAMP)
-$(BUILD_MODE_STAMP):
+$(BUILD_MODE_STAMP): FORCE
 	@mkdir -p "$(OBJDIR)"
-	@rm -f "$(OBJDIR)"/.build-mode-debug "$(OBJDIR)"/.build-mode-quiet
-	@touch "$@"
+	@if test "`cat '$@' 2>/dev/null`" != "$(BUILD_MODE)"; then \
+		echo "$(BUILD_MODE)" > "$@"; \
+	fi
+
+.PHONY: FORCE
+FORCE:
 
 # If User/PSRAM is pulled in later, also pick it up — kept as a no-op target
 # so calling `make obj/User/psram.o` works without breaking the wildcard.
