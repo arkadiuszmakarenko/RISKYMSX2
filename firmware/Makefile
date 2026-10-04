@@ -159,6 +159,16 @@ CFLAGS_COMMON += -DCART_GAME_BASE_MB=$(GAME_BASE_MB)
 KONAMISCC_SCC_QUEUE ?= 1
 CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
 
+# Escape hatch for one-off -D switches, for the cases where adding a
+# documented variable is more churn than the experiment is worth.
+#
+#     make rebuild EXTRA_CFLAGS=-DNEXTOR_LOG=0    # quiet Nextor mailbox log
+#
+# Applies to every translation unit, so a build that changes it wants a
+# `rebuild`, not an incremental `make`.
+EXTRA_CFLAGS ?=
+CFLAGS_COMMON += $(EXTRA_CFLAGS)
+
 # --- Flash tool --------------------------------------------------------------
 # CH32V4x7 (chip id 0xa6) is NOT supported by upstream `wlink` or `minichlink`
 # (they report "Chip Type unknown [a6]" and refuse to program). The WCH-LinkE

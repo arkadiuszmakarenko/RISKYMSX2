@@ -103,6 +103,40 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ---------------------------------------------------------------------------
+ * NEXTOR_LOG - the mailbox request log, on or off
+ * ---------------------------------------------------------------------------
+ * The log is two lines per request and one of them goes out BEFORE the
+ * command is answered, which is the only reason a hang inside a handler is
+ * visible at all. That makes it a debugging tool with a cost: a UART line
+ * is a blocking write, on a path the Z80 is spinning on MB_POLL for. It
+ * does not change what the protocol does, but it does change how long
+ * answers take, and the thing being chased here is a timing-sensitive
+ * overlap - so "does it still fail with logging off?" is a question worth
+ * being able to ask without editing thirty call sites.
+ *
+ * So the switch shadows the printf identifier rather than #ifdef-ing every
+ * call. One block, no call-site edits, and the two builds cannot drift
+ * apart because there is only one place to change.
+ *
+ * Note this also compiles out the ARGUMENTS, which is deliberate: several
+ * of them call into raw_disk.c (RawDisk_LastFailure and friends), and a
+ * logging build that kept making those calls would not be the quiet build
+ * it looks like.
+ *
+ * Override from the command line, e.g.
+ *     make CFLAGS_EXTRA=-DNEXTOR_LOG=0
+ * or by editing this to 0.
+ */
+#ifndef NEXTOR_LOG
+#define NEXTOR_LOG 1
+#endif
+
+#if !NEXTOR_LOG
+#undef printf
+#define printf(...)    ((void)0)
+#endif
+
 /* ========================================================================
  * Wire contract
  * ====================================================================== */
@@ -139,6 +173,26 @@
  * one HANDSHAKE plus its poll, which is the shortest span that can hold
  * an unexplained CMD write together with whatever it interrupted. */
 #define NEXTOR_TRACE_N       24U
+
+/* Read-trace geometry. Declared up here rather than beside the dump because
+ * the ring is a field of s_mb, and the ring is written from IRQ context.
+ *
+ * N must stay a power of two - the read path indexes it with a mask, not a
+ * modulo, because it is the hottest path in the module (MB_POLL spins on
+ * STATUS here tens of thousands of times per slow answer). A handshake is
+ * ~8 reads and a 12-byte params fetch ~15, so 32 holds every control
+ * exchange whole; a 512-byte sector read does not fit and is not meant to,
+ * and the dump says so rather than shortening the order string silently. */
+#define NEXTOR_RDTRACE_N            32U
+#define NEXTOR_RD_ORDER_N           28U
+
+/* How long after publishing an answer the read trace waits before
+ * declaring the exchange over. Long enough that a driver still spinning on
+ * MB_POLL is not reported prematurely, short enough that a driver that has
+ * given up is reported while the failure is still what is on screen. Only
+ * the idle-path caller waits; the log_request caller knows the exchange is
+ * already over and asking again is what makes that distinction. */
+#define NEXTOR_READ_QUIET_MS        250U
 
 /* Argument bytes each command pushes after its command byte.
  * Transcribed from driver.asm's command table. Indexed by command byte.
@@ -305,6 +359,50 @@ static struct {
     volatile uint8_t  tr_pos;    /* next slot to write                */
     volatile uint8_t  tr_gen [NEXTOR_TRACE_N]; /* tick at that write   */
     volatile uint8_t  tr_tick;   /* mailbox writes seen, wraps at 256  */
+
+    /* --- Z80 read trace (IRQ reads, idle path prints) ---
+     * tr_* above is the half of the exchange the driver SENT. These are
+     * the half it got back, and they are the half that decides whether an
+     * answer was accepted.
+     *
+     * The reason this exists: the driver prints its accept/reject verdict
+     * to the MSX SCREEN, not the UART, so from the terminal an answer the
+     * driver refused looks identical to an answer that never arrived. Both
+     * show up as "one HANDSHAKE, then silence". These counters separate
+     * them - a driver that popped DATA the right number of times read the
+     * answer and rejected it on content; a driver with STAT reads but no
+     * DATA pops never got past MB_POLL; no reads at all means it never
+     * looked.
+     *
+     * Reset at publish, not at res_begin: the reads we care about all
+     * happen AFTER the answer is released, so the window has to start
+     * there. */
+    volatile uint16_t rd_stat;   /* STATUS reads since the last publish */
+    volatile uint16_t rd_data;   /* DATA pops    "        "             */
+    volatile uint16_t rd_rxcnt;  /* RXCNT reads  "        "             */
+    volatile uint16_t rd_err;    /* ERR reads    "        "             */
+    volatile uint8_t  rd_last;   /* last STATUS value handed back       */
+    volatile uint8_t  rd_seq;    /* seq of the request being reported   */
+    volatile uint8_t  rd_done;   /* summary already printed for it      */
+    volatile uint8_t  rd_active; /* a result has actually been published */
+    volatile uint32_t rd_t0;     /* publish time, for the quiet window  */
+
+    /* The ORDERED form of the four counters above, which is what actually
+     * settles an ambiguous total. A count of "0 STATUS reads" means two
+     * very different things - the driver never polled, or the poll that saw
+     * DONE landed in the neighbouring request's window - and they need
+     * opposite fixes. The ring shows the DONE-detecting read in sequence,
+     * next to the DATA pops it must have preceded.
+     *
+     * A ring rather than a linear log because it cannot overrun: the 512
+     * DATA pops of a sector read would need 512 slots, and the only thing
+     * worth keeping from a long exchange is its tail. rr_n saturating at
+     * the ring size is what tells the dump when it has lost the head. */
+    volatile uint8_t  rr_reg [NEXTOR_RDTRACE_N];
+    volatile uint8_t  rr_val [NEXTOR_RDTRACE_N];
+    volatile uint8_t  rr_pos;    /* next slot to write                  */
+    volatile uint8_t  rr_n;      /* reads seen, saturating at the size  */
+
     uint8_t           args[NEXTOR_ARG_MAX];
     uint8_t           res [NEXTOR_RES_MAX];
 } s_mb;
@@ -580,6 +678,23 @@ void Nextor_CacheInvalidate (void) {
  * like it returned stale results. RX_AVAIL and ERR start clear so the
  * first request is answered from a known-empty result FIFO. */
 void Nextor_Init (void) {
+    /* Boot marker. The first thing to establish when Nextor DOS does not
+     * come up is which half of the mailbox is missing, and this line is the
+     * only proof that the firmware half is alive at all. With it:
+     *
+     *   this line, then nothing  -> the Z80 never wrote a command byte, so
+     *                               the fault is in the cart window decode
+     *                               or in the driver's detection
+     *   this line, then [nx] #0  -> the mailbox works; whatever is wrong is
+     *                               in the answers, and the STALE / dropped
+     *                               lines below are the ones to read
+     *   no line at all           -> Nextor_Init never ran, so the Nextor
+     *                               mapper was never installed
+     *
+     * Printed after the state is set, so everything it claims is already
+     * true. One line per mapper install, so a swap storm cannot flood the
+     * terminal - and a flood here would itself stall the boot it is
+     * meant to explain. */
     s_mb.argp    = s_mb.args;
     s_mb.argend  = s_mb.args;
     s_mb.res_r   = s_mb.res;
@@ -597,6 +712,14 @@ void Nextor_Init (void) {
      * been re-probed. */
     s_mb.mbr_dumped    = 0U;
     s_mb.params_dumped = 0U;
+    s_mb.rd_stat  = 0U;
+    s_mb.rd_data  = 0U;
+    s_mb.rd_rxcnt = 0U;
+    s_mb.rd_err   = 0U;
+    s_mb.rd_last  = 0U;
+    s_mb.rd_seq   = 0U;
+    s_mb.rd_done  = 0U;
+    s_mb.rd_active = 0U;
     /* Calibrate the log's millisecond scale before the first request can
      * be timed. See the "Request timestamps" section. This is the only
      * place that costs a known 4 ms, and it is safe there: the Nextor
@@ -640,6 +763,12 @@ void Nextor_Init (void) {
      * RawDisk_Init() is a power-on call and now lives in main(). The
      * invalidation path for a stick that really does go away is
      * Nextor_CacheInvalidate(), which the USB disconnect path calls. */
+
+    /* The boot marker, printed last so that everything it asserts is
+     * already true - including the 4 ms calibration, which is why this is
+     * at the end of the function and not at the top. */
+    printf ("[nx] mapper installed: mailbox READY, probe window CLOSED,"
+            " t=+%lums\r\n", (unsigned long)s_boot_start_ms);
 }
 
 /* LBA argument, little-endian - MB_SEND pushes the driver's (DE) block
@@ -696,20 +825,24 @@ static uint8_t res_publish (uint8_t cap) {
         return 0U;
     }
 
-    /* The status byte is built in a register and stored ONCE.
-     *
-     * The single store is what makes DONE, ERR and RX_AVAIL move together,
-     * which is the property the driver's MB_POLL reads the byte for.
-     * Separate read-modify-writes would put a window in the middle of the
-     * update where STATUS reads as something that means nothing, and would
-     * also race the interrupt handler's own write of the same byte - the
-     * mask above is what stops that, not the store.
+    /* The status byte is built in a register and stored ONCE. DONE, ERR and
+     * RX_AVAIL are all read by the driver out of the same byte, and
+     * separate read-modify-writes would open a window in the middle of the
+     * update where STATUS reads as something that means nothing. The mask
+     * above is what stops the interrupt handler's own write of the same byte
+     * racing this one - not the store, which is already single.
      *
      * DONE and ERR are deliberately the only bits touched. Nothing here
      * clears DONE on the way out, and res_begin() owns RX_AVAIL: the request
      * this answer belongs to may already have been superseded (which is what
      * the cap check above is about), and clearing its status bits on the way
-     * out would destroy the state of a request this pass is not answering. */
+     * out would destroy the state of a request this pass is not answering.
+     *
+     * This is also where the read trace's window opens. Everything the Z80
+     * reads from here on belongs to THIS answer, which is the only
+     * attribution that makes the counters meaningful - the driver reads
+     * STATUS both before and after the publish, and only the latter half
+     * tells us whether it saw the DONE just raised. */
     {
         uint8_t status = (uint8_t)(s_mb.status
                                    & (uint8_t)~NEXTOR_STAT_RX_AVAIL);
@@ -722,6 +855,18 @@ static uint8_t res_publish (uint8_t cap) {
         }
         status |= NEXTOR_STAT_DONE;
 
+        s_mb.rd_stat  = 0U;
+        s_mb.rd_data  = 0U;
+        s_mb.rd_rxcnt = 0U;
+        s_mb.rd_err   = 0U;
+        s_mb.rd_last  = 0U;
+        s_mb.rr_pos   = 0U;
+        s_mb.rr_n     = 0U;
+        s_mb.rd_seq   = s_mb.seq;
+        s_mb.rd_done  = 0U;
+        s_mb.rd_active = 1U;
+        s_mb.rd_t0    = ms_now ();
+
         s_mb.status = status;
     }
     published = 1U;
@@ -733,6 +878,151 @@ static uint8_t res_publish (uint8_t cap) {
 /* How many times one Nextor_Service() pass may rebuild its answer because
  * the driver moved on mid-answer. See the call site. */
 #define NEXTOR_ANSWER_REBUILDS      2U
+
+
+/* Report what the Z80 read back from the last published answer.
+ *
+ * This is the read half of the exchange, and it is the half that decides
+ * whether an answer was ACCEPTED. The driver announces its verdict on the
+ * MSX screen, so from the terminal "the driver rejected the answer" and
+ * "the answer never arrived" are the same observation: one request logged,
+ * then nothing. These counters are what tells them apart:
+ *
+ *   STAT=0                  the Z80 never polled the mailbox again. It is
+ *                           not waiting for anything - it has given up on
+ *                           the driver, or the answer was published for a
+ *                           request it had already abandoned.
+ *   STAT>0, DATA=0          MB_POLL ran and never saw DONE. A timeout, so
+ *                           the exchange died inside the wait.
+ *   STAT>0, DATA==expected  the answer WAS read, and rejected on content.
+ *                           That is a protocol/wrong-value fault, not a
+ *                           timing one, and rd_last says what it saw.
+ *   DATA>expected           MB_RESOLVE drained residue - a leftover from an
+ *                           earlier request, i.e. the mailbox was already
+ *                           desynchronised before this one started.
+ *
+ * Called from two places, which differ in what they can guarantee:
+ *
+ *   read_summary (0) - from log_request, i.e. when the NEXT command byte
+ *       has landed. The previous exchange is definitively over, so no wait
+ *       is needed and none is wanted: back-to-back requests are 0 ms apart,
+ *       so a quiet window here would never expire and this would silently
+ *       never print anything.
+ *   read_summary (1) - from the idle path, where there may be no next
+ *       request at all. Here the wait is the whole point: reporting the
+ *       moment the answer was published would show zero reads for a driver
+ *       that is merely still thinking.
+ *
+ * rd_done makes the two callers idempotent: whichever gets there first
+ * reports it, once.
+ *
+ * One shot per answer (rd_done), so a driver that is still polling produces
+ * one line rather than a heartbeat. */
+static void read_summary (uint8_t wait_quiet) {
+    const uint8_t  seq   = s_mb.rd_seq;
+    const uint16_t stat  = s_mb.rd_stat;
+    const uint16_t data  = s_mb.rd_data;
+    const uint16_t rxcnt = s_mb.rd_rxcnt;
+    const uint16_t err   = s_mb.rd_err;
+    const uint8_t  left  = (uint8_t)(s_mb.res_end != s_mb.res_r);
+    /* READ and WRITE are the only high-frequency commands - a directory
+     * scan issues thousands of them - and for those a line of bookkeeping
+     * per request would both bury the anomalies and lengthen the answer the
+     * Z80 is waiting on. So they report only when something is actually
+     * wrong. The control and boot commands are rare and are exactly where
+     * "read the answer and refused it" has to be visible. */
+    const uint8_t frequent = ((s_mb.raw == NEXTOR_CMD_READ)
+                           || (s_mb.raw == NEXTOR_CMD_WRITE)) ? 1U : 0U;
+
+    if (s_mb.rd_active == 0U || s_mb.rd_done != 0U) {
+        return;
+    }
+    if ((wait_quiet != 0U)
+        && ((uint32_t)(ms_now () - s_mb.rd_t0) < NEXTOR_READ_QUIET_MS)) {
+        return;
+    }
+    /* Silence and a stranded answer are always worth a line. Otherwise the
+     * report is worth one only for a rare command, or when the driver read
+     * the answer without consuming it. */
+    if ((frequent != 0U)
+        && ((stat | data | rxcnt | err) != 0U)
+        && (left == 0U)) {
+        return;
+    }
+    s_mb.rd_done = 1U;
+
+    if ((stat | data | rxcnt | err) == 0U) {
+        printf ("[nx] reads after #%u: NONE - the Z80 never polled, so it"
+                " was not waiting on this answer at all%s\r\n",
+                (unsigned)seq, (left != 0U)
+                    ? "  *** UNREAD ANSWER LEFT IN THE FIFO ***" : "");
+        return;
+    }
+
+    printf ("[nx] reads after #%u: STAT=%u (last 0x%02x) DATA=%u RXCNT=%u"
+            " ERR=%u%s\r\n",
+            (unsigned)seq, (unsigned)stat, (unsigned)s_mb.rd_last,
+            (unsigned)data, (unsigned)rxcnt, (unsigned)err,
+            (left != 0U) ? "  *** ANSWER NEVER FULLY READ ***" : "");
+
+    /* ...followed by the order, which is the part the counters cannot give.
+     *
+     * One register letter per read, so the sequence that matters reads
+     * directly: `SDDDDDDDDDDDDXX` is a driver that polled once, saw DONE,
+     * and drained - the shape every healthy exchange has. What is NOT that
+     * shape is the finding: a leading run of S with no D (polled, never
+     * drained), a D with no preceding S (drained an answer it never waited
+     * for), or a lone D where several were published (popped residue).
+     *
+     * Truncated to NEXTOR_RD_ORDER_N and the loss is stated rather than
+     * hidden: a 512-byte sector read cannot fit, and a silently shortened
+     * order string would read as a complete one. */
+    if (s_mb.rr_n != 0U) {
+        char      ord [NEXTOR_RD_ORDER_N + 1U];
+        uint8_t   i;
+        uint8_t   n   = s_mb.rr_n;
+        uint8_t   k   = 0U;
+        uint8_t   cut = 0U;
+
+        if (n > NEXTOR_RDTRACE_N) {
+            n = (uint8_t)NEXTOR_RDTRACE_N;
+        }
+        /* Where the oldest surviving entry is.
+         *
+         * NOT simply rr_pos. That is only right once the ring has wrapped:
+         * with 8 reads in a 32-slot ring rr_pos is 8, and starting there
+         * would begin at slot 8 - the next slot to be written, holding
+         * whatever the previous exchange left - and run off the end into
+         * stale entries. Unwrapped, the oldest entry is slot 0. Wrapped,
+         * it is slot rr_pos, because that is the one about to be
+         * overwritten. */
+        const uint8_t start = (s_mb.rr_n >= NEXTOR_RDTRACE_N)
+                              ? s_mb.rr_pos : 0U;
+
+        for (i = 0U; i < n; i++) {
+            const uint8_t idx = (uint8_t)((start + i)
+                                          & (NEXTOR_RDTRACE_N - 1U));
+            const uint8_t r   = s_mb.rr_reg [idx];
+
+            if (k >= NEXTOR_RD_ORDER_N) {
+                cut = 1U;
+                break;
+            }
+            ord [k++] = (r == NEXTOR_MBOX_DATA)          ? 'D'
+                      : (r == NEXTOR_MBOX_CMD)           ? 'S'
+                      : (r == NEXTOR_MBOX_RXCNT_LO)      ? 'X'
+                      : (r == NEXTOR_MBOX_RXCNT_HI)      ? 'x'
+                      : (r == NEXTOR_MBOX_ERR)           ? 'E'
+                      : (r == NEXTOR_MBOX_VER)           ? 'V'
+                                                         : '?';
+        }
+        ord [k] = '\0';
+        printf ("[nx] rds #%u n=%u%s: %s%s\r\n",
+                (unsigned)seq, (unsigned)s_mb.rr_n,
+                (s_mb.rr_n >= NEXTOR_RDTRACE_N) ? "(head lost)" : "",
+                ord, cut ? "..." : "");
+    }
+}
 
 /* Record one mailbox write. IRQ context, one caller site, no branches
  * that depend on anything but tr_pos: this runs in the middle of a bus
@@ -781,7 +1071,9 @@ static void trace_dump (void) {
         } else {
             tag = "";
         }
-
+        printf ("[nx]      -%-4s <- 0x%02x%s\r\n",
+                (reg < 6U) ? regname[reg] : "????",
+                (unsigned)s_mb.tr_val[pos], tag);
     }
 }
 
@@ -819,7 +1111,101 @@ static void trace_dump (void) {
  * Windows as exFAT/NTFS comes back 07, and that is a "this will never
  * mount in Nextor" rather than a bug worth chasing.
  * ====================================================================== */
+static void dump_mbr (const uint8_t *sec) {
+    /* Indexed by (type & 0x0F), the low nibble of the MBR type byte - the
+     * high nibble is the "LBA" flag and Nextor looks at the low one. The
+     * 16 entries are exhaustive on purpose: a stick formatted as exFAT
+     * comes back as 07, and recognising that by name is the difference
+     * between "Nextor cannot mount this" and "there is a bug somewhere". */
+    static const char *const type_name[16] = {
+        "empty",      "FAT12",   "FAT16<32M", "FAT16<32M",
+        "FAT16",      "extended", "FAT16",     "NTFS/exFAT",
+        "?",          "FAT32",   "FAT32-LBA", "?",
+        "?",          "?",       "?",         "FAT16-LBA"
+    };
+    const uint16_t sig = (uint16_t)(sec[510] | ((uint16_t)sec[511] << 8));
+    uint8_t       part;
+    uint8_t       usable = 0U;
 
+    printf ("[nx] MBR lba=0: %02x %02x %02x %02x  sig=%04x%s\r\n",
+            (unsigned)sec[0], (unsigned)sec[1], (unsigned)sec[2],
+            (unsigned)sec[3], (unsigned)sig,
+            (sig == 0xAA55U) ? "" : "  *** NOT A VALID MBR ***");
+
+    for (part = 0U; part < 4U; part++) {
+        const uint8_t *e   = &sec[446U + (uint16_t)(part * 16U)];
+        const uint8_t  typ = e[4];
+        const uint32_t lba = (uint32_t)e[8] | ((uint32_t)e[9] << 8)
+                           | ((uint32_t)e[10] << 16) | ((uint32_t)e[11] << 24);
+        const uint32_t cnt = (uint32_t)e[12] | ((uint32_t)e[13] << 8)
+                           | ((uint32_t)e[14] << 16) | ((uint32_t)e[15] << 24);
+        const uint8_t  boot_flag = (uint8_t)(e[0] & 0x80U);
+
+        if (typ != 0U) {
+            usable++;
+        }
+        printf ("[nx]   part%u type=%02x %-10s boot=%s lba=%-10lu sectors=%-10lu",
+                (unsigned)part, (unsigned)typ,
+                type_name[typ & 0x0FU],
+                boot_flag ? "yes" : "no ",
+                (unsigned long)lba, (unsigned long)cnt);
+        if (typ == 0U) {
+            printf ("  (empty)\r\n");
+        } else if ((typ == 0x01U) || (typ == 0x04U) || (typ == 0x06U)
+                   || (typ == 0x0EU)) {
+            /* The four types partit.mac's IS_SUITABLE_PART_TYPE accepts.
+             * Counted separately because a stick with only these, but
+             * with the active flag clear, is the other way the kernel
+             * finds nothing to mount. */
+            printf ("  *** bootable, but %s ***\r\n",
+                    boot_flag ? "mountable" : "NOT ACTIVE");
+        } else if ((typ == 0x05U) || (typ == 0x0FU)) {
+            printf ("  (extended - needs the inner scan)\r\n");
+        } else {
+            printf ("  *** not mountable by Nextor ***\r\n");
+        }
+    }
+
+    if (sig != 0xAA55U) {
+        printf ("[nx] MBR lba=0: sector 0 has no 55AA signature. Nextor cannot"
+                " automap this stick as-is - it needs a real MBR with a"
+                " bootable FAT12/16 partition (the B key in the terminal"
+                " menu writes one).\r\n");
+    } else if (usable == 0U) {
+        printf ("[nx] MBR lba=0: signature present but all four partition"
+                " entries are empty.\r\n");
+    }
+}
+
+/* ========================================================================
+ * Request logging
+ *
+ * TWO LINES PER REQUEST, on purpose.
+ *
+ * The previous version printed one line, after the command had been
+ * answered. That is useless for exactly the failure it was written to
+ * diagnose: if answering the request never returns - a hang inside the
+ * sector transfer, a wedged USB host controller, a bus fault in the
+ * firmware - the single line is never printed at all, and the log ends
+ * with nothing after the last command that DID work. The evidence that
+ * matters most is the evidence that is missing.
+ *
+ * So the request line goes out first, before the handler runs:
+ *
+ *   [nx] #7 READ args=4 lba=0x00000000  +0ms      <- about to answer this
+ *   [nx] #7    -> res=512  +4ms                  <- answered, this long
+ *
+ * A request line with no result line is then an unambiguous statement
+ * that the firmware stopped inside that command, and the LBA on it says
+ * which sector it stopped on.
+ *
+ * Both lines come from one snapshot taken with interrupts disabled, at
+ * the top of the handler, BEFORE res_publish() - res_publish sets DONE
+ * and the Z80 can return the instant DONE is visible and start the next
+ * burst, whose first byte runs Nextor_WriteByte() and overwrites
+ * args[]. Reading a field even a few instructions after the publish
+ * describes the NEXT request.
+ * ====================================================================== */
 typedef struct {
     uint8_t  cmd;                       /* s_mb.cmd, normalised           */
     uint8_t  raw;                       /* s_mb.raw, the byte as written   */
@@ -832,8 +1218,113 @@ typedef struct {
     uint8_t  media;                     /* s_mb.res[0], the STATUS byte */
 } log_snap;
 
+/* The request half: printed before the command is answered. */
+static void log_request (const log_snap *s) {
+    /* The previous answer's read side is finished by now - the driver has
+     * moved on and sent a new command byte - so this is the second of the
+     * two places the read summary can be reported from. The idle path is
+     * the better-timed of them (it also catches a driver that went quiet
+     * for good and never came back), but the idle path only runs while the
+     * mailbox is idle, and a driver in the middle of a bulk read never
+     * leaves it idle long enough. rd_done makes the two callers
+     * idempotent: whichever arrives first reports it, once.
+     *
+     /* Deliberately BEFORE the dropped-request check below: that check is
+     * about writes and this is about reads, so neither line can mask the
+     * other, and the read verdict is the one that explains a driver which
+     * saw every answer and still went somewhere else. */
+    read_summary (0U);
+
+    (void)s_mark_name; /* marker names are disabled during timing tests */
+    const uint8_t  cmd  = s->cmd;
+    const uint8_t  raw  = s->raw;
+    const uint8_t  seq  = s->seq;
+    const uint16_t nargs = s->nargs;
+    const uint32_t lba  = s->lba;
+
+    if (is_mark (raw)) {
+        /* Markers are diagnostic traffic, not requests. They must not
+         * contribute to request-drop accounting. The driver's probe
+         * markers (index 18 and up) ARE printed: they carry the values
+         * the Z80 actually received, which is the only way to compare
+         * the drained bytes against what raw_disk.c read. The old
+         * fire-and-forget storm (indices 0-17) stays silent - those
+         * call sites are compiled to no-ops in the driver anyway. */
+        {
+            const uint8_t idx = (uint8_t)(raw - NEXTOR_CMD_MARK_FIRST);
+            if (idx >= 18U) {
+                printf ("[nx]   . %-22s = %3u (0x%02x)\r\n",
+                        (idx < NEXTOR_MARK_DEFINED)
+                            ? s_mark_name[idx] : "(unnamed)",
+                        (unsigned)s->rawarg, (unsigned)s->rawarg);
+            } else if (idx == 1U) {
+                printf ("[nx]   . RW:sectors requested = %3u (0x%02x)\r\n",
+                        (unsigned)s->rawarg, (unsigned)s->rawarg);
+            }
+        }
+        s_mb.last_seq = seq;
+        return;
+    }
+
+    /* One request, one pair of lines. If seq moved by more than one, a
+     * real request was overwritten before Nextor_Service reached it. */
+    if ((uint8_t)(seq - s_mb.last_seq) > 1U) {
+        printf ("[nx] --- %u request(s) dropped, service fell behind ---\r\n",
+                (unsigned)((uint8_t)(seq - s_mb.last_seq) - 1U));
+    }
+    s_mb.last_seq = seq;
+
+    if (cmd >= NEXTOR_CMD_MAX) {
+        printf ("[nx] #%u <invalid cmd 0x%02x> last Z80 writes:\r\n",
+                (unsigned)seq, (unsigned)raw);
+        /* Deliberately NOT snapshotted: this is the one case where a
+         * burst is still arriving (the sink is parked, so nothing stops
+         * the remaining bytes), and the point of the dump is to show
+         * what the Z80 wrote. Newer writes landing mid-dump are the
+         * interesting ones, not a defect. */
+        trace_dump ();
+        return;
+    }
+
+    printf ("[nx] #%u %s args=%u", (unsigned)seq, s_cmd_name[cmd],
+            (unsigned)nargs);
+    if ((cmd == NEXTOR_CMD_READ) || (cmd == NEXTOR_CMD_WRITE)) {
+        printf (" lba=0x%08x", (unsigned)lba);
+    }
+    /* Gap since the previous request. The first line reads how long the
+     * Z80 took to get from the driver's banner to its first mailbox
+     * request - the boot stall plus the screen print, so it doubles as a
+     * check on the stall. */
+    printf ("  +%ums\r\n", (unsigned)ms_since_prev());
+}
 
 /* The result half: printed after the answer is complete. */
+static void log_result (const log_snap *s) {
+    if (is_mark (s->raw)) {
+        return;                 /* a breadcrumb has no answer to print */
+    }
+    if (s->cmd >= NEXTOR_CMD_MAX) {
+        return;                 /* trace_dump already said everything */
+    }
+
+    printf ("[nx] #%u    ->", (unsigned)s->seq);
+    if (s->err != NEXTOR_ERR_NONE) {
+        printf (" ERR %u", (unsigned)s->err);
+    }
+    if (s->nres > 0U) {
+        printf (" res=%u", (unsigned)s->nres);
+    }
+    if (s->cmd == NEXTOR_CMD_STATUS) {
+        /* The media byte is the whole point of this command, and a bare
+         * "res=1" in a wall of lines is not readable a hundred lines
+         * later. */
+        printf (" media=%u%s", (unsigned)s->media,
+                (s->media == 2U) ? " (changed)" : "");
+    }
+    /* Gap since the request line: the firmware's own time for this
+     * command, which is what a USB-side problem shows up in. */
+    printf ("  +%ums\r\n", (unsigned)ms_since_prev());
+}
 
 /* Build the 12-byte Nextor device parameter block.
  *
@@ -932,9 +1423,15 @@ next_request:
     /* Nothing to answer, so use the time to get the medium ready. The
      * only slow work outside a command is enumeration + READ CAPACITY +
      * INQUIRY in RawDisk_Probe (driven from raw_probe); READs and
-     * WRITEs go straight to SCSI on the command path. */
+     * WRITEs go straight to SCSI on the command path.
+     *
+     * read_summary() lives here because this is the only place that runs
+     * once the exchange is over. raw_probe() is called first so it cannot
+     * report a stalled medium as a dead mailbox - a probe does not touch
+     * the mailbox registers, so it would only delay the answer. */
     if (s_mb.armed == 0U) {
         (void)raw_probe ();
+        read_summary (1U);
         return;
     }
 
@@ -1001,6 +1498,10 @@ next_request:
 
     res_begin ();
 
+    /* Request line first, before anything that can take time or fail to
+     * return. See the logging section for why. */
+    log_request (&snap);
+
     switch (cmd) {
     case NEXTOR_CMD_HANDSHAKE: {
         /* "RNX3" + firmware version. Pure firmware state - already a
@@ -1038,7 +1539,29 @@ next_request:
          * bytes that were actually handed over. */
         if (s_mb.params_dumped == 0U) {
             s_mb.params_dumped = 1U;
-            
+            printf ("[nx] params: %02x %02x %02x %02x %02x %02x "
+                    "%02x %02x %02x %02x %02x %02x\r\n",
+                    (unsigned)s_mb.res[0],  (unsigned)s_mb.res[1],
+                    (unsigned)s_mb.res[2],  (unsigned)s_mb.res[3],
+                    (unsigned)s_mb.res[4],  (unsigned)s_mb.res[5],
+                    (unsigned)s_mb.res[6],  (unsigned)s_mb.res[7],
+                    (unsigned)s_mb.res[8],  (unsigned)s_mb.res[9],
+                    (unsigned)s_mb.res[10], (unsigned)s_mb.res[11]);
+            printf ("[nx]   type=%u secsize=%u sectors=%lu flags=%02x"
+                    "%s%s%s  chs=%u/%u/%u\r\n",
+                    (unsigned)s_mb.res[0],
+                    (unsigned)(s_mb.res[1] | ((uint16_t)s_mb.res[2] << 8)),
+                    (unsigned long)((uint32_t)s_mb.res[3]
+                                  | ((uint32_t)s_mb.res[4] << 8)
+                                  | ((uint32_t)s_mb.res[5] << 16)
+                                  | ((uint32_t)s_mb.res[6] << 24)),
+                    (unsigned)s_mb.res[7],
+                    (s_mb.res[7] & 0x01U) ? " removable" : "",
+                    (s_mb.res[7] & 0x04U) ? " FLOPPY(!)" : "",
+                    (s_mb.res[7] & 0x08U) ? " no-automap" : "",
+                    (unsigned)(s_mb.res[8] | ((uint16_t)s_mb.res[9] << 8)),
+                    (unsigned)s_mb.res[10],
+                    (unsigned)s_mb.res[11]);
         }
         break;
 
@@ -1101,12 +1624,14 @@ next_request:
          * it is a number. */
         if (RawDisk_IsPresent () == 0U) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
-
+            printf ("[nx]   no medium, LBA rejected\r\n");
             break;
         }
         if (RawDisk_ReadSectors (snap_lba, 1U, s_mb.res) == 0U) {
             s_mb.err = NEXTOR_ERR_IO;
-
+            printf ("[nx]   read failed: %s (present=%u sectors=%lu)\r\n",
+                    RawDisk_LastFailure (), (unsigned)RawDisk_IsPresent (),
+                    (unsigned long)RawDisk_SectorCount ());
             break;
         }
         /* Keep the USB/backend result separate from the later mailbox
@@ -1120,11 +1645,25 @@ next_request:
          * compare them against. */
         {
             uint16_t qi;
-
+            printf ("[nx]   raw lba=%lu:", (unsigned long)snap_lba);
+            for (qi = 0U; qi < 4U; qi++) {
+                printf (" %02x", (unsigned)s_mb.res[qi]);
+            }
+            printf ("  tail=%02x %02x\r\n",
+                    (unsigned)s_mb.res[510], (unsigned)s_mb.res[511]);
         }
         if ((snap_lba == 2048U) && (s_mb.boot_dumped == 0U)) {
             s_mb.boot_dumped = 1U;
-
+            printf ("[nx]   raw lba2048: %02x %02x %02x %02x "
+                    "bps=%02x%02x spc=%02x fats=%02x root=%02x%02x "
+                    "spf=%02x%02x sig=%02x%02x\r\n",
+                    (unsigned)s_mb.res[0], (unsigned)s_mb.res[1],
+                    (unsigned)s_mb.res[2], (unsigned)s_mb.res[3],
+                    (unsigned)s_mb.res[11], (unsigned)s_mb.res[12],
+                    (unsigned)s_mb.res[13], (unsigned)s_mb.res[16],
+                    (unsigned)s_mb.res[17], (unsigned)s_mb.res[18],
+                    (unsigned)s_mb.res[22], (unsigned)s_mb.res[23],
+                    (unsigned)s_mb.res[510], (unsigned)s_mb.res[511]);
         }
         /* First successful read of sector 0 is the MBR, and the MBR is
          * the one sector whose contents decide whether Nextor can map
@@ -1134,7 +1673,7 @@ next_request:
          * successful reads also shows WHY there is no drive. */
         if ((snap_lba == 0U) && (s_mb.mbr_dumped == 0U)) {
             s_mb.mbr_dumped = 1U;
-
+            dump_mbr (s_mb.res);
         }
         s_mb.res_end = s_mb.res + NEXTOR_SECTOR_SIZE;
         break;
@@ -1159,12 +1698,12 @@ next_request:
          * that is present and merely had a write failure. */
         if (RawDisk_IsPresent () == 0U) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
-
+            printf ("[nx]   no medium, write rejected\r\n");
             break;
         }
         if (RawDisk_WriteSectors (snap_lba, 1U, &s_mb.args[4]) == 0U) {
             s_mb.err = NEXTOR_ERR_IO;
-
+            printf ("[nx]   write failed: %s\r\n", RawDisk_LastFailure ());
             break;
         }
         break;
@@ -1239,15 +1778,17 @@ next_request:
      * immediately and correctly. Only if the rebuilds run out is the answer
      * deferred - and even then the request stays armed, so the next
      * main-loop pass picks it up. Nothing is ever dropped. */
-    if (res_publish (snap_cap) != 0U) {
-        return;
+    if (res_publish (snap_cap) == 0U) {
+        printf ("[nx] #%u STALE cap=%u/%u - driver moved on, rebuilding%s\r\n",
+                (unsigned)snap_seq, (unsigned)snap_cap, (unsigned)s_mb.cap,
+                (rebuild == 0U) ? " (DEFERRED, no rebuilds left)" : "");
+        if (rebuild == 0U) {
+            return;         /* deferred, not lost: s_mb.armed is still set */
+        }
+        rebuild--;
+        goto next_request;
     }
-
-    if (rebuild == 0U) {
-        return;             /* deferred, not lost: s_mb.armed is still set */
-    }
-    rebuild--;
-    goto next_request;
+    log_result (&snap);
 }
 
 /* ========================================================================
@@ -1287,9 +1828,31 @@ void Nextor_WriteByte (uint16_t address, uint8_t value) {
          *
          * DONE must also fall here, not in Service: MB_POLL returns the
          * instant DONE is visible, so clearing it late would let the driver
-         * read the PREVIOUS answer. */
+         * read the PREVIOUS answer.
+         *
+         * `cap` moves on every command byte and is the staleness test in
+         * res_publish(). It is here, at the instant of capture, and not at
+         * arm time, so it also covers the whole of a 512-byte argument burst
+         * during which armed is still 0. */
         s_mb.status &= (uint8_t)~(NEXTOR_STAT_DONE | NEXTOR_STAT_ERR);
         s_mb.cap++;
+
+        /* First-contact marker, print once per mapper install. The request
+         * log only starts at [nx] #0, which requires a completed burst; if
+         * the Z80 writes command bytes but no request line ever follows,
+         * the arguments are not being captured and the fault is in the
+         * argument path, not in the answers. This line is the only way to
+         * see that, and it is here because this is the only place that
+         * knows a command byte landed at all.
+         *
+         * Once per install, not per command: this is IRQ context on the
+         * hot path, and a per-command print would be both a timing hazard
+         * and unreadable. `cap` is 1 exactly on the first one. */
+        if (s_mb.cap == 1U) {
+            printf ("[nx] first CMD byte from the Z80: 0x%02x%s\r\n",
+                    (unsigned)value,
+                    (cmd < NEXTOR_CMD_MAX) ? "" : "  *** NOT A VALID COMMAND ***");
+        }
 
         if (cmd >= NEXTOR_CMD_MAX) {
             /* Park the sink at the empty range. The burst that follows
@@ -1362,13 +1925,23 @@ void Nextor_WriteByte (uint16_t address, uint8_t value) {
 
 uint8_t Nextor_ReadByte (uint16_t address) {
     const uint8_t reg = NEXTOR_MBOX_REG (address);
+    uint8_t v;
 
     switch (reg) {
     case NEXTOR_MBOX_CMD:
         /* Same index as NEXTOR_MBOX_STAT - the protocol is
          * write=command / read=status on 0x7FF0. Returned precomputed
-         * so MB_POLL's spin is a single load. */
-        return s_mb.status;
+         * so MB_POLL's spin is a single load.
+         *
+         * This is by far the most-read register: MB_POLL spins on it for
+         * the whole answer, tens of thousands of times. The stores that
+         * record it are the entire cost of the read trace and are worth
+         * it - seeing the STATUS values in order, next to the DATA pops
+         * they gate, is what identifies a driver polling a status that
+         * never showed DONE. */
+        s_mb.rd_stat++;
+        v = s_mb.status;
+        break;
 
     case NEXTOR_MBOX_DATA: {
         /* Result pop. The driver pops a known count, so this only has
@@ -1377,7 +1950,7 @@ uint8_t Nextor_ReadByte (uint16_t address) {
          * stable wrong value and bails instead of spinning forever. */
         uint8_t *p   = s_mb.res_r;
         uint8_t *end = s_mb.res_end;
-        uint8_t v;
+        s_mb.rd_data++;
         if (p < end) {
             v = *p;
         } else {
@@ -1391,26 +1964,56 @@ uint8_t Nextor_ReadByte (uint16_t address) {
         } else {
             v = 0xFFU;
         }
-        return v;
+        break;
     }
 
     case NEXTOR_MBOX_RXCNT_LO:
         /* Informational only (driver.asm never reads it) but cheap to
          * keep honest. */
-        return (uint8_t)(s_mb.res_end - s_mb.res_r);
+        s_mb.rd_rxcnt++;
+        v = (uint8_t)(s_mb.res_end - s_mb.res_r);
+        break;
 
     case NEXTOR_MBOX_RXCNT_HI:
-        return (uint8_t)((s_mb.res_end - s_mb.res_r) >> 8);
+        s_mb.rd_rxcnt++;
+        v = (uint8_t)((s_mb.res_end - s_mb.res_r) >> 8);
+        break;
 
     case NEXTOR_MBOX_ERR:
-        return s_mb.err;
+        s_mb.rd_err++;
+        v = s_mb.err;
+        break;
 
     case NEXTOR_MBOX_VER:
-        return NEXTOR_VERSION;
+        v = NEXTOR_VERSION;
+        break;
 
     default:
         /* Slots 6 and 7 (0x7FF8, 0x7FFC) are decoded by the handler but
          * unused by the protocol. */
-        return 0xFFU;
+        v = 0xFFU;
+        break;
     }
+
+    /* Ordered record, after the value is final - for DATA that means after
+     * the FIFO has been popped, so the trace shows what was handed over
+     * rather than what was in the slot beforehand.
+     *
+     * rr_pos is masked rather than taken modulo: the ring is a power of two
+     * and this is the hottest path in the module (MB_POLL spins on STATUS
+     * here tens of thousands of times per slow answer), so it is worth
+     * saving the divide. rr_n saturating is what tells the dump that the
+     * head of a long exchange was lost - it must never wrap, or the dump
+     * would report a truncated exchange as a complete one. */
+    {
+        const uint8_t pos = s_mb.rr_pos;
+
+        s_mb.rr_reg [pos] = reg;
+        s_mb.rr_val [pos] = v;
+        s_mb.rr_pos       = (uint8_t)((pos + 1U) & (NEXTOR_RDTRACE_N - 1U));
+        if (s_mb.rr_n < NEXTOR_RDTRACE_N) {
+            s_mb.rr_n++;
+        }
+    }
+    return v;
 }
