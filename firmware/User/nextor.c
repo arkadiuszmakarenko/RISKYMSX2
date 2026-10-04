@@ -717,9 +717,7 @@ static void trace_dump (void) {
         } else {
             tag = "";
         }
-        printf ("[nx]      -%-4s <- 0x%02x%s\r\n",
-                (reg < 6U) ? regname[reg] : "????",
-                (unsigned)s_mb.tr_val[pos], tag);
+
     }
 }
 
@@ -757,101 +755,7 @@ static void trace_dump (void) {
  * Windows as exFAT/NTFS comes back 07, and that is a "this will never
  * mount in Nextor" rather than a bug worth chasing.
  * ====================================================================== */
-static void dump_mbr (const uint8_t *sec) {
-    /* Indexed by (type & 0x0F), the low nibble of the MBR type byte - the
-     * high nibble is the "LBA" flag and Nextor looks at the low one. The
-     * 16 entries are exhaustive on purpose: a stick formatted as exFAT
-     * comes back as 07, and recognising that by name is the difference
-     * between "Nextor cannot mount this" and "there is a bug somewhere". */
-    static const char *const type_name[16] = {
-        "empty",      "FAT12",   "FAT16<32M", "FAT16<32M",
-        "FAT16",      "extended", "FAT16",     "NTFS/exFAT",
-        "?",          "FAT32",   "FAT32-LBA", "?",
-        "?",          "?",       "?",         "FAT16-LBA"
-    };
-    const uint16_t sig = (uint16_t)(sec[510] | ((uint16_t)sec[511] << 8));
-    uint8_t       part;
-    uint8_t       usable = 0U;
 
-    printf ("[nx] MBR lba=0: %02x %02x %02x %02x  sig=%04x%s\r\n",
-            (unsigned)sec[0], (unsigned)sec[1], (unsigned)sec[2],
-            (unsigned)sec[3], (unsigned)sig,
-            (sig == 0xAA55U) ? "" : "  *** NOT A VALID MBR ***");
-
-    for (part = 0U; part < 4U; part++) {
-        const uint8_t *e   = &sec[446U + (uint16_t)(part * 16U)];
-        const uint8_t  typ = e[4];
-        const uint32_t lba = (uint32_t)e[8] | ((uint32_t)e[9] << 8)
-                           | ((uint32_t)e[10] << 16) | ((uint32_t)e[11] << 24);
-        const uint32_t cnt = (uint32_t)e[12] | ((uint32_t)e[13] << 8)
-                           | ((uint32_t)e[14] << 16) | ((uint32_t)e[15] << 24);
-        const uint8_t  boot_flag = (uint8_t)(e[0] & 0x80U);
-
-        if (typ != 0U) {
-            usable++;
-        }
-        printf ("[nx]   part%u type=%02x %-10s boot=%s lba=%-10lu sectors=%-10lu",
-                (unsigned)part, (unsigned)typ,
-                type_name[typ & 0x0FU],
-                boot_flag ? "yes" : "no ",
-                (unsigned long)lba, (unsigned long)cnt);
-        if (typ == 0U) {
-            printf ("  (empty)\r\n");
-        } else if ((typ == 0x01U) || (typ == 0x04U) || (typ == 0x06U)
-                   || (typ == 0x0EU)) {
-            /* The four types partit.mac's IS_SUITABLE_PART_TYPE accepts.
-             * Counted separately because a stick with only these, but
-             * with the active flag clear, is the other way the kernel
-             * finds nothing to mount. */
-            printf ("  *** bootable, but %s ***\r\n",
-                    boot_flag ? "mountable" : "NOT ACTIVE");
-        } else if ((typ == 0x05U) || (typ == 0x0FU)) {
-            printf ("  (extended - needs the inner scan)\r\n");
-        } else {
-            printf ("  *** not mountable by Nextor ***\r\n");
-        }
-    }
-
-    if (sig != 0xAA55U) {
-        printf ("[nx] MBR lba=0: sector 0 has no 55AA signature. Nextor cannot"
-                " automap this stick as-is - it needs a real MBR with a"
-                " bootable FAT12/16 partition (the B key in the terminal"
-                " menu writes one).\r\n");
-    } else if (usable == 0U) {
-        printf ("[nx] MBR lba=0: signature present but all four partition"
-                " entries are empty.\r\n");
-    }
-}
-
-/* ========================================================================
- * Request logging
- *
- * TWO LINES PER REQUEST, on purpose.
- *
- * The previous version printed one line, after the command had been
- * answered. That is useless for exactly the failure it was written to
- * diagnose: if answering the request never returns - a hang inside the
- * sector transfer, a wedged USB host controller, a bus fault in the
- * firmware - the single line is never printed at all, and the log ends
- * with nothing after the last command that DID work. The evidence that
- * matters most is the evidence that is missing.
- *
- * So the request line goes out first, before the handler runs:
- *
- *   [nx] #7 READ args=4 lba=0x00000000  +0ms      <- about to answer this
- *   [nx] #7    -> res=512  +4ms                  <- answered, this long
- *
- * A request line with no result line is then an unambiguous statement
- * that the firmware stopped inside that command, and the LBA on it says
- * which sector it stopped on.
- *
- * Both lines come from one snapshot taken with interrupts disabled, at
- * the top of the handler, BEFORE res_publish() - res_publish sets DONE
- * and the Z80 can return the instant DONE is visible and start the next
- * burst, whose first byte runs Nextor_WriteByte() and overwrites
- * args[]. Reading a field even a few instructions after the publish
- * describes the NEXT request.
- * ====================================================================== */
 typedef struct {
     uint8_t  cmd;                       /* s_mb.cmd, normalised           */
     uint8_t  raw;                       /* s_mb.raw, the byte as written   */
@@ -864,98 +768,8 @@ typedef struct {
     uint8_t  media;                     /* s_mb.res[0], the STATUS byte */
 } log_snap;
 
-/* The request half: printed before the command is answered. */
-static void log_request (const log_snap *s) {
-    (void)s_mark_name; /* marker names are disabled during timing tests */
-    const uint8_t  cmd  = s->cmd;
-    const uint8_t  raw  = s->raw;
-    const uint8_t  seq  = s->seq;
-    const uint16_t nargs = s->nargs;
-    const uint32_t lba  = s->lba;
-
-    if (is_mark (raw)) {
-        /* Markers are diagnostic traffic, not requests. They must not
-         * contribute to request-drop accounting. The driver's probe
-         * markers (index 18 and up) ARE printed: they carry the values
-         * the Z80 actually received, which is the only way to compare
-         * the drained bytes against what raw_disk.c read. The old
-         * fire-and-forget storm (indices 0-17) stays silent - those
-         * call sites are compiled to no-ops in the driver anyway. */
-        {
-            const uint8_t idx = (uint8_t)(raw - NEXTOR_CMD_MARK_FIRST);
-            if (idx >= 18U) {
-                printf ("[nx]   . %-22s = %3u (0x%02x)\r\n",
-                        (idx < NEXTOR_MARK_DEFINED)
-                            ? s_mark_name[idx] : "(unnamed)",
-                        (unsigned)s->rawarg, (unsigned)s->rawarg);
-            } else if (idx == 1U) {
-                printf ("[nx]   . RW:sectors requested = %3u (0x%02x)\r\n",
-                        (unsigned)s->rawarg, (unsigned)s->rawarg);
-            }
-        }
-        s_mb.last_seq = seq;
-        return;
-    }
-
-    /* One request, one pair of lines. If seq moved by more than one, a
-     * real request was overwritten before Nextor_Service reached it. */
-    if ((uint8_t)(seq - s_mb.last_seq) > 1U) {
-        printf ("[nx] --- %u request(s) dropped, service fell behind ---\r\n",
-                (unsigned)((uint8_t)(seq - s_mb.last_seq) - 1U));
-    }
-    s_mb.last_seq = seq;
-
-    if (cmd >= NEXTOR_CMD_MAX) {
-        printf ("[nx] #%u <invalid cmd 0x%02x> last Z80 writes:\r\n",
-                (unsigned)seq, (unsigned)raw);
-        /* Deliberately NOT snapshotted: this is the one case where a
-         * burst is still arriving (the sink is parked, so nothing stops
-         * the remaining bytes), and the point of the dump is to show
-         * what the Z80 wrote. Newer writes landing mid-dump are the
-         * interesting ones, not a defect. */
-        trace_dump ();
-        return;
-    }
-
-    printf ("[nx] #%u %s args=%u", (unsigned)seq, s_cmd_name[cmd],
-            (unsigned)nargs);
-    if ((cmd == NEXTOR_CMD_READ) || (cmd == NEXTOR_CMD_WRITE)) {
-        printf (" lba=0x%08x", (unsigned)lba);
-    }
-    /* Gap since the previous request. The first line reads how long the
-     * Z80 took to get from the driver's banner to its first mailbox
-     * request - the boot stall plus the screen print, so it doubles as a
-     * check on the stall. */
-    printf ("  +%ums\r\n", (unsigned)ms_since_prev());
-}
 
 /* The result half: printed after the answer is complete. */
-static void log_result (const log_snap *s) {
-    if (is_mark (s->raw)) {
-        return;                 /* a breadcrumb has no answer to print */
-    }
-    if (s->cmd >= NEXTOR_CMD_MAX) {
-        return;                 /* trace_dump already said everything */
-    }
-
-    printf ("[nx] #%u    ->", (unsigned)s->seq);
-    if (s->err != NEXTOR_ERR_NONE) {
-        printf (" ERR %u", (unsigned)s->err);
-    }
-    if (s->nres > 0U) {
-        printf (" res=%u", (unsigned)s->nres);
-    }
-    if (s->cmd == NEXTOR_CMD_STATUS) {
-        /* The media byte is the whole point of this command, and a bare
-         * "res=1" in a wall of lines is not readable a hundred lines
-         * later. */
-        printf (" media=%u%s", (unsigned)s->media,
-                (s->media == 2U) ? " (changed)" : "");
-    }
-    /* Gap since the request line: the firmware's own time for this
-     * command, which is what a USB-side problem shows up in. */
-    printf ("  +%ums\r\n", (unsigned)ms_since_prev());
-}
 
 /* Build the 12-byte Nextor device parameter block.
  *
@@ -1112,10 +926,6 @@ void Nextor_Service (void) {
 
     res_begin ();
 
-    /* Request line first, before anything that can take time or fail to
-     * return. See the logging section for why. */
-    log_request (&snap);
-
     switch (cmd) {
     case NEXTOR_CMD_HANDSHAKE: {
         /* "RNX3" + firmware version. Pure firmware state - already a
@@ -1153,29 +963,7 @@ void Nextor_Service (void) {
          * bytes that were actually handed over. */
         if (s_mb.params_dumped == 0U) {
             s_mb.params_dumped = 1U;
-            printf ("[nx] params: %02x %02x %02x %02x %02x %02x "
-                    "%02x %02x %02x %02x %02x %02x\r\n",
-                    (unsigned)s_mb.res[0],  (unsigned)s_mb.res[1],
-                    (unsigned)s_mb.res[2],  (unsigned)s_mb.res[3],
-                    (unsigned)s_mb.res[4],  (unsigned)s_mb.res[5],
-                    (unsigned)s_mb.res[6],  (unsigned)s_mb.res[7],
-                    (unsigned)s_mb.res[8],  (unsigned)s_mb.res[9],
-                    (unsigned)s_mb.res[10], (unsigned)s_mb.res[11]);
-            printf ("[nx]   type=%u secsize=%u sectors=%lu flags=%02x"
-                    "%s%s%s  chs=%u/%u/%u\r\n",
-                    (unsigned)s_mb.res[0],
-                    (unsigned)(s_mb.res[1] | ((uint16_t)s_mb.res[2] << 8)),
-                    (unsigned long)((uint32_t)s_mb.res[3]
-                                  | ((uint32_t)s_mb.res[4] << 8)
-                                  | ((uint32_t)s_mb.res[5] << 16)
-                                  | ((uint32_t)s_mb.res[6] << 24)),
-                    (unsigned)s_mb.res[7],
-                    (s_mb.res[7] & 0x01U) ? " removable" : "",
-                    (s_mb.res[7] & 0x04U) ? " FLOPPY(!)" : "",
-                    (s_mb.res[7] & 0x08U) ? " no-automap" : "",
-                    (unsigned)(s_mb.res[8] | ((uint16_t)s_mb.res[9] << 8)),
-                    (unsigned)s_mb.res[10],
-                    (unsigned)s_mb.res[11]);
+            
         }
         break;
 
@@ -1238,14 +1026,12 @@ void Nextor_Service (void) {
          * it is a number. */
         if (RawDisk_IsPresent () == 0U) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
-            printf ("[nx]   no medium, LBA rejected\r\n");
+
             break;
         }
         if (RawDisk_ReadSectors (snap_lba, 1U, s_mb.res) == 0U) {
             s_mb.err = NEXTOR_ERR_IO;
-            printf ("[nx]   read failed: %s (present=%u sectors=%lu)\r\n",
-                    RawDisk_LastFailure (), (unsigned)RawDisk_IsPresent (),
-                    (unsigned long)RawDisk_SectorCount ());
+
             break;
         }
         /* Keep the USB/backend result separate from the later mailbox
@@ -1259,25 +1045,11 @@ void Nextor_Service (void) {
          * compare them against. */
         {
             uint16_t qi;
-            printf ("[nx]   raw lba=%lu:", (unsigned long)snap_lba);
-            for (qi = 0U; qi < 4U; qi++) {
-                printf (" %02x", (unsigned)s_mb.res[qi]);
-            }
-            printf ("  tail=%02x %02x\r\n",
-                    (unsigned)s_mb.res[510], (unsigned)s_mb.res[511]);
+
         }
         if ((snap_lba == 2048U) && (s_mb.boot_dumped == 0U)) {
             s_mb.boot_dumped = 1U;
-            printf ("[nx]   raw lba2048: %02x %02x %02x %02x "
-                    "bps=%02x%02x spc=%02x fats=%02x root=%02x%02x "
-                    "spf=%02x%02x sig=%02x%02x\r\n",
-                    (unsigned)s_mb.res[0], (unsigned)s_mb.res[1],
-                    (unsigned)s_mb.res[2], (unsigned)s_mb.res[3],
-                    (unsigned)s_mb.res[11], (unsigned)s_mb.res[12],
-                    (unsigned)s_mb.res[13], (unsigned)s_mb.res[16],
-                    (unsigned)s_mb.res[17], (unsigned)s_mb.res[18],
-                    (unsigned)s_mb.res[22], (unsigned)s_mb.res[23],
-                    (unsigned)s_mb.res[510], (unsigned)s_mb.res[511]);
+
         }
         /* First successful read of sector 0 is the MBR, and the MBR is
          * the one sector whose contents decide whether Nextor can map
@@ -1287,7 +1059,7 @@ void Nextor_Service (void) {
          * successful reads also shows WHY there is no drive. */
         if ((snap_lba == 0U) && (s_mb.mbr_dumped == 0U)) {
             s_mb.mbr_dumped = 1U;
-            dump_mbr (s_mb.res);
+
         }
         s_mb.res_end = s_mb.res + NEXTOR_SECTOR_SIZE;
         break;
@@ -1312,12 +1084,12 @@ void Nextor_Service (void) {
          * that is present and merely had a write failure. */
         if (RawDisk_IsPresent () == 0U) {
             s_mb.err = NEXTOR_ERR_NO_MEDIA;
-            printf ("[nx]   no medium, write rejected\r\n");
+
             break;
         }
         if (RawDisk_WriteSectors (snap_lba, 1U, &s_mb.args[4]) == 0U) {
             s_mb.err = NEXTOR_ERR_IO;
-            printf ("[nx]   write failed: %s\r\n", RawDisk_LastFailure ());
+
             break;
         }
         break;
@@ -1359,7 +1131,7 @@ void Nextor_Service (void) {
     snap.media = s_mb.res[0];
 
     res_publish ();
-    log_result (&snap);
+
 }
 
 /* ========================================================================
