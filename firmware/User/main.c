@@ -140,12 +140,5 @@ int main (void) {
         Loader_Service ();
         Terminal_Service ();
 
-        /* No WFI — while the Nextor kernel's driver is polling a
-         * register in a tight loop, each cart read generates an EXTI0
-         * interrupt. WFI wakes on the interrupt but the ISR overhead +
-         * WFI re-entry latency can be too slow for the driver's
-         * timeout. Spin instead so Nextor_Service runs immediately
-         * after the ISR returns. */
-        __asm__ volatile ("nop");
     }
 }
