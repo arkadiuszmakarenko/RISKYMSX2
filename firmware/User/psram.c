@@ -424,19 +424,6 @@ uint8_t PSRAM_Init(void)
     psram_set_rd_latency (band->mr0_read, band->periph_latency,
                           READ_LATENCY_VARIABLE, band->hfreq);
 
-    printf ("PSRAM diag: HCLK=%u devclk=%uMHz ceiling<=%uM band<=%uM hfreq=%u mr0=0x%x mr4=0x%x lat=0x%02x trc=0x%02x tcph=0x%02x TIMING=0x%08x LATENCY=0x%08x STATUS=0x%08x\r\n",
-            (unsigned)SystemCoreClock,
-            (unsigned)dev_mhz,
-            (unsigned)band_ceiling_mhz,
-            (unsigned)band->dev_mhz_max,
-            (unsigned)band->hfreq,
-            (unsigned)band->mr0_read,
-            (unsigned)band->mr4_write,
-            (unsigned)band->periph_latency,
-            (unsigned)psram_timing.PSRAM_trc,
-            (unsigned)psram_timing.PSRAM_tcph,
-            (unsigned)PSRAM->TIMING,
-            (unsigned)PSRAM->LATENCY, (unsigned)PSRAM->STATUS);
 
     /* 5. Multi-offset self-test. Three addresses hit three different
      *    internal row groups on the 64 Mbit part. */

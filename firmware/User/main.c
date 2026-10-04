@@ -108,7 +108,7 @@ int main (void) {
      * A mapper swap later from the terminal menu performs its own single
      * Nextor_Init() at the swap point. */
     RawDisk_Init ();
-
+    Delay_Ms(100);
     /* USB and the disk backend are now ready for the first Nextor
      * mailbox request. Release WAIT and let the held BIOS cycle finish. */
     Cart_HoldMSXWait_End ();

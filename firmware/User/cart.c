@@ -2114,14 +2114,6 @@ void Cart_EXTI0_Nextor_Handler (void) {
         address = 0xFFFFU;
     }
 
-    /* Expanded-slot protocol: two bits per 16 KiB page select the
-     * sub-slot for that page. Sub-slot 0 keeps the ASCII16K Nextor ROM
-     * plus the mailbox (unchanged behaviour); sub-slot 1 is the 4 MiB
-     * mapper RAM addressed through the bank registers at 0xFC..0xFF;
-     * sub-slots 2 and 3 are empty (floating bus). */
-    const unsigned page = (unsigned)(address >> 14);
-    const unsigned subslot = (g_subslot_reg >> (page * 2U)) & 0x3U;
-
     if ((ctrl & CART_MREQ_MASK) == 0U) {
         if ((ctrl & CART_RD_MASK) == 0U) {
             /* READ cycle. */
@@ -2133,35 +2125,66 @@ void Cart_EXTI0_Nextor_Handler (void) {
                  * reinterpreted as an SSR read. */
                 GPIOB->OUTDR = ((uint32_t)(uint8_t)~g_subslot_reg) << 8;
                 GPIOB->CFGHR = CART_BUS_ON;
-            } else if (subslot == 0U) {
-                if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
-                    /* Mailbox register. nextor.c owns the FIFO and the
-                     * status bits; the handler only routes the cycle. */
-                    const uint8_t v = Nextor_ReadByte (address);
-                    GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
-                                 | ((uint32_t)v << 8);
-                    GPIOB->CFGHR = CART_BUS_ON;
-                } else {
-                    /* ASCII16K data flow: pick the bias for this page,
-                     * index nextor_rom[]. bias is unsigned-wrapped on
-                     * purpose - (bank << 14) - 0x4000 for bank 0 is
-                     * 0xFFFFC000, and adding address 0x4000 wraps back
-                     * to exactly 0. */
+            } else {
+                /* The normal Nextor configuration has all four pages in
+                 * sub-slot 0. Keep this branch deliberately small: it is
+                 * the overwhelmingly common path (kernel fetches and data
+                 * reads), and avoids the page/sub-slot shift, load and mask
+                 * sequence below. The mailbox must stay on the full decoder;
+                 * FFFF has already been handled above when M1 identifies an
+                 * SSR access. */
+                if (g_subslot_reg == 0U
+                        && (address & 0xFFF0U) != NEXTOR_MBOX_BASE) {
                     const uint32_t bias = (address < 0x8000U)
                                         ? g_state->bankOffsets[0]
                                         : g_state->bankOffsets[8];
                     Cart_DriveByteFromFlash (nextor_rom,
                                             bias + (uint32_t)address);
+                } else {
+                    /* Expanded-slot protocol: two bits per 16 KiB CPU page
+                     * select the sub-slot. Sub-slot 0 keeps the ASCII16K
+                     * ROM plus mailbox; sub-slot 1 is mapper RAM; 2/3 float. */
+                    const unsigned ssr = (unsigned)g_subslot_reg;
+                    const unsigned page = (unsigned)(address >> 14);
+                    const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
+
+                    if (subslot == 0U) {
+                        if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+                            /* Mailbox register. nextor.c owns the FIFO and
+                             * the status bits; route the cycle only. */
+                            const uint8_t v = Nextor_ReadByte (address);
+                            GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                                         | ((uint32_t)v << 8);
+                            GPIOB->CFGHR = CART_BUS_ON;
+                        } else {
+                            const uint32_t bias = (address < 0x8000U)
+                                                ? g_state->bankOffsets[0]
+                                                : g_state->bankOffsets[8];
+                            Cart_DriveByteFromFlash (nextor_rom,
+                                                    bias + (uint32_t)address);
+                        }
+                    } else if (subslot == 1U
+                               && s_slotted_psram_ready != 0U) {
+                        Cart_DriveSlottedPSRAMByte (address, page);
+                    } else {
+                        /* Empty sub-slot: leave the data bus floating. */
+                        GPIOB->CFGHR = CART_BUS_OFF;
+                    }
                 }
-            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                Cart_DriveSlottedPSRAMByte (address, page);
-            } else {
-                /* Empty sub-slot: leave the data bus floating. */
-                GPIOB->CFGHR = CART_BUS_OFF;
             }
         } else if ((ctrl & CART_WR_MASK) == 0U) {
             /* WRITE cycle: WR is low now; data valid on PB8..15. */
             const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+            /* Avoid the page shift on the normal (all-subslot-0) path.
+             * Mailbox argument bursts are writes, so this matters nearly as
+             * much as the ROM-read fast path above. */
+            unsigned page = 0U;
+            unsigned subslot = 0U;
+            if (g_subslot_reg != 0U) {
+                const unsigned ssr = (unsigned)g_subslot_reg;
+                page = (unsigned)(address >> 14);
+                subslot = (ssr >> (page * 2U)) & 0x3U;
+            }
             if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
                 /* Secondary-slot register latch. The BIOS writes its
                  * EXPTBL-derived sub-slot table here during the power-on
