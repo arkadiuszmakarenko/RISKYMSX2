@@ -371,11 +371,18 @@ int Cart_SetMapper (Cart_Mapper m) {
     EXTI->INTFR = EXTI_INTENR_MR8;
     if (Cart_MapperHasSubslots (m)) {
         EXTI->INTENR |= EXTI_INTENR_MR8;
-        NVIC_SetPriority (EXTI9_5_IRQn, 0x01);
+        /* PFIC priorities are encoded in the upper nibble. Keep the
+         * cycle-critical EXTI0 VTF IRQ at 0x00 and let this bookkeeping IRQ
+         * run one level below it. Configure priority before arming VTF. */
+        NVIC_SetPriority (EXTI9_5_IRQn, 0x10);
+        SetVTFIRQ ((uint32_t)EXTI9_5_IRQHandler, EXTI9_5_IRQn, 1, ENABLE);
+        __asm__ volatile ("fence iorw, iorw" ::: "memory");
+        __asm__ volatile ("fence.i" ::: "memory");
         NVIC_EnableIRQ (EXTI9_5_IRQn);
     } else {
         EXTI->INTENR &= ~EXTI_INTENR_MR8;
         NVIC_DisableIRQ (EXTI9_5_IRQn);
+        SetVTFIRQ ((uint32_t)EXTI9_5_IRQHandler, EXTI9_5_IRQn, 1, DISABLE);
     }
 
     /* Flash selector mappers: reset the mailbox so the loader starts clean. */
@@ -558,6 +565,11 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
     EXTI->INTENR &= ~EXTI_INTENR_MR8;
     EXTI->INTFR = EXTI_INTENR_MR8;
+    NVIC_SetPriority (EXTI9_5_IRQn, 0x00);
+    /* Slot 0 is reserved for the cycle-critical EXTI0 mapper handler. Keep
+     * slot 1 programmed with the fixed bank-register handler, but disabled
+     * until Cart_SetMapper selects an expanded-slot mapper. */
+    SetVTFIRQ ((uint32_t)EXTI9_5_IRQHandler, EXTI9_5_IRQn, 1, DISABLE);
     NVIC_DisableIRQ (EXTI9_5_IRQn);
 
     /* Install the no-mapper handler by default. main()/CLI installs the
@@ -2082,39 +2094,10 @@ void Cart_EXTI0_Terminal_Handler (void) {
 /* ------------------------------------------------------------------ */
 
 void Cart_EXTI0_Nextor_Handler (void) {
-    const uint16_t entry_address = (uint16_t)GPIOD->INDR;
+
     uint32_t ctrl = GPIOE->INDR;
-
-    /* Late entry: SLTSL already high, this cycle is over. */
-    if ((ctrl & CART_SLTSL_MASK) != 0U) {
-        GPIOB->CFGHR = CART_BUS_OFF;
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        return;
-    }
-
-    /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
-     * bail if SLTSL rises first. Same pattern as the terminal handler. */
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) ==
-           (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
-        }
-    }
-
-    /* Re-sample the address once RD/WR has settled. The entry-time sample
-     * can still be mid-transition (T1 -> T3) for the BIOS power-on scan,
-     * which is exactly when the secondary-slot register at FFFF is read
-     * and written. Preserve an entry-time FFFF if the later sample has
-     * already moved off it. */
     uint16_t address = (uint16_t)GPIOD->INDR;
-    if (entry_address == 0xFFFFU && address != 0xFFFFU) {
-        address = 0xFFFFU;
-    }
 
-    if ((ctrl & CART_MREQ_MASK) == 0U) {
         if ((ctrl & CART_RD_MASK) == 0U) {
             /* READ cycle. */
             if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
@@ -2172,7 +2155,19 @@ void Cart_EXTI0_Nextor_Handler (void) {
                     }
                 }
             }
-        } else if ((ctrl & CART_WR_MASK) == 0U) {
+        } 
+        
+            while (ctrl &  CART_WR_MASK) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+        
+        
+        if ((ctrl & CART_WR_MASK) == 0U) {
             /* WRITE cycle: WR is low now; data valid on PB8..15. */
             const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
             /* Avoid the page shift on the normal (all-subslot-0) path.
@@ -2214,25 +2209,11 @@ void Cart_EXTI0_Nextor_Handler (void) {
                 Cart_WriteSlottedPSRAMByte (address, page, w);
             }
             /* The Z80 owns the data bus during writes. */
-            GPIOB->CFGHR = CART_BUS_OFF;
-        } else {
-            GPIOB->CFGHR = CART_BUS_OFF;
-        }
-    } else {
-        /* Ignore I/O, refresh and interrupt-ack cycles: the PE8 /IORQ
-         * handler owns the bank registers and nothing else on the cart
-         * answers while MREQ is high. */
-        GPIOB->CFGHR = CART_BUS_OFF;
-    }
 
-    EXTI->INTFR = EXTI_INTENR_MR0;
-    if (s_msx_wait_held != 0U) {
-        /* Cart_HoldMSXWait_End() owns the final bus-off while a startup
-         * hold is active; spinning for SLTSL here would deadlock. */
-        return;
-    }
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        } 
     GPIOB->CFGHR = CART_BUS_OFF;
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    
 }
 
 /* ------------------------------------------------------------------ */
