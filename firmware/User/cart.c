@@ -2053,40 +2053,26 @@ void Cart_EXTI0_Terminal_Handler (void) {
 /* ------------------------------------------------------------------ */
 
 void Cart_EXTI0_Nextor_Handler (void) {
+    /* EXTI0 fires when SLTSL changes. Capture the address and control bus
+     * immediately; the Z80 is waiting for the cartridge response. */
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
 
-    /* Late entry: SLTSL already high, this cycle is over. */
-    if ((ctrl & CART_SLTSL_MASK) != 0U) {
-        GPIOB->CFGHR = CART_BUS_OFF;
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        return;
-    }
 
-    /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
-     * bail if SLTSL rises first. Same pattern as the terminal handler. */
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) ==
-           (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
-        }
-    }
 
     if ((ctrl & CART_RD_MASK) == 0U) {
-        /* READ cycle. */
+        /* READ cycle: mailbox reads come from the live FIFO/status state;
+         * every other address is a normal ROM read from the selected bank. */
         if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
-            /* Mailbox register. nextor.c owns the FIFO and the status
-             * bits; the handler only routes the cycle. */
+            /* nextor.c owns FIFO advancement and status bits. This handler
+             * only routes the bus cycle and drives the returned byte. */
             const uint8_t v = Nextor_ReadByte (address);
             GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
                          | ((uint32_t)v << 8);
             GPIOB->CFGHR = CART_BUS_ON;
         } else {
-            /* ASCII16K data flow: pick the bias for this page, index
-             * nextor_rom[]. bias is unsigned-wrapped on purpose -
+            /* ASCII16K data flow: select the bank offset for this page and
+             * index the embedded ROM. The unsigned wrap is intentional -
              * (bank << 14) - 0x4000 for bank 0 is 0xFFFFC000, and
              * adding address 0x4000 wraps back to exactly 0. */
             const uint32_t bias = (address < 0x8000U)
@@ -2094,19 +2080,37 @@ void Cart_EXTI0_Nextor_Handler (void) {
                                 : g_state->bankOffsets[8];
             Cart_DriveByteFromFlash (nextor_rom, bias + (uint32_t)address);
         }
+        /* Acknowledge EXTI before waiting for SLTSL where possible, then
+         * turn the cartridge data bus off after the Z80 releases the cycle. */
         EXTI->INTFR = EXTI_INTENR_MR0;
-        if (s_msx_wait_held == 0U) {
+
             while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        }
+
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
     }
 
-    /* WRITE cycle: WR is low now; data valid on PB8..15. */
+   /* WR lag SLTSL by a gate delay. Wait for either control signal to
+     * settle, but abandon the cycle if SLTSL rises while waiting. */
+    while ((ctrl & (CART_WR_MASK)) ==
+           (CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
+        
+
+    /* WRITE cycle: WR is low and the Z80's data byte is valid on PB8..15.
+     * Mailbox writes feed the command/argument collector; bank writes update
+     * the ASCII16K page offsets. Other writes are intentionally ignored. */
     if ((ctrl & CART_WR_MASK) == 0U) {
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
         if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
-            /* Mailbox: command byte / argument push. */
+            /* Mailbox command byte or argument byte. Nextor_WriteByte keeps
+             * this path bounded because it runs inside the bus interrupt. */
             Nextor_WriteByte (address, w);
         } else if (address == NEXTOR_BANK_REG_PAGE1) {
             g_state->bankOffsets[0] = ((uint32_t)w << NEXTOR_BANK_SHIFT)
@@ -2116,24 +2120,21 @@ void Cart_EXTI0_Nextor_Handler (void) {
             g_state->bankOffsets[8] = ((uint32_t)w << NEXTOR_BANK_SHIFT)
                                     - 0x8000U;
         }
-        /* Other writes: ignored. A bank number past the end of the ROM
+        /* Other writes are ignored. A bank number past the end of the ROM
          * (w >= 8 for the 128 KiB image) is latched like any other; the
          * read path's off < nextor_rom_len test then floats those
          * addresses to 0xFF instead of indexing out of bounds. */
         EXTI->INTFR = EXTI_INTENR_MR0;
-        if (s_msx_wait_held == 0U) {
+
             while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
             GPIOB->CFGHR = CART_BUS_OFF;
-        }
         return;
     }
 
     /* Neither RD nor WR - spurious; release. */
-    EXTI->INTFR = EXTI_INTENR_MR0;
-    if (s_msx_wait_held == 0U) {
+        EXTI->INTFR = EXTI_INTENR_MR0;
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;
-    }
 }
 
 /* ------------------------------------------------------------------ */
