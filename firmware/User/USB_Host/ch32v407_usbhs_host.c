@@ -753,7 +753,7 @@ uint8_t USBHSH_GetEndpData( uint8_t endp_num, uint16_t *pendp_tog, uint8_t *pbuf
  *
  * @return  The result of sending data.
  */
-uint8_t USBHSH_SendEndpData( uint8_t endp_num, uint16_t *pendp_tog, uint8_t *pbuf, uint16_t len )
+uint8_t USBHSH_SendEndpData( uint8_t endp_num, uint16_t *pendp_tog, const uint8_t *pbuf, uint16_t len )
 {
     uint8_t  s;
 

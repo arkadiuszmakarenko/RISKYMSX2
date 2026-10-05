@@ -654,7 +654,10 @@ static void res_begin (void) {
     s_mb.res_r   = s_mb.res;
     s_mb.res_end = s_mb.res;
     s_mb.err     = NEXTOR_ERR_NONE;
-    s_mb.status &= (uint8_t)~NEXTOR_STAT_RX_AVAIL;
+    /* Clear all per-command status before doing any work.  Leaving ERR set
+     * after one failed READ/WRITE makes the next successful command look like
+     * another I/O failure to the Z80 driver. */
+    s_mb.status &= (uint8_t)~(NEXTOR_STAT_RX_AVAIL | NEXTOR_STAT_ERR);
 }
 
 /* Publish the result FIFO and release the driver. s_mb.res_end must

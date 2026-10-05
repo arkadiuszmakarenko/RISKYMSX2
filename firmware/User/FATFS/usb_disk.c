@@ -176,7 +176,7 @@ static uint8_t usb_send_cbw (const CBW_t *cbw) {
     return res;
 }
 
-static uint8_t usb_recv_csw (CSW_t *csw) {
+static uint8_t usb_recv_csw (CSW_t *csw, uint32_t expected_tag) {
     uint8_t  res;
     int zlp_retries = 0;
     for (int tries = 0; tries < 60; tries++) {
@@ -193,6 +193,13 @@ static uint8_t usb_recv_csw (CSW_t *csw) {
          * next command. Treat a short/empty success as "not ready", back
          * off, and ask again. */
         if ((res == ERR_SUCCESS) && (plen >= (uint16_t)sizeof (CSW_t))) {
+            /* A stale CSW must never be accepted as the result of the
+             * current command.  This matters after a timeout/recovery where
+             * the device may still have the previous response queued. */
+            if (csw->dCSWSignature != 0x53425355U
+                || csw->dCSWTag != expected_tag) {
+                return ERR_USB_TRANSFER;
+            }
             return res;
         }
         if (res == ERR_SUCCESS) {
@@ -467,7 +474,7 @@ static uint8_t scsi_read_capacity10_once (uint32_t *block_count,
         return 2;
     }
     Delay_Ms (2);
-    res = usb_recv_csw (&csw);
+    res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS) {
         printf ("USB: CAP10 CSW recv failed r=%02x\r\n", (unsigned)res);
         return 3;
@@ -513,7 +520,7 @@ static uint8_t scsi_read_capacity16_once (uint32_t *block_count,
     res = bulk_in_read_retry (cap_buf, &plen, 40);
     if (res != ERR_SUCCESS || plen < 12) return 2;
     Delay_Ms (1);
-    res = usb_recv_csw (&csw);
+    res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
     {
         uint32_t lba_hi = ((uint32_t)cap_buf[0] << 24)
@@ -615,17 +622,14 @@ static uint8_t scsi_read_sectors_once (uint32_t lba, uint8_t *buf,
     cbw.CBWCB[7] = (uint8_t)(blocks >> 8);
     cbw.CBWCB[8] = (uint8_t)blocks;
 
-    int cbw_send_retries = 0;
-    do {
-        res = usb_send_cbw (&cbw);
-        if (res == ERR_SUCCESS) break;
-        Delay_Ms (1);
-        cbw_send_retries++;
-    } while (cbw_send_retries < 20);
+    /* usb_send_cbw already owns the bounded retry/recovery policy.  A second
+     * retry loop here multiplied the worst-case delay beyond MB_POLL's
+     * firmware/driver command budget. */
+    res = usb_send_cbw (&cbw);
     if (res != ERR_SUCCESS) return 1;
 
-    while (bytes_received < block_size) {
-        plen = block_size - bytes_received;
+    while (bytes_received < transfer_len) {
+        plen = transfer_len - bytes_received;
         if (plen > USBHS_BULK_MAX_PACKET) plen = USBHS_BULK_MAX_PACKET;
         int nak_retries = 0;
         do {
@@ -641,13 +645,10 @@ static uint8_t scsi_read_sectors_once (uint32_t lba, uint8_t *buf,
         bytes_received += plen;
     }
 
-    int csw_retries = 0;
-    do {
-        res = usb_recv_csw (&csw);
-        if (res == ERR_SUCCESS && csw.bCSWStatus == 0) break;
-        Delay_Ms (1);
-        csw_retries++;
-    } while (csw_retries < 40);
+    /* usb_recv_csw handles bounded NAK/ZLP patience.  Do not wrap it in a
+     * second long retry loop: a command must either finish or publish an
+     * error before the Z80 mailbox poll expires. */
+    res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
     return 0;
 }
@@ -677,7 +678,7 @@ uint8_t usb_scsi_read_sectors (uint32_t lba, uint8_t *buf,
 static uint8_t scsi_write_sector_once (uint32_t lba, const uint8_t *buf,
                                        uint32_t block_size) {
     CBW_t cbw;
-    CSW_t csw;
+    CSW_t csw = {0};
     uint8_t  res;
     uint32_t bytes_sent = 0;
 
@@ -725,13 +726,7 @@ static uint8_t scsi_write_sector_once (uint32_t lba, const uint8_t *buf,
      * tens of milliseconds (flash programming / wear levelling), which is
      * precisely when a single usb_recv_csw() would give up. The read side
      * has always retried this in an outer loop; writes now do too. */
-    int csw_retries = 0;
-    do {
-        Delay_Ms (1);
-        res = usb_recv_csw (&csw);
-        if (res == ERR_SUCCESS && csw.bCSWStatus == 0) break;
-        csw_retries++;
-    } while (csw_retries < 40);
+    res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
         printf ("USB: WR10 CSW rc=%02x status=%u\r\n",
                 (unsigned)res, (unsigned)csw.bCSWStatus);
@@ -770,7 +765,7 @@ uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len) {
     res = bulk_in_read_retry (buf, &plen, 40);
     if (res != ERR_SUCCESS) return 2;
     Delay_Ms (1);
-    res = usb_recv_csw (&csw);
+    res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
     return 0;
 }
@@ -796,7 +791,7 @@ uint8_t usb_scsi_inquiry (uint8_t *buf, uint16_t len) {
     res = bulk_in_read_retry (buf, &plen, 40);
     if (res != ERR_SUCCESS) return 2;
     Delay_Ms (1);
-    res = usb_recv_csw (&csw);
+    res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
     return 0;
 }
@@ -817,7 +812,7 @@ uint8_t usb_scsi_test_unit_ready (void) {
     res = usb_send_cbw (&cbw);
     if (res != ERR_SUCCESS) return 1;
     Delay_Ms (1);
-    res = usb_recv_csw (&csw);
+    res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS) return 2;
     return (csw.bCSWStatus == 0) ? 0 : 3;
 }

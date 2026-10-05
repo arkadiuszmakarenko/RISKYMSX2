@@ -76,12 +76,11 @@ extern uint8_t USBHSH_SetUsbAddress( uint8_t ep0_size, uint8_t addr );
 extern uint8_t USBHSH_SetUsbConfig( uint8_t ep0_size, uint8_t cfg_val );
 extern uint8_t USBHSH_ClearEndpStall( uint8_t ep0_size, uint8_t endp_num );
 extern uint8_t USBHSH_GetEndpData( uint8_t endp_num, uint16_t *pendp_tog, uint8_t *pbuf, uint16_t *plen );
-extern uint8_t USBHSH_SendEndpData( uint8_t endp_num, uint16_t *pendp_tog, uint8_t *pbuf, uint16_t len );
+extern uint8_t USBHSH_SendEndpData( uint8_t endp_num, uint16_t *pendp_tog, const uint8_t *pbuf, uint16_t len );
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif
-
 
