@@ -105,7 +105,7 @@ void Cart_SetSlottedPSRAMReady (uint8_t ready) {
  * writes would steal I/O cycles from the rest of the machine. */
 static inline __attribute__((always_inline))
 int Cart_MapperHasSubslots (Cart_Mapper m) {
-    return (m == CART_MAP_SLOTTED || m == CART_MAP_NEXTOR) ? 1 : 0;
+    return (m == CART_MAP_NEXTOR) ? 1 : 0;
 }
 
 static inline __attribute__((always_inline))
@@ -157,15 +157,8 @@ void Cart_EXTI0_Terminal_Handler (void) __attribute__((noinline,
 void Cart_EXTI0_Nextor_Handler (void) __attribute__((noinline,
                                                       interrupt("WCH-Interrupt-fast")));
 
-void Cart_EXTI0_Slotted_Handler (void) __attribute__((noinline,
-                                                      interrupt("WCH-Interrupt-fast")));
 void EXTI9_5_IRQHandler (void) __attribute__((section(".ramfunc"), noinline,
                                                interrupt("WCH-Interrupt-fast")));
-
-/* No-mapper fallback: just clears the pending bit and releases the bus.
- * The Z80 reads 0xFF (floating bus). */
-void Cart_EXTI0_None_Handler (void) __attribute__((section(".ramfunc"), noinline,
-                                                    interrupt("WCH-Interrupt-fast")));
 
 /* ------------------------------------------------------------------ */
 /* Public API                                                          */
@@ -186,7 +179,6 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "FLASH",
     "TERMINAL",
     "NEXTOR",
-    "SLOTTED",
 };
 
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
@@ -248,6 +240,10 @@ uint32_t Cart_GetGameBase (void) { return CART_GAME_BASE; }
  * Returns the same value as Cart_SetMapper(). */
 int Cart_SetMapper_Safe (Cart_Mapper m);
 int Cart_SetMapper_Safe (Cart_Mapper m) {
+    /* CART_MAP_NONE is only the power-on/sentinel state. There is no
+     * active cart cycle to serve until a real mapper is installed. */
+    if (m == CART_MAP_NONE) return -1;
+
     printf ("CART: SetMapper_Safe -> %d\r\n", (int)m);
     /* Phase 1: stop the IRQ. The order matters:
      *   - EXTI0's pending bit is in EXTI->INTFR (edge-triggered on
@@ -312,15 +308,13 @@ int Cart_SetMapper_Safe (Cart_Mapper m) {
 }
 
 int Cart_SetMapper (Cart_Mapper m) {
-    if ((unsigned)m >= CART_MAP_MAX) return -1;
-    if (m != CART_MAP_NONE
-        && m != CART_MAP_ROM16k
+    if ((unsigned)m >= CART_MAP_MAX || m == CART_MAP_NONE) return -1;
+    if (m != CART_MAP_ROM16k
         && m != CART_MAP_ROM32k
         && m != CART_MAP_ROM48k
         && m != CART_MAP_FLASH
         && m != CART_MAP_TERMINAL
         && m != CART_MAP_NEXTOR
-        && m != CART_MAP_SLOTTED
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -332,8 +326,8 @@ int Cart_SetMapper (Cart_Mapper m) {
 
     g_mapper = m;
 
-    if (m == CART_MAP_SLOTTED) {
-        /* Never carry page or sub-slot selections across mapper swaps. */
+    /* Never carry page or sub-slot selections across mapper swaps. */
+    if (m == CART_MAP_NEXTOR) {
         g_subslot_reg = 0x00U;
         for (unsigned page = 0U; page < 4U; page++) {
             s_slotted_bank_regs[page] = 0U;
@@ -343,9 +337,8 @@ int Cart_SetMapper (Cart_Mapper m) {
     /* Install the matching handler in VTF slot 0. SetVTFIRQ writes
      * VTFADDR[0] and VTFIDR[0] - the VTF dispatcher uses VTFADDR[0]
      * when EXTI0 fires (the IRQ number is matched by VTFIDR[0]). */
-    uint32_t h = (uint32_t)Cart_EXTI0_None_Handler;
+    uint32_t h;
     switch (m) {
-    case CART_MAP_NONE:        h = (uint32_t)Cart_EXTI0_None_Handler; break;
     case CART_MAP_ROM16k:      h = (uint32_t)Cart_EXTI0_ROM16k_Handler; break;
     case CART_MAP_ROM32k:      h = (uint32_t)Cart_EXTI0_ROM32k_Handler; break;
     case CART_MAP_ROM48k:      h = (uint32_t)Cart_EXTI0_ROM48k_Handler; break;
@@ -357,7 +350,6 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
 
-    case CART_MAP_SLOTTED:    h = (uint32_t)Cart_EXTI0_Slotted_Handler; break;
     case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
@@ -413,7 +405,7 @@ int Cart_SetMapper (Cart_Mapper m) {
      * (no stale LBA / sector buffer / IDENTIFY data from a previous
      * run, no stale state from a half-completed READ/WRITE).
      * Safe to call repeatedly. */
-    if (m == CART_MAP_NEXTOR || m == CART_MAP_SLOTTED) {
+    if (m == CART_MAP_NEXTOR) {
         Nextor_Init ();
     }
 
@@ -489,7 +481,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         /* ASCII 16k: 16 KiB banks at 0x6000 and 0x7000. */
         s_state.bankOffsets[0] = 0x0000U - 0x4000U;
         s_state.bankOffsets[8] = 0x0000U - 0x8000U;
-    } else if (m == CART_MAP_NEXTOR || m == CART_MAP_SLOTTED) {
+    } else if (m == CART_MAP_NEXTOR) {
         /* Nextor is ASCII16K over nextor_rom[]: 16 KiB banks selected by
          * 0x6000 (page 1) and 0x7000/0x77FF (page 2). Both pages start
          * on bank 0, so the kernel sees ROM[0x0000..0x3FFF] at 0x4000 the
@@ -502,7 +494,7 @@ int Cart_SetMapper (Cart_Mapper m) {
          * the handler intercepts it by absolute address before the
          * index is ever computed.
          *
-         * CART_MAP_SLOTTED serves the same ROM from sub-slot 0 (the only
+         * CART_MAP_NEXTOR serves the same ROM from sub-slot 0 (the only
          * sub-slot with content), so it needs the same initial banks. */
         s_state.bankOffsets[0] = 0x0000U - 0x4000U;
         s_state.bankOffsets[8] = 0x0000U - 0x8000U;
@@ -590,20 +582,9 @@ void Init_Cart (void) {
     NVIC_SetPriority (EXTI9_5_IRQn, 0x10);
     NVIC_DisableIRQ (EXTI9_5_IRQn);
 
-    /* Install the no-mapper handler by default. main()/CLI installs the
-     * real mapper via Cart_SetMapper() once PSRAM_Init() has succeeded.
-     * SetVTFIRQ writes VTFADDR[0]; NVIC_EnableIRQ sets the per-IRQ
-     * enable bit in PFIC->IENR. Both must be done for VTF dispatch to
-     * fire. */
-    SetVTFIRQ ((uint32_t)Cart_EXTI0_None_Handler, EXTI0_IRQn, 0, ENABLE);
-    /* Keep EXTI0 masked while WAIT is held. Its pending edge must remain
-     * latched until the real mapper is installed; dispatching the None
-     * handler first would consume the BIOS probe without driving ROM data.
-     * Cart_SetMapper_Safe() installs the active handler and re-enables
-     * EXTI0 before WAIT is released. */
-    if (s_msx_wait_held == 0U) {
-        NVIC_EnableIRQ (EXTI0_IRQn);
-    }
+    /* No VTF entry is installed until the real mapper is selected.
+     * Startup holds ~WAIT and Cart_SetMapper_Safe() installs the active
+     * handler before releasing the held BIOS cycle. */
     NVIC_SetPriority (EXTI0_IRQn, 0x00);
     __enable_irq();
 }
@@ -2254,222 +2235,6 @@ void Cart_EXTI0_Nextor_Handler (void) {
     GPIOB->CFGHR = CART_BUS_OFF;
     EXTI->INTFR = EXTI_INTENR_MR0;
     
-}
-
-/* ------------------------------------------------------------------ */
-/* Slotted mapper: expanded slot, sub-slot 0 = Nextor ROM, sub-slot 1 = */
-/* 4 MiB PSRAM mapper RAM.                                            */
-/* ------------------------------------------------------------------ */
-/*
- *  Expanded-slot layout served by this handler (two bits per 16 KiB page
- *  in the secondary-slot register at FFFF):
- *
- *    sub-slot 0 : the embedded Nextor ROM, ASCII16K over pages 1 and 2,
- *                 with the mailbox window at 0x7FF0..0x7FF5 punched out of
- *                 page 1. Identical contract to Cart_EXTI0_Nextor_Handler,
- *                 so the MSX boots Nextor out of sub-slot 0 and can talk to
- *                 nextor.c while the mapper RAM sub-slot is being scanned.
- *    sub-slot 1 : 4 MiB mapper RAM in PSRAM. Ports 0xFC..0xFF (latched by
- *                 the PE8/~IORQ handler) select the 16 KiB segment for
- *                 pages 0..3, so all 256 segments are reachable - which is
- *                 what Nextor's TEST_MAPPER_SLOT walks to size the mapper.
- *    sub-slots 2/3 : electrically empty (floating bus).
- *
- *  Page 3 answers the secondary-slot register even in sub-slot 0: the BIOS
- *  power-on scan reads ~ssr there and stores bit 7 into EXPTBL[slot] as
- *  its "this slot is expanded" flag. Every other page-3 access floats so
- *  page 3 remains the MSX's own RAM, exactly as for the plain ASCII16K
- *  Nextor mapper.
- */
-
-void Cart_EXTI0_Slotted_Handler (void) {
-    /* The entry-time address sample exists ONLY for the FFFF-preserve
-     * hack below (a BIOS power-on scan edge case from the slower
-     * dispatch-latency era). It costs an APB read on EVERY served cycle,
-     * so it is compile-time optional: leave it on (default) for maximum
-     * cold-boot robustness, or build with -DCART_FFFF_ENTRY_SAMPLE=0 to
-     * reclaim ~5 cycles per cycle (~3% of the serve deadline) once the
-     * boot scan is verified on your machine. */
-#if !defined (CART_FFFF_ENTRY_SAMPLE)
-#define CART_FFFF_ENTRY_SAMPLE 1
-#endif
-#if CART_FFFF_ENTRY_SAMPLE
-    const uint16_t entry_address = (uint16_t)GPIOD->INDR;
-#endif
-    uint32_t ctrl = GPIOE->INDR;
-
-    /* A late VTF entry must not drive a stale byte onto the bus. */
-    if ((ctrl & CART_SLTSL_MASK) != 0U) {
-        GPIOB->CFGHR = CART_BUS_OFF;
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        return;
-    }
-
-    /* RD/WR settle after ~SLTSL. This also makes the address sample
-     * below stable for the cold-boot slot probe. */
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) ==
-           (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
-        }
-    }
-
-    uint16_t address = (uint16_t)GPIOD->INDR;
-    /* The entry-time sample can still be mid-transition (T1 -> T3) for the
-     * BIOS power-on scan, which is exactly when the secondary-slot
-     * register at FFFF is read and written. Preserve an entry-time FFFF if
-     * the later sample has already moved off it.
-     * Disabled under CART_FFFF_ENTRY_SAMPLE=0: the entry sample costs an
-     * APB read on every served cycle, and with today's fast dispatch the
-     * mid-transition window it guarded (PSRAM-latency era) no longer
-     * opens. Verify the cold-boot slot scan still finds the expanded
-     * slot before keeping it disabled. */
-#if CART_FFFF_ENTRY_SAMPLE
-    if (entry_address == 0xFFFFU && address != 0xFFFFU) {
-        address = 0xFFFFU;
-    }
-#endif
-
-    if ((ctrl & CART_MREQ_MASK) == 0U) {
-        if ((ctrl & CART_RD_MASK) == 0U) {
-            uint8_t value = 0xFFU;
-            const unsigned page = (unsigned)(address >> 14);
-            const unsigned subslot =
-                (g_subslot_reg >> (page * 2U)) & 0x3U;
-
-            /* The expanded-slot register is read inverted, as required
-             * by the MSX primary-slot decoder. M1 low means opcode fetch;
-             * do not reinterpret an ordinary FFFF instruction fetch as
-             * an SSR read. */
-            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
-                value = (uint8_t)~g_subslot_reg;
-                GPIOB->OUTDR = (uint32_t)value << 8;
-                GPIOB->CFGHR = CART_BUS_ON;
-            } else if (subslot == 0U) {
-                /* Sub-slot 0 is the embedded Nextor ROM (ASCII16K) plus
-                 * its mailbox window. Same contract as
-                 * Cart_EXTI0_Nextor_Handler:
-                 *   0x4000..0x7FFF bank n latched by 0x6000
-                 *   0x8000..0xBFFF bank m latched by 0x7000 / 0x77FF
-                 *   0x7FF0..0x7FF5 mailbox -> nextor.c
-                 * Page 0 (0x0000..0x3FFF) is BIOS/main RAM and page 3
-                 * (0xC000..0xFFFF) belongs to the MSX too - an ASCII16K
-                 * cart only spans pages 1 and 2 - so both float. Page 3
-                 * still answers the secondary-slot register at 0xFFFF
-                 * above, which is what makes the BIOS report the slot as
-                 * expanded. */
-                if (NEXTOR_IN_MBOX_WINDOW (address)) {
-                    value = Nextor_ReadByte (address);
-                    GPIOB->OUTDR = (uint32_t)value << 8;
-                    GPIOB->CFGHR = CART_BUS_ON;
-                } else if (address >= 0x4000U && address < 0xC000U) {
-                    /* bias is unsigned-wrapped on purpose: bank 0 in
-                     * page 1 is 0xFFFFC000, so bias + 0x4000 == 0. */
-                    const uint32_t bias = (address < 0x8000U)
-                                        ? g_state->bankOffsets[0]
-                                        : g_state->bankOffsets[8];
-                    Cart_DriveByteFromFlash (nextor_rom,
-                                            bias + (uint32_t)address);
-                } else {
-                    GPIOB->CFGHR = CART_BUS_OFF;
-                }
-            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                Cart_DriveSlottedPSRAMByte (address, page);
-            } else {
-                /* Empty sub-slot: leave the data bus floating. */
-                GPIOB->CFGHR = CART_BUS_OFF;
-            }
-        } else if ((ctrl & CART_WR_MASK) == 0U) {
-            const uint8_t value = Cart_ReadWriteData ();
-            const unsigned page = (unsigned)(address >> 14);
-
-            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
-                g_subslot_reg = value;
-            } else {
-                const unsigned subslot =
-                    (g_subslot_reg >> (page * 2U)) & 0x3U;
-                if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                    Cart_WriteSlottedPSRAMByte (address, page, value);
-                } else if (subslot == 0U) {
-                    /* Mailbox push plus the ASCII16K bank latches. */
-                    if (NEXTOR_IN_MBOX_WINDOW (address)) {
-                        Nextor_WriteByte (address, value);
-                    } else if (address == NEXTOR_BANK_REG_PAGE1) {
-                        g_state->bankOffsets[0] =
-                            ((uint32_t)value << NEXTOR_BANK_SHIFT) - 0x4000U;
-                    } else if (address == NEXTOR_BANK_REG_PAGE2 ||
-                               address == NEXTOR_BANK_REG_PAGE2_ALT) {
-                        g_state->bankOffsets[8] =
-                            ((uint32_t)value << NEXTOR_BANK_SHIFT) - 0x8000U;
-                    }
-                }
-            }
-            /* The Z80 owns the data bus during writes. */
-            GPIOB->CFGHR = CART_BUS_OFF;
-        } else {
-            GPIOB->CFGHR = CART_BUS_OFF;
-        }
-    } else {
-        /* Ignore I/O/refresh/interrupt-ack cycles. */
-        GPIOB->CFGHR = CART_BUS_OFF;
-    }
-
-    EXTI->INTFR = EXTI_INTENR_MR0;
-    if (s_msx_wait_held != 0U) {
-        /* The caller owns the final bus-off while a startup hold is
-         * active; never wait for SLTSL here or the hold deadlocks. */
-        return;
-    }
-    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-    GPIOB->CFGHR = CART_BUS_OFF;
-}
-
-/* ------------------------------------------------------------------ */
-/* None handler: bus floats. Z80 reads 0xFF (open-bus pattern).       */
-/* ------------------------------------------------------------------ */
-
-void Cart_EXTI0_None_Handler (void) {
-    __asm__ volatile (
-        /* Read s_msx_wait_held (0x200004c5). While set, the cycle is
-         * held by Cart_HoldMSXWait_End - don't spin for SLTSL, just
-         * clear INTFR and return. Cart_HoldMSXWait_End() finishes
-         * the cycle (data bus off) once main() calls it. */
-        "li    a5, 0x20000                 \n"
-        "addi  a5, a5, 0x4c5               \n"
-        "lbu   a5, 0(a5)                   \n"
-        "bnez  a5, 4f                      \n"
-        "lui   t0, 0x40011                 \n"
-        "lui   t1, 0x40012                 \n"
-        "lui   t2, 0x40010                 \n"
-        "lw    a6, -2040(t1)               \n"
-        "andi  a6, a6, 1                   \n"
-        "beqz  a6, 1f                      \n"
-        "lui   a7, 0x44444                 \n"
-        "addi  a7, a7, 0x444               \n"
-        "sw    a7, -1020(t0)               \n"
-        "sw    a6, 1044(t2)                \n"
-        "j     2f                          \n"
-        "1:                                \n"
-        /* Just clear pending and spin. Bus remains tri-stated. */
-        "addi  a5, zero, 1                 \n"
-        "sw    a5, 1044(t2)                \n"
-        "3:                                \n"
-        "lw    a6, -2040(t1)               \n"
-        "andi  a6, a6, 1                   \n"
-        "beqz  a6, 3b                      \n"
-        "j     2f                          \n"
-        /* Held cycle: clear INTFR, return immediately. */
-        "4:                                \n"
-        "addi  a5, zero, 1                 \n"
-        /* EXTI INTFR @ 0x40010414 */
-        "li    a6, 0x40010                 \n"
-        "addi  a6, a6, 0x414               \n"
-        "sw    a5, 0(a6)                   \n"
-        "2:                                \n"
-        : : : "t0", "t1", "t2", "a5", "a6", "a7", "memory");
 }
 
 /* ------------------------------------------------------------------ */

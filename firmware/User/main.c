@@ -69,7 +69,7 @@ int main (void) {
     /* Preserve the pending BIOS probe edge while atomically installing
      * the Nextor handler. The handler serves the held ROM read and
      * returns without waiting for SLTSL. */
-    Cart_SetMapper_Safe (CART_MAP_SLOTTED);
+    Cart_SetMapper_Safe (CART_MAP_NEXTOR);
 
 
     printf ("SystemClk:%d\r\n", SystemCoreClock);

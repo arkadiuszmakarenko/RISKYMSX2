@@ -44,7 +44,8 @@
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
 
-/* PSRAM mapper window used by CART_MAP_SLOTTED: 256 x 16 KiB banks = 4 MiB.
+/* PSRAM mapper window used by the Nextor expanded-slot path: 256 x 16 KiB
+ * banks = 4 MiB.
  * Keep this region separate from the normal game-image area. */
 #define CART_SLOTTED_BANK_PORT_BASE   0xFCU
 #define CART_SLOTTED_BANK_COUNT       256U
@@ -168,8 +169,7 @@ typedef enum {
  * image. Reached via the terminal menu's N key
  * (handle_list_key -> soft_reset_into_cart
  * (CART_MAP_NEXTOR)). */
-    CART_MAP_SLOTTED    = 14,  /* expanded slot + 4 MiB mapper RAM */
-    CART_MAP_MAX        = 15,
+    CART_MAP_MAX        = 14,
 } Cart_Mapper;
 
 /* Mapper names used by `MAP ?` and CLI error messages. */
@@ -257,7 +257,7 @@ void Cart_HoldMSXWait_Begin (void);
 void Cart_HoldMSXWait_End (void);
 
 /* Mark the PSRAM-backed slotted mapper available after PSRAM_Init(). The
- * mapper remains inactive until Cart_SetMapper(CART_MAP_SLOTTED) is called. */
+ * mapper remains inactive until Cart_SetMapper(CART_MAP_NEXTOR) is called. */
 void Cart_SetSlottedPSRAMReady (uint8_t ready);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
