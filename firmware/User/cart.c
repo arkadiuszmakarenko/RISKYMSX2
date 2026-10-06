@@ -764,11 +764,6 @@ void EXTI9_5_IRQHandler (void) {
     if (port < CART_SLOTTED_BANK_PORT_BASE
         || port >= CART_SLOTTED_BANK_PORT_BASE + 4U) return;
 
-    /* Still required: every other mapper leaves ports FC..FF to the rest
-     * of the machine, so the line is masked there - this is the belt to
-     * that braces, and it now only runs for our four ports. */
-    if (!Cart_MapperHasSubslots (g_mapper)) return;
-
     uint32_t ctrl = GPIOE->INDR;
 
     /* /IORQ, /RD and /WR have small gate delays relative to one another.
