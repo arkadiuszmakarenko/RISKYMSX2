@@ -770,7 +770,6 @@ void EXTI9_5_IRQHandler (void) {
     if (!Cart_MapperHasSubslots (g_mapper)) return;
 
     uint32_t ctrl = GPIOE->INDR;
-    if ((ctrl & CART_IORQ_MASK) != 0U) return;
 
     /* /IORQ, /RD and /WR have small gate delays relative to one another.
      * First wait for the cycle type to settle; sampling the bank byte only
