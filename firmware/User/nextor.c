@@ -103,6 +103,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Mailbox tracing is useful during protocol diagnosis, but trace_put() is
+ * called from the EXTI0 write IRQ for every mailbox byte. Keep it out of the
+ * normal timing image; enable explicitly with -DRISKY_DEBUG=1 when needed. */
+#ifndef RISKY_DEBUG
+#define RISKY_DEBUG 0
+#endif
+
 /* ========================================================================
  * Wire contract
  * ====================================================================== */
@@ -713,6 +720,7 @@ static uint8_t res_publish (void) {
  * cycle the Z80 is waiting on. tr_tick is the write counter the dumper
  * uses to tell the slots it has actually filled from the ones it has
  * not, which is why the two live in different arrays. */
+#if RISKY_DEBUG
 static void trace_put (uint8_t reg, uint8_t value) {
     const uint8_t pos = s_mb.tr_pos;
 
@@ -722,6 +730,7 @@ static void trace_put (uint8_t reg, uint8_t value) {
     s_mb.tr_tick    = (uint8_t)(s_mb.tr_tick + 1U);
     s_mb.tr_pos     = (uint8_t)((pos + 1U) % NEXTOR_TRACE_N);
 }
+#endif
 
 /* Print the recorded writes newest first, so whatever followed the
  * unexplained one is on top and the command itself is easy to find.
@@ -1459,7 +1468,11 @@ void Nextor_Service (void) {
 void Nextor_WriteByte (uint16_t address, uint8_t value) {
     const uint8_t reg = NEXTOR_MBOX_REG (address);
 
+#if RISKY_DEBUG
     trace_put (reg, value);
+#else
+    (void)reg;
+#endif
 
     if (reg == NEXTOR_MBOX_CMD) {
         uint8_t cmd = value;
