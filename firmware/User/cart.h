@@ -44,13 +44,11 @@
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
 
-/* RAM-backed MSX mapper window used by CART_MAP_SLOTTED. Four MiB is
- * exposed as 256 x 16 KiB banks selected through I/O ports FC..FF.
- * Keep this region separate from the normal game-image area. */
+/* Internal-SRAM mapper window used by CART_MAP_SLOTTED: ten 16 KiB banks. */
 #define CART_SLOTTED_BANK_PORT_BASE   0xFCU
-#define CART_SLOTTED_BANK_COUNT       256U
+#define CART_SLOTTED_BANK_COUNT       8U
 #define CART_SLOTTED_BANK_SIZE        (16U * 1024U)
-#define CART_SLOTTED_BANK_BASE_OFFSET (4U * 1024U * 1024U)
+#define CART_SLOTTED_SRAM_SIZE        (CART_SLOTTED_BANK_COUNT * CART_SLOTTED_BANK_SIZE)
 
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
@@ -59,9 +57,8 @@
 #define PSRAM_CART_BASE   0x80000000UL
 #define PSRAM_CART_SIZE   (8U * 1024U * 1024U)   /* 8 MiB */
 
-#if (CART_SLOTTED_BANK_BASE_OFFSET \
-     + (CART_SLOTTED_BANK_COUNT * CART_SLOTTED_BANK_SIZE)) > PSRAM_CART_SIZE
-#error "CART_SLOTTED mapper region exceeds PSRAM_CART_SIZE"
+#if CART_SLOTTED_SRAM_SIZE > (200U * 1024U)
+#error "CART_SLOTTED mapper region exceeds chip SRAM"
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -260,6 +257,7 @@ void Cart_HoldMSXWait_End (void);
 /* Mark the PSRAM-backed slotted mapper available after PSRAM_Init(). The
  * mapper remains inactive until Cart_SetMapper(CART_MAP_SLOTTED) is called. */
 void Cart_SetSlottedPSRAMReady (uint8_t ready);
+uint8_t Cart_InitSlottedSRAM (void);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that

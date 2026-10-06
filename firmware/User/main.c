@@ -75,27 +75,20 @@ int main (void) {
     printf ("SystemClk:%d\r\n", SystemCoreClock);
     printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
-    /* Bring up PSRAM after the cart mapper is already armed. It backs the
-     * expanded-slot mapper RAM (sub-slot 1, 4 MiB at
-     * CART_SLOTTED_BANK_BASE_OFFSET) and every PSRAM-backed cart mapper.
-     * The result MUST be published with Cart_SetSlottedPSRAMReady():
-     * until it is, the EXTI0 handler treats sub-slot 1 as an empty slot
-     * and leaves the data bus floating, which makes the BIOS/Nextor report
-     * "slot is expanded but nothing inside". */
+    /* Initialize the internal-SRAM slotted mapper independently of PSRAM. */
     {
+        const uint8_t sram_status = Cart_InitSlottedSRAM ();
+        Cart_SetSlottedPSRAMReady (sram_status != 0U);
         const uint8_t psram_status = PSRAM_Init ();
-        Cart_SetSlottedPSRAMReady (psram_status == PSRAM_OK);
         if (psram_status != PSRAM_OK) {
-            printf ("PSRAM init failed: status 0x%02X - sub-slot 1 stays "
-                    "empty\r\n", psram_status);
+            printf ("PSRAM init failed: status 0x%02X\r\n", psram_status);
         } else {
-            printf ("PSRAM ready: mapper RAM window at PSRAM+0x%08X "
-                    "(%u x %u KiB)\r\n",
-                    (unsigned)(PSRAM_CART_BASE
-                               + CART_SLOTTED_BANK_BASE_OFFSET),
-                    (unsigned)(CART_SLOTTED_BANK_COUNT),
-                    (unsigned)(CART_SLOTTED_BANK_SIZE / 1024U));
+            printf ("PSRAM ready for game images\r\n");
         }
+        printf ("Slotted SRAM: %s (%u x %u KiB)\r\n",
+                sram_status ? "OK" : "FAILED",
+                (unsigned)CART_SLOTTED_BANK_COUNT,
+                (unsigned)(CART_SLOTTED_BANK_SIZE / 1024U));
     }
 
     /* USBHS host init. Powers up the controller so it's ready. */

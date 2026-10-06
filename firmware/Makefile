@@ -51,8 +51,8 @@ LINKER        := Ld/Link.ld
 # FLASH 576K; RAM region is 136K-1K = 135K (the linker script places RAM at
 # 0x20000000+1024 and keeps the first 1 KiB out of the region). Used to turn
 # the binutils size output into "bytes used / bytes free" in `showsize`.
-FLASH_SIZE    := 589824      # 576 * 1024
-RAM_SIZE      := 138240      # 135 * 1024
+FLASH_SIZE    := 524288      # 512 * 1024
+RAM_SIZE      := 203776      # 199 * 1024
 
 # --- Parallel builds --------------------------------------------------------
 # Default to -j8 unless the user passes -jN (including -j1) on the command
