@@ -473,6 +473,16 @@ static uint32_t s_boot_start_ms;
 
 static uint32_t s_next_probe;       /* ms timestamp of the next probe */
 
+/* Nonzero when the Z80 driver needs the service loop: a completed request
+ * is waiting for its answer, or a burst is still in flight. Long
+ * background work (raw_probe, USB enumeration) polls this between its
+ * blocking steps so a probe that started in a quiet moment never owns the
+ * service loop past the moment a request arrives - the pile-up documented
+ * below is exactly what happens without it. */
+uint8_t Nextor_RequestPending (void) {
+    return (s_mb.armed != 0U || s_mb.argp != s_mb.args) ? 1U : 0U;
+}
+
 static void raw_probe (void) {
     const uint32_t now = ms_now ();
 
@@ -529,6 +539,10 @@ static void raw_probe (void) {
         return;
     }
     s_next_probe = now;
+    /* The silence gate above opened before this call, and a request can
+     * still land in the microseconds in between. Never hand the bus to
+     * a probe while a request is already waiting. */
+    if (Nextor_RequestPending () != 0U) return;
     (void)RawDisk_Probe ();
 }
 
@@ -649,10 +663,33 @@ static void res_begin (void) {
     s_mb.status &= (uint8_t)~NEXTOR_STAT_RX_AVAIL;
 }
 
+/* --- Answer crossing guard -----------------------------------------------
+ * Set by Nextor_Service to the seq of the request being answered, cleared
+ * by res_publish(). If the capture moves on before the answer is
+ * published (the driver gave up on that request and sent another), the
+ * published DONE would land on the driver's CURRENT command: it pops the
+ * wrong result, and the driver's register state desyncs - observed as a
+ * garbage LBA (0xc9c9c93b) right after a dropped request. */
+static volatile uint8_t s_answer_guard_active;
+static volatile uint8_t s_answer_guard_seq;
+
 /* Publish the result FIFO and release the driver. s_mb.res_end must
  * become visible before DONE, or MB_POLL can return and MB_GETRES can
- * read against a stale end pointer. */
-static void res_publish (void) {
+ * read against a stale end pointer. Returns 1 if published, 0 if the
+ * answer was suppressed because its request was overwritten. */
+static uint8_t res_publish (void) {
+    /* Crossing guard: the request this answer belongs to is already gone
+     * from the capture - the driver abandoned it and is now waiting on a
+     * different command. Publishing DONE here would be an answer for a
+     * request nobody is polling for, landing on the driver's current
+     * poll and desyncing the exchange. Suppress it: the driver's current
+     * request is untouched and gets serviced on the next pass. */
+    if (s_answer_guard_active != 0U
+        && (uint8_t)(s_mb.seq - s_answer_guard_seq) != 0U) {
+        s_answer_guard_active = 0U;
+        return 0U;
+    }
+    s_answer_guard_active = 0U;
     /* DONE is the acquire point for the Z80: once it sees DONE, the cart
      * interrupt may immediately serve DATA reads. Make the result bytes,
      * res_r/res_end, and ERR visible before publishing that status bit on
@@ -668,6 +705,7 @@ static void res_publish (void) {
         s_mb.status |= NEXTOR_STAT_ERR;
     }
     s_mb.status |= NEXTOR_STAT_DONE;
+    return 1U;
 }
 
 /* Record one mailbox write. IRQ context, one caller site, no branches
@@ -1061,23 +1099,41 @@ void Nextor_Service (void) {
      * DOS FCB layer's pattern) would otherwise read STATUS's stale
      * args[] while seq said the READ was the one being answered.
      *
-     * The snapshot is taken with interrupts DISABLED, so IRQ cannot
-     * land between the field reads. seq is the ticket number - IRQ
-     * increments it exactly once per completed burst capture, so a
-     * same-seq snapshot is internally consistent by construction.
+     * The snapshot is taken WITHOUT disabling interrupts. An IRQ-off
+     * window here was the instability driver under heavy disk I/O:
+     * the Z80 polls STATUS in a tight loop (one EXTI0 dispatch per
+     * poll, ~1-2 us apart), and every mailbox command re-entered this
+     * section, so a masked-IRQ window eventually landed on the start
+     * of a Z80 bus cycle - the EXTI0 dispatch then ran past the Z80's
+     * data-sample point and the machine read a stale/floating bus.
+     * The same window could also delay EXTI9_5 past the next memory
+     * cycle, making a mapper-bank write land AFTER the read that
+     * needed it (stale bank). SRAM vs PSRAM and priority experiments
+     * cannot fix a masked-IRQ window; removing it can.
      *
-     * Crucially, this NEVER drops a request. An earlier version
-     * returned without answering when seq moved mid-clear; that
-     * made the Z80 time out and retry, with 0.5-1.5 s stalls on
-     * every STATUS during the kernel's per-sector scan. The window
-     * is closed by disabling IRQ around the field reads: the IRQ
-     * will land the moment we re-enable, see armed=0, and complete
-     * normally on the next pass. */
+     * Instead the fields are re-validated with the seq ticket after
+     * reading them: Nextor_WriteByte increments seq exactly once per
+     * completed request, AFTER setting armed, so an unchanged seq
+     * means no burst completed while the fields were being read and
+     * the snapshot is internally consistent by construction. On any
+     * seq movement the read is simply retried - the loop runs at
+     * most twice in practice because the driver protocol never
+     * starts a new request before the previous one is answered with
+     * DONE (which only this code publishes).
+     *
+     * Crucially, this NEVER drops a request. Consumption (armed=0)
+     * happens only AFTER a validated pass, and if the validation
+     * never settles (not reachable through the driver protocol, but
+     * defensive against a crashed Z80 stream) we return without
+     * consuming: the request stays armed and the next pass retries.
+     * That is always safe - a retry is just latency, while acting on
+     * a torn snapshot would answer an old request with another
+     * request's LBA. */
     uint8_t cmd;
     /* Snapshot fields are kept as separate locals because the log needs
      * cmd / seq / nargs / lba after the answer path runs and those
-     * fields are no longer stable (IRQ has been re-enabled and the Z80
-     * is reading the response FIFO). */
+     * fields are no longer stable (IRQ is live and the Z80 is reading
+     * the response FIFO). */
     uint8_t  snap_seq;
     uint8_t  snap_raw;
     uint8_t  snap_arg;
@@ -1085,20 +1141,43 @@ void Nextor_Service (void) {
     uint32_t snap_lba;
     log_snap snap;
     {
-        __disable_irq ();
-        s_mb.armed = 0U;
-        cmd        = s_mb.cmd;
-        snap_raw   = s_mb.raw;
-        snap_seq   = s_mb.seq;
-        snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
-        snap_lba   = arg_lba ();
-        /* A breadcrumb's payload is args[0]. Read it in the same critical
-         * section as everything else: a new command byte resets argp, so
-         * reading it afterwards would race the next marker and report its
-         * value instead. */
-        snap_arg   = (snap_nargs > 0U) ? s_mb.args[0] : 0U;
-        __enable_irq ();
+        /* Bounded so a pathological Z80 stream cannot wedge Service;
+         * every real burst passes on the first or second iteration. */
+        unsigned tries = 8U;
+        for (;;) {
+            const uint8_t seq0 = s_mb.seq;
+            cmd         = s_mb.cmd;
+            snap_raw    = s_mb.raw;
+            snap_seq    = seq0;
+            snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
+            snap_lba   = arg_lba ();
+            /* A breadcrumb's payload is args[0]. Read it in the same
+             * pass as everything else: a new command byte resets argp,
+             * so reading it afterwards would race the next marker and
+             * report its value instead. */
+            snap_arg   = (snap_nargs > 0U) ? s_mb.args[0] : 0U;
+            if ((s_mb.seq == seq0) && (s_mb.armed != 0U)) {
+                /* Coherent: consume so the capture can accept the next
+                 * burst. Ordering is safe because DONE for this request
+                 * is not published yet, so the Z80 is still polling
+                 * STATUS and cannot have started a new burst. */
+                s_mb.armed = 0U;
+                break;
+            }
+            if (--tries == 0U) {
+                /* Torn snapshot; leave the request armed and retry on
+                 * the next pass. */
+                return;
+            }
+        }
     }
+
+    /* Arm the crossing guard: everything from here to res_publish() is
+     * the answer for snap_seq. If the capture moves on in the meantime
+     * (slow USB answer, driver timeout), res_publish() suppresses the
+     * DONE instead of letting it land on the driver's next command. */
+    s_answer_guard_seq    = snap_seq;
+    s_answer_guard_active = 1U;
 
     snap.cmd   = cmd;
     snap.raw   = snap_raw;
@@ -1358,8 +1437,12 @@ void Nextor_Service (void) {
     snap.nres  = (uint16_t)(s_mb.res_end - s_mb.res_r);
     snap.media = s_mb.res[0];
 
-    res_publish ();
-    log_result (&snap);
+    if (res_publish ()) {
+        log_result (&snap);
+    } else {
+        printf ("[nx] --- answer for #%u suppressed (its request was "
+                "overwritten before DONE) ---\r\n", (unsigned)snap.seq);
+    }
 }
 
 /* ========================================================================

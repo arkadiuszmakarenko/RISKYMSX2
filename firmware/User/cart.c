@@ -382,9 +382,23 @@ int Cart_SetMapper (Cart_Mapper m) {
     EXTI->INTFR = EXTI_INTENR_MR8;
     if (Cart_MapperHasSubslots (m)) {
         EXTI->INTENR |= EXTI_INTENR_MR8;
-        /* PFIC priorities are encoded in the upper nibble. Keep the
-         * cycle-critical EXTI0 VTF IRQ at 0x00 and let this bookkeeping IRQ
-         * run one level below it. Configure priority before arming VTF. */
+        /* PFIC priorities: EXTI9_5 must be EQUAL to EXTI0 (0x00), never
+         * strictly lower. Two reasons, both learned the hard way:
+         *   1. These are both VTF channels, and VTF-to-VTF preemption is
+         *      not reliable on this core - every configuration where
+         *      EXTI0 could preempt EXTI9_5 mid-handler (priority 0x10 vs
+         *      0x00) produced hard lockups, while equal priority (which
+         *      serializes dispatch) boots.
+         *   2. Serialization is free here: /SLTSL (EXTI0) and /IORQ
+         *      (EXTI9_5) cycles are mutually exclusive on the Z80 bus, so
+         *      the two IRQs never truly overlap - dispatch order just
+         *      follows bus event order. The bank capture completes inside
+         *      the OUT cycle (~350 ns), ~600 ns before the next memory
+         *      cycle can pend EXTI0, so the bank register is always
+         *      stable before the read that uses it.
+         * This mirrors the original working design's 0x01-vs-0x00 pair,
+         * which lands in the same preemption group. Configure priority
+         * before arming VTF. */
         NVIC_SetPriority (EXTI9_5_IRQn, 0x00);
         SetVTFIRQ ((uint32_t)EXTI9_5_IRQHandler, EXTI9_5_IRQn, 1, ENABLE);
         __asm__ volatile ("fence iorw, iorw" ::: "memory");
@@ -576,6 +590,8 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
     EXTI->INTENR &= ~EXTI_INTENR_MR8;
     EXTI->INTFR = EXTI_INTENR_MR8;
+    /* Equal to EXTI0 (0x00): the two VTF channels are serialized, never
+     * nested - see Cart_SetMapper for the full rationale. */
     NVIC_SetPriority (EXTI9_5_IRQn, 0x00);
     /* Slot 0 is reserved for the cycle-critical EXTI0 mapper handler. Keep
      * slot 1 programmed with the fixed bank-register handler, but disabled
@@ -597,7 +613,7 @@ void Init_Cart (void) {
     if (s_msx_wait_held == 0U) {
         NVIC_EnableIRQ (EXTI0_IRQn);
     }
-    NVIC_SetPriority (EXTI0_IRQn, 0x10);
+    NVIC_SetPriority (EXTI0_IRQn, 0x00);
     __enable_irq();
 }
 

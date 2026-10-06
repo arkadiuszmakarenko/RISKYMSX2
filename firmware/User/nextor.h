@@ -243,6 +243,10 @@ void Nextor_Init (void);
 /* Main-loop service hook: drains the command in flight into the result
  * FIFO. Must be called from main(), never from IRQ context - it is the
  * only place blocking disk work is allowed. */
+/* Nonzero while the Z80 driver has a mailbox request waiting or a burst
+ * in flight. Long background work (USB probes, enumeration) polls this
+ * between its blocking steps to yield the service loop immediately. */
+uint8_t Nextor_RequestPending (void);
 void Nextor_Service (void);
 
 /* Called by the USB layer when the stick is removed/re-plugged (or the

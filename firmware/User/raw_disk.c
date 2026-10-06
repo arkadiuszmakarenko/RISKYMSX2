@@ -17,6 +17,7 @@
 #include "debug.h"
 #include "usb_disk.h"
 #include "raw_disk.h"
+#include "nextor.h"
 
 /* ------------------------------------------------------------------------- */
 /* State                                                                     */
@@ -119,6 +120,11 @@ uint8_t RawDisk_Probe (void) {
     uint32_t bsize   = 0U;
     uint8_t  inq[36];
 
+    /* A request can arrive between raw_probe's silence gate and this
+     * call - never start USB work while one is waiting. Aborting here
+     * costs one probe retry; running anyway costs a dropped request. */
+    if (Nextor_RequestPending () != 0U) return 0U;
+
     s.probed = 1U;
 
     /* Enumeration may take hundreds of milliseconds on a freshly attached
@@ -128,6 +134,10 @@ uint8_t RawDisk_Probe (void) {
         s.sectors = 0U;
         return 0U;
     }
+
+    /* Enumeration can take hundreds of milliseconds; re-check before
+     * committing to the READ CAPACITY / INQUIRY phases. */
+    if (Nextor_RequestPending () != 0U) return 0U;
 
     /* READ CAPACITY (10), falling back to (16) for a stick larger than 2 TiB
      * or one that refuses the 10-byte form. This is the "geometry and block

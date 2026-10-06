@@ -275,6 +275,12 @@ uint8_t USBH_EnumRootDevice (uint8_t usb_port) {
 
     enum_cnt = 0;
 ENUM_START:
+    /* Yield to the Z80 driver before each enumeration attempt: this loop
+     * sits behind hundreds of milliseconds of Delay_Ms backoff, and a
+     * mailbox request that arrives mid-probe must not wait for it. The
+     * error code means "not enumerated this pass, retry later" to every
+     * caller - the probe state machine is fully polled and re-runs. */
+    if (Nextor_RequestPending () != 0U) return ERR_USB_DISCON;
     Delay_Ms (100);
     enum_cnt++;
     Delay_Ms (8 << enum_cnt);
@@ -282,6 +288,7 @@ ENUM_START:
     /* USBHS has no "begin/end reset" mode arg; it just resets. */
     USBHSH_ResetRootHubPort ();
     for (i = 0, s = 0; i < DEF_RE_ATTACH_TIMEOUT; i++) {
+        if (Nextor_RequestPending () != 0U) return ERR_USB_DISCON;
         if (USBHSH_EnableRootHubPort (&RootHubDev[usb_port].bSpeed)
                 == ERR_SUCCESS) {
             i = 0;
@@ -844,8 +851,22 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
 
     PSRAMDMASet ((uint32_t *)sram_src, psram_addr, &dmas);
     PSRAM_DMA_Cmd (ENABLE);
-    while ((PSRAM->ISR & 0x2U) == 0U) {            /* wait DMATF */
-        /* could WFI here but the DMA finishes fast (1 MiB / 8-word burst) */
+    /* Bounded wait: a normal burst completes in microseconds, but if the
+     * PSRAM controller wedges (glitchy device - a long-standing suspicion
+     * on this board) this spin would otherwise hold the main loop forever
+     * with interrupts live: the cart keeps serving Z80 cycles, the mailbox
+     * never gets its answer, and the MSX hangs in its poll loop - the
+     * observed "lock". Bail out with an error so the load fails cleanly
+     * instead. */
+    uint32_t guard = 2000000U;                    /* ~10 ms of spins */
+    while ((PSRAM->ISR & 0x2U) == 0U) {           /* wait DMATF */
+        if (--guard == 0U) {
+            PSRAM_DMA_Cmd (DISABLE);
+            PSRAM_ClearITPendingBit (PSRAM_DMATF);
+            printf ("USB: PSRAM DMA stuck at 0x%08lx (%lu bytes)\r\n",
+                    (unsigned long)psram_addr, (unsigned long)byte_count);
+            return 2U;
+        }
     }
     PSRAM_ClearITPendingBit (PSRAM_DMATF);
     PSRAM_DMA_Cmd (DISABLE);
@@ -884,6 +905,9 @@ uint8_t USB_TryEnsureEnumerated (void) {
      *    internally, so this loop is mostly for the f_mount side. */
     uint8_t r = DEF_ERR_ENUM;
     for (int tries = 0; tries < 5; tries++) {
+        /* Yield the service loop the moment the Z80 asks for anything:
+         * a probe must never own the bus past a request arrival. */
+        if (Nextor_RequestPending () != 0U) return DEF_ERR_ENUM;
         r = USBH_PreDeal ();
         if (r == DEF_ERR_DETECT) {
             if (s_fatfs_mounted) {

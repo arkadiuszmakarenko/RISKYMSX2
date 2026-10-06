@@ -77,7 +77,16 @@ void USBHS_RCC_Init(FunctionalState sta)
                 RCC_USBHSPLLReferConfig(RCC_USBHSPLLCKREFCLK_20M);
             }
             RCC->CTLR |= RCC_USBHSPLLON;
-            while (!(RCC->CTLR & RCC_USBHSPLLRDY));
+            /* Bounded wait: a silent infinite spin here leaves the cart
+             * looking dead with no diagnostics. If the PLL fails to lock,
+             * continue - USB transactions will fail with their own
+             * timeouts and the console will say so. */
+            {
+                uint32_t pll_guard = 2000000U;    /* ~10 ms of spins */
+                while (!(RCC->CTLR & RCC_USBHSPLLRDY)) {
+                    if (--pll_guard == 0U) break;
+                }
+            }
         }
 
         /* Enable UTMI Clock */
