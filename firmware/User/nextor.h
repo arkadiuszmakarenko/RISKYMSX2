@@ -138,6 +138,25 @@ extern "C" {
 #define NEXTOR_MBOX_REG(address) \
     ((uint8_t)((uint16_t)(address) - NEXTOR_MBOX_BASE))
 
+/* Is `address` inside the 16-byte mailbox window at NEXTOR_MBOX_BASE?
+ *
+ * Written as a right-shift compare instead of the obvious
+ * `(address & 0xFFF0) == NEXTOR_MBOX_BASE`, because 0x7FF0 does not fit
+ * a 12-bit signed immediate: the masked form makes the compiler
+ * materialise 0xFFF0 and 0x7FF0 as two separate constants before the
+ * AND and the compare (six instructions), while
+ * `(address >> 4) == 0x7FF` needs a shift plus one immediate compare
+ * (three instructions) - 0x7FF is exactly the largest value a 12-bit
+ * signed immediate can hold. The two predicates agree for every 16-bit
+ * address: both are true exactly on 0x7FF0..0x7FFF.
+ *
+ * This test sits in front of every ROM read and every bank write in the
+ * Nextor/Slotted handlers, and a hit is rare (the Z80 only reaches
+ * 0x7FF0..0x7FF5 for mailbox traffic), so the three-instruction miss
+ * path is what the hot cycles actually pay. */
+#define NEXTOR_IN_MBOX_WINDOW(address) \
+    (((address) >> 4) == (NEXTOR_MBOX_BASE >> 4))
+
 /* STATUS bits (bit7 MSB first - the driver tests them as a byte). */
 #define NEXTOR_STAT_READY         0x80U   /* firmware alive            */
 #define NEXTOR_STAT_DONE          0x40U   /* command finished           */

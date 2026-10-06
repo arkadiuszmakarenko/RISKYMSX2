@@ -54,7 +54,7 @@
  //  #define SYSCLK_120MHz_HCLK_60MHz_HSI   120000000
  // #define SYSCLK_240MHz_HCLK_120MHz_HSI  240000000
  // #define SYSCLK_350MHz_HCLK_175MHz_HSI  350000000
-//#define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
+//
 
 /*Only suitable for commercial applications, with a temperature not exceeding 70 °C and good heat dissipation*/
 /*
@@ -63,7 +63,8 @@
 */
 
 /* Clock Definitions */
- #define SYSCLK_480MHz_HCLK_240MHz_HSE 480000000
+ //#define SYSCLK_480MHz_HCLK_240MHz_HSE 480000000
+ #define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
 uint32_t HCLKClock;
 #ifdef SYSCLK_HCLK_HSE
 uint32_t SystemClock = SYSCLK_HCLK_HSE; /* System Clock Frequency */

@@ -754,9 +754,30 @@ uint8_t Cart_ReadWriteData (void) {
  * trigger. Each port selects one 16 KiB bank for a CPU page. The handler
  * only samples the write and never drives the data bus. */
 void EXTI9_5_IRQHandler (void) {
-    if ((EXTI->INTFR & EXTI_INTENR_MR8) == 0U) return;
+    /* Write-1-to-clear with NO read-back guard. The EXTI9_5 vector covers
+     * lines 5..9, but this firmware only ever arms line 8 (PE8/~IORQ):
+     * EXTI->FTENR/RTENR touch TR0 and TR8 only, and EXTI->INTENR is only
+     * ever written with MR0/MR8. A request on this vector therefore always
+     * means MR8 is pending, so the old `if ((INTFR & MR8) == 0) return;`
+     * load-and-branch was dead code - and it sat on the hottest path in
+     * the firmware, because EVERY I/O instruction in the MSX (VDP 0x98,
+     * PPI 0xA0, slot registers, ...) asserts ~IORQ and lands here, not
+     * just our own mapper ports. */
     EXTI->INTFR = EXTI_INTENR_MR8;
 
+    /* Cheapest discriminator first. The address bus is stable for the
+     * whole I/O cycle and GPIOD is a plain GPIO read, so a foreign I/O
+     * cycle is rejected before we touch GPIOE, the mapper state, or the
+     * settle spin. This replaces the old order (mapper check, GPIOE
+     * sample, ~IORQ test, 4096-entry spin, THEN port test), which burned
+     * ~23 instructions to reach the same `return`. */
+    const uint8_t port = (uint8_t)(GPIOD->INDR & 0x00FFU);
+    if (port < CART_SLOTTED_BANK_PORT_BASE
+        || port >= CART_SLOTTED_BANK_PORT_BASE + 4U) return;
+
+    /* Still required: every other mapper leaves ports FC..FF to the rest
+     * of the machine, so the line is masked there - this is the belt to
+     * that braces, and it now only runs for our four ports. */
     if (!Cart_MapperHasSubslots (g_mapper)) return;
 
     uint32_t ctrl = GPIOE->INDR;
@@ -775,17 +796,23 @@ void EXTI9_5_IRQHandler (void) {
     }
     if ((ctrl & CART_IORQ_MASK) != 0U) return;
 
-    const uint8_t port = (uint8_t)(GPIOD->INDR & 0x00FFU);
-    if (port < CART_SLOTTED_BANK_PORT_BASE
-        || port >= CART_SLOTTED_BANK_PORT_BASE + 4U) return;
-
     const unsigned page = (unsigned)(port - CART_SLOTTED_BANK_PORT_BASE);
     if ((ctrl & CART_WR_MASK) == 0U) {
         /* OUT (FC..FF),A: latch only the page-bank register. The actual
          * mapper RAM reads and writes are memory cycles handled by the
          * EXTI0 cart handler, not by this /IORQ IRQ. */
         s_slotted_bank_regs[page] = Cart_ReadWriteData ();
-        __asm__ volatile ("fence iorw, iorw" ::: "memory");
+        /* NO fence here. `fence iorw, iorw` orders DEVICE accesses against
+         * memory accesses; s_slotted_bank_regs is plain SRAM and its only
+         * reader is Cart_DriveSlottedSRAMByte / Cart_WriteSlottedSRAMByte,
+         * running later on the SAME hart (EXTI0 preempts this handler or
+         * runs after mret). RVWMMO guarantees that a hart's load observes
+         * its own youngest program-order store to the same address, and a
+         * preempting handler is program-order after this store - so the
+         * byte is visible with no barrier. The `volatile` qualifier on
+         * s_slotted_bank_regs already stops the compiler from moving it.
+         * A fence here costs an instruction plus a pipeline drain on the
+         * capture path for nothing. */
     }
 }
 
@@ -2146,7 +2173,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                  * FFFF has already been handled above when M1 identifies an
                  * SSR access. */
                 if (g_subslot_reg == 0U
-                        && (address & 0xFFF0U) != NEXTOR_MBOX_BASE) {
+                        && !NEXTOR_IN_MBOX_WINDOW (address)) {
                     const uint32_t bias = (address < 0x8000U)
                                         ? g_state->bankOffsets[0]
                                         : g_state->bankOffsets[8];
@@ -2161,7 +2188,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                     const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
 
                     if (subslot == 0U) {
-                        if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+                        if (NEXTOR_IN_MBOX_WINDOW (address)) {
                             /* Mailbox register. nextor.c owns the FIFO and
                              * the status bits; route the cycle only. */
                             const uint8_t v = Nextor_ReadByte (address);
@@ -2218,7 +2245,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                  * opcode fetch, not a register write. */
                 g_subslot_reg = w;
             } else if (subslot == 0U) {
-                if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+                if (NEXTOR_IN_MBOX_WINDOW (address)) {
                     /* Mailbox: command byte / argument push. */
                     Nextor_WriteByte (address, w);
                 } else if (address == NEXTOR_BANK_REG_PAGE1) {
@@ -2350,7 +2377,7 @@ void Cart_EXTI0_Slotted_Handler (void) {
                  * still answers the secondary-slot register at 0xFFFF
                  * above, which is what makes the BIOS report the slot as
                  * expanded. */
-                if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+                if (NEXTOR_IN_MBOX_WINDOW (address)) {
                     value = Nextor_ReadByte (address);
                     GPIOB->OUTDR = (uint32_t)value << 8;
                     GPIOB->CFGHR = CART_BUS_ON;
@@ -2384,7 +2411,7 @@ void Cart_EXTI0_Slotted_Handler (void) {
                     Cart_WriteSlottedSRAMByte (address, page, value);
                 } else if (subslot == 0U) {
                     /* Mailbox push plus the ASCII16K bank latches. */
-                    if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+                    if (NEXTOR_IN_MBOX_WINDOW (address)) {
                         Nextor_WriteByte (address, value);
                     } else if (address == NEXTOR_BANK_REG_PAGE1) {
                         g_state->bankOffsets[0] =
