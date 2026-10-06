@@ -88,25 +88,14 @@ extern const uint32_t terminal_rom_len;
 
 /* Expanded-slot state. The sub-slot register follows the MSX convention:
  * two bits select the sub-slot for each 16 KiB CPU page. Sub-slot 0 is
- * flash-backed/read-only, sub-slot 1 is the internal-SRAM mapper-RAM window,
+ * flash-backed/read-only, sub-slot 1 is the PSRAM mapper-RAM window,
  * sub-slots 2/3 are electrically empty. */
 volatile uint8_t g_subslot_reg = 0x00U;
 static volatile uint8_t s_slotted_psram_ready;
 static volatile uint8_t s_slotted_bank_regs[4] = { 0U, 0U, 0U, 0U };
-static volatile uint8_t s_slotted_sram[CART_SLOTTED_SRAM_SIZE];
 
 void Cart_SetSlottedPSRAMReady (uint8_t ready) {
     s_slotted_psram_ready = (ready != 0U) ? 1U : 0U;
-}
-
-uint8_t Cart_InitSlottedSRAM (void) {
-    volatile uint32_t *const mem = (volatile uint32_t *)s_slotted_sram;
-    const unsigned words = CART_SLOTTED_SRAM_SIZE / sizeof(uint32_t);
-    for (unsigned i = 0U; i < words; ++i) mem[i] = 0xA55A0000U ^ i;
-    __asm__ volatile ("fence iorw, iorw" ::: "memory");
-    for (unsigned i = 0U; i < words; ++i)
-        if (mem[i] != (0xA55A0000U ^ i)) return 0U;
-    return 1U;
 }
 
 /* Which mappers implement the expanded-slot protocol: the secondary-slot
@@ -120,24 +109,24 @@ int Cart_MapperHasSubslots (Cart_Mapper m) {
 }
 
 static inline __attribute__((always_inline))
-void Cart_DriveSlottedSRAMByte (uint16_t address, unsigned page) {
-    const unsigned bank = (unsigned)s_slotted_bank_regs[page]
-                        % CART_SLOTTED_BANK_COUNT;
-    const uint32_t off = ((uint32_t)bank * CART_SLOTTED_BANK_SIZE)
+void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page) {
+    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
+                       + ((uint32_t)s_slotted_bank_regs[page]
+                          * CART_SLOTTED_BANK_SIZE)
                        + ((uint32_t)address & 0x3FFFU);
-    const uint8_t value = s_slotted_sram[off];
+    const uint8_t value = *(const volatile uint8_t *)(PSRAM_CART_BASE + off);
     GPIOB->OUTDR = (uint32_t)value << 8;
     GPIOB->CFGHR = CART_BUS_ON;
 }
 
 static inline __attribute__((always_inline))
-void Cart_WriteSlottedSRAMByte (uint16_t address, unsigned page,
-                                uint8_t value) {
-    const unsigned bank = (unsigned)s_slotted_bank_regs[page]
-                        % CART_SLOTTED_BANK_COUNT;
-    const uint32_t off = ((uint32_t)bank * CART_SLOTTED_BANK_SIZE)
+void Cart_WriteSlottedPSRAMByte (uint16_t address, unsigned page,
+                                 uint8_t value) {
+    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
+                       + ((uint32_t)s_slotted_bank_regs[page]
+                          * CART_SLOTTED_BANK_SIZE)
                        + ((uint32_t)address & 0x3FFFU);
-    s_slotted_sram[off] = value;
+    *(volatile uint8_t *)(PSRAM_CART_BASE + off) = value;
     __asm__ volatile ("fence iorw, iorw" ::: "memory");
 }
 
@@ -804,7 +793,7 @@ void EXTI9_5_IRQHandler (void) {
         s_slotted_bank_regs[page] = Cart_ReadWriteData ();
         /* NO fence here. `fence iorw, iorw` orders DEVICE accesses against
          * memory accesses; s_slotted_bank_regs is plain SRAM and its only
-         * reader is Cart_DriveSlottedSRAMByte / Cart_WriteSlottedSRAMByte,
+         * reader is Cart_DriveSlottedPSRAMByte / Cart_WriteSlottedPSRAMByte,
          * running later on the SAME hart (EXTI0 preempts this handler or
          * runs after mret). RVWMMO guarantees that a hart's load observes
          * its own youngest program-order store to the same address, and a
@@ -2204,7 +2193,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                         }
                     } else if (subslot == 1U
                                && s_slotted_psram_ready != 0U) {
-                        Cart_DriveSlottedSRAMByte (address, page);
+                        Cart_DriveSlottedPSRAMByte (address, page);
                     } else {
                         /* Empty sub-slot: leave the data bus floating. */
                         GPIOB->CFGHR = CART_BUS_OFF;
@@ -2212,8 +2201,8 @@ void Cart_EXTI0_Nextor_Handler (void) {
                 }
             }
         } 
-        
-            while (ctrl &  CART_WR_MASK) {
+
+        while (ctrl &  CART_WR_MASK) {
         ctrl = GPIOE->INDR;
         if ((ctrl & CART_SLTSL_MASK) != 0U) {
             GPIOB->CFGHR = CART_BUS_OFF;
@@ -2262,7 +2251,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                  * then floats those addresses to 0xFF instead of
                  * indexing out of bounds. */
             } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                Cart_WriteSlottedSRAMByte (address, page, w);
+                Cart_WriteSlottedPSRAMByte (address, page, w);
             }
             /* The Z80 owns the data bus during writes. */
 
@@ -2393,7 +2382,7 @@ void Cart_EXTI0_Slotted_Handler (void) {
                     GPIOB->CFGHR = CART_BUS_OFF;
                 }
             } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                Cart_DriveSlottedSRAMByte (address, page);
+                Cart_DriveSlottedPSRAMByte (address, page);
             } else {
                 /* Empty sub-slot: leave the data bus floating. */
                 GPIOB->CFGHR = CART_BUS_OFF;
@@ -2408,7 +2397,7 @@ void Cart_EXTI0_Slotted_Handler (void) {
                 const unsigned subslot =
                     (g_subslot_reg >> (page * 2U)) & 0x3U;
                 if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                    Cart_WriteSlottedSRAMByte (address, page, value);
+                    Cart_WriteSlottedPSRAMByte (address, page, value);
                 } else if (subslot == 0U) {
                     /* Mailbox push plus the ASCII16K bank latches. */
                     if (NEXTOR_IN_MBOX_WINDOW (address)) {

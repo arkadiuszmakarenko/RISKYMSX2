@@ -75,18 +75,20 @@ int main (void) {
     printf ("SystemClk:%d\r\n", SystemCoreClock);
     printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
-    /* Initialize the internal-SRAM slotted mapper independently of PSRAM. */
+    /* Bring up PSRAM for the expanded-slot mapper (sub-slot 1) and for
+     * PSRAM-backed cart images. */
     {
-        const uint8_t sram_status = Cart_InitSlottedSRAM ();
-        Cart_SetSlottedPSRAMReady (sram_status != 0U);
         const uint8_t psram_status = PSRAM_Init ();
+        Cart_SetSlottedPSRAMReady (psram_status == PSRAM_OK);
         if (psram_status != PSRAM_OK) {
-            printf ("PSRAM init failed: status 0x%02X\r\n", psram_status);
+            printf ("PSRAM init failed: status 0x%02X - sub-slot 1 stays empty\r\n",
+                    psram_status);
         } else {
-            printf ("PSRAM ready for game images\r\n");
+            printf ("PSRAM ready: slotted mapper at PSRAM+0x%08X\r\n",
+                    (unsigned)(PSRAM_CART_BASE + CART_SLOTTED_BANK_BASE_OFFSET));
         }
-        printf ("Slotted SRAM: %s (%u x %u KiB)\r\n",
-                sram_status ? "OK" : "FAILED",
+        printf ("Slotted PSRAM: %s (%u x %u KiB)\r\n",
+                psram_status == PSRAM_OK ? "OK" : "FAILED",
                 (unsigned)CART_SLOTTED_BANK_COUNT,
                 (unsigned)(CART_SLOTTED_BANK_SIZE / 1024U));
     }

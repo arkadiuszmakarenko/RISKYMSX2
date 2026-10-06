@@ -63,8 +63,8 @@
 */
 
 /* Clock Definitions */
- //#define SYSCLK_480MHz_HCLK_240MHz_HSE 480000000
- #define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
+ #define SYSCLK_480MHz_HCLK_240MHz_HSE 480000000
+// #define SYSCLK_400MHz_HCLK_200MHz_HSI 400000000
 uint32_t HCLKClock;
 #ifdef SYSCLK_HCLK_HSE
 uint32_t SystemClock = SYSCLK_HCLK_HSE; /* System Clock Frequency */
