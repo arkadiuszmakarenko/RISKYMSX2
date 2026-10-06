@@ -187,6 +187,25 @@ WLINK_CHIP    ?= CH32V30X         # CH32V4x7 family is selected via CH32V30X id
 # WLINK_ADDR=0x08000000 only if you change the flash bank address.
 WLINK_ADDR    ?= 0x00000000       # WCH openocd flash bank base
 
+# --- Link-Time Optimization (bus-handler latency) -----------------------------
+# The EXTI0 handlers call Nextor_ReadByte/Nextor_WriteByte across translation
+# units, so every mailbox pop pays a call + prologue/epilogue inside the Z80
+# cycle deadline. LTO inlines those calls into the handlers and is worth
+# roughly 6-10% of the per-cycle serve time during disk I/O. OFF by default:
+# the WCH toolchain's LTO pass interacting with the HPE
+# ("WCH-Interrupt-fast") handler markers is not boot-tested. Enable, flash,
+# and verify a cold boot before keeping it:
+#
+#     make rebuild RISKY_LTO=1 && make flash
+#
+RISKY_LTO         ?= 0
+ifeq ($(RISKY_LTO),1)
+  CFLAGS_COMMON += -flto
+  LTO_LDFLAGS     := -flto
+else
+  LTO_LDFLAGS     :=
+endif
+
 # --- Directories -------------------------------------------------------------
 SRCDIRS        := Startup Debug Core Peripheral/src \
                   User User/FATFS User/USB_Host
@@ -334,7 +353,7 @@ all: $(ELF) $(HEX) $(LST) showsize
 #   --specs=nano.specs / nosys.specs are WCH's default newlib configs.
 $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 	@echo "  LD    $@"
-	@"$(CC)" $(ARCH_FLAGS) -Os -g -gdwarf-4 $(QUIET_LDFLAGS) \
+	@"$(CC)" $(ARCH_FLAGS) -Os -g -gdwarf-4 $(QUIET_LDFLAGS) $(LTO_LDFLAGS) \
 		-T "$(CURDIR)/$(LINKER)" \
 		-nostartfiles \
 		-Xlinker --gc-sections \

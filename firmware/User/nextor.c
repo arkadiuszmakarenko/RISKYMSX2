@@ -1552,16 +1552,15 @@ uint8_t Nextor_ReadByte (uint16_t address) {
         /* Result pop. The driver pops a known count, so this only has
          * to stay in range; an empty FIFO returns 0xFF (the
          * floating-bus pattern) so a driver that over-pops sees a
-         * stable wrong value and bails instead of spinning forever. */
+         * stable wrong value and bails instead of spinning forever.
+         * Single range test: the pop path runs once per byte of a 512-
+         * byte answer, so every removed compare shows up in the bus
+         * duty cycle. */
         uint8_t *p   = s_mb.res_r;
         uint8_t *end = s_mb.res_end;
-        uint8_t v;
+        uint8_t  v;
         if (p < end) {
             v = *p;
-        } else {
-            v = 0xFFU;
-        }
-        if (p < end) {
             s_mb.res_r = ++p;
             if (p == end) {
                 s_mb.status &= (uint8_t)~NEXTOR_STAT_RX_AVAIL;

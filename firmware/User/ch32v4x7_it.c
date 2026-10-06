@@ -13,6 +13,7 @@
 
 void NMI_Handler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void HardFault_Handler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
+void Unhandled_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 
 /*********************************************************************
  * @fn      NMI_Handler
@@ -100,5 +101,50 @@ void HardFault_Handler(void)
  * output - polled, no IRQ needed). USART1_IRQHandler is intentionally
  * not defined here; the weak default in startup_ch32v4x7.S never runs
  * because USART_Printf_Init does not enable any USART1 interrupts. */
+
+/*********************************************************************
+ * @fn      Unhandled_IRQHandler
+ *
+ * @brief   Catch-all for any enabled-but-undefined interrupt vector.
+ *
+ * @return  never - prints and resets.
+ *
+ * The stock weak vector tail in startup_ch32v4x7.S was a silent
+ * `j 1b`: a single spurious interrupt (line glitch, peripheral errata,
+ * stray enable) locked the machine forever with no trace - the last
+ * console line simply became the last line ever. That matches the
+ * observed "log shows this and nothing after that" failures exactly.
+ * The startup tail now jumps here instead: dump mcause - which on this
+ * core is 0x80000000 | IRQ number, i.e. it NAMES the offending
+ * vector - over the raw UART path (printf-free, same technique as
+ * HardFault), then reset. Raw register writes are used because printf
+ * itself may be the interrupted context.
+ */
+void Unhandled_IRQHandler(void)
+{
+    uint32_t mcause;
+    __asm__ volatile("csrr %0, mcause" : "=r"(mcause));
+    volatile uint32_t * const uart = (volatile uint32_t *)0x40013800; /* USART1 */
+    static const char tag[] = "\r\n*** UIRQ mcause=";
+    for (int i = 0; tag[i]; i++) {
+        while (!(uart[0x0C / 4] & (1U << 7))) { /* wait TXE */
+        }
+        uart[0x04 / 4] = tag[i];
+    }
+    {
+        static const char hex[] = "0123456789abcdef";
+        for (int shift = 28; shift >= 0; shift -= 4) {
+            while (!(uart[0x0C / 4] & (1U << 7))) { }
+            uart[0x04 / 4] = hex[(mcause >> shift) & 0xF];
+        }
+        for (int i = 0; " *** reset ***\r\n"[i]; i++) {
+            while (!(uart[0x0C / 4] & (1U << 7))) { }
+            uart[0x04 / 4] = " *** reset ***\r\n"[i];
+        }
+    }
+    for (volatile int i = 0; i < 80000; i++) __asm__ volatile("nop");
+    NVIC_SystemReset();
+    while (1) { }
+}
 
 

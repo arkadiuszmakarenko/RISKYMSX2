@@ -315,8 +315,7 @@ DMA2_Channel9_IRQHandler:
 DMA2_Channel10_IRQHandler:  
 DMA2_Channel11_IRQHandler:  
 
-1:
-	j 1b
+	j	Unhandled_IRQHandler
 
 	.section	.text.handle_reset,"ax",@progbits
 	.weak	handle_reset

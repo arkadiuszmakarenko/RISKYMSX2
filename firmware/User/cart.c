@@ -382,32 +382,36 @@ int Cart_SetMapper (Cart_Mapper m) {
     EXTI->INTFR = EXTI_INTENR_MR8;
     if (Cart_MapperHasSubslots (m)) {
         EXTI->INTENR |= EXTI_INTENR_MR8;
-        /* PFIC priorities: EXTI9_5 must be EQUAL to EXTI0 (0x00), never
-         * strictly lower. Two reasons, both learned the hard way:
-         *   1. These are both VTF channels, and VTF-to-VTF preemption is
-         *      not reliable on this core - every configuration where
-         *      EXTI0 could preempt EXTI9_5 mid-handler (priority 0x10 vs
-         *      0x00) produced hard lockups, while equal priority (which
-         *      serializes dispatch) boots.
-         *   2. Serialization is free here: /SLTSL (EXTI0) and /IORQ
-         *      (EXTI9_5) cycles are mutually exclusive on the Z80 bus, so
-         *      the two IRQs never truly overlap - dispatch order just
-         *      follows bus event order. The bank capture completes inside
-         *      the OUT cycle (~350 ns), ~600 ns before the next memory
-         *      cycle can pend EXTI0, so the bank register is always
-         *      stable before the read that uses it.
-         * This mirrors the original working design's 0x01-vs-0x00 pair,
-         * which lands in the same preemption group. Configure priority
-         * before arming VTF. */
-        NVIC_SetPriority (EXTI9_5_IRQn, 0x00);
-        SetVTFIRQ ((uint32_t)EXTI9_5_IRQHandler, EXTI9_5_IRQn, 1, ENABLE);
-        __asm__ volatile ("fence iorw, iorw" ::: "memory");
-        __asm__ volatile ("fence.i" ::: "memory");
+        /* EXTI9_5 dispatch: VECTOR TABLE (see the VTF experiment
+         * conclusion above), but at priority 0x10 - a strictly LOWER
+         * preemption group than EXTI0's 0x00. This is the one piece the
+         * earlier experiments never isolated:
+         *
+         *   With the two IRQs in the same group (0x01 vs 0x00, or the
+         *   equal-VTF config), EXTI0 CANNOT preempt this handler - and
+         *   this handler contains a settle spin that runs up to ~600 ns
+         *   inside the /IORQ cycle. A Z80 memory cycle that pends during
+         *   that spin waits non-preemptibly, past the Z80's data-sample
+         *   point: the served opcode byte arrives late, the Z80 fetches
+         *   garbage, and the PC derails - the trace showed exactly that
+         *   (a burst interrupted by a storm of wild writes executing
+         *   data as code). It only takes one corrupted fetch, which is
+         *   why it is "time to time" and not constant.
+         *
+         *   At 0x10, EXTI0 (VTF, group 0) preempts this handler at any
+         *   point; the bank capture resumes after the fetch is served.
+         *   Vector dispatch + standard nesting is the reliable path -
+         *   the broken config was VTF-to-VTF preemption, which is gone.
+         *
+         * The residual theoretical race (EXTI0 preempting between the
+         * port sample and the bank-register store, delaying a bank
+         * switch by one cycle) only affects mapper-RAM software, and is
+         * strictly better than corrupting opcode fetches system-wide. */
+        NVIC_SetPriority (EXTI9_5_IRQn, 0x10);
         NVIC_EnableIRQ (EXTI9_5_IRQn);
     } else {
         EXTI->INTENR &= ~EXTI_INTENR_MR8;
         NVIC_DisableIRQ (EXTI9_5_IRQn);
-        SetVTFIRQ ((uint32_t)EXTI9_5_IRQHandler, EXTI9_5_IRQn, 1, DISABLE);
     }
 
     /* Flash selector mappers: reset the mailbox so the loader starts clean. */
@@ -590,13 +594,11 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
     EXTI->INTENR &= ~EXTI_INTENR_MR8;
     EXTI->INTFR = EXTI_INTENR_MR8;
-    /* Equal to EXTI0 (0x00): the two VTF channels are serialized, never
-     * nested - see Cart_SetMapper for the full rationale. */
-    NVIC_SetPriority (EXTI9_5_IRQn, 0x00);
-    /* Slot 0 is reserved for the cycle-critical EXTI0 mapper handler. Keep
-     * slot 1 programmed with the fixed bank-register handler, but disabled
-     * until Cart_SetMapper selects an expanded-slot mapper. */
-    SetVTFIRQ ((uint32_t)EXTI9_5_IRQHandler, EXTI9_5_IRQn, 1, DISABLE);
+    /* Vector-table dispatch, strictly below EXTI0's preemption group so
+     * the fetch handler can always preempt the bank capture - see
+     * Cart_SetMapper for the full rationale. Masked here; Cart_SetMapper
+     * arms it for expanded-slot mappers. */
+    NVIC_SetPriority (EXTI9_5_IRQn, 0x10);
     NVIC_DisableIRQ (EXTI9_5_IRQn);
 
     /* Install the no-mapper handler by default. main()/CLI installs the
@@ -2270,7 +2272,19 @@ void Cart_EXTI0_Nextor_Handler (void) {
  */
 
 void Cart_EXTI0_Slotted_Handler (void) {
+    /* The entry-time address sample exists ONLY for the FFFF-preserve
+     * hack below (a BIOS power-on scan edge case from the slower
+     * dispatch-latency era). It costs an APB read on EVERY served cycle,
+     * so it is compile-time optional: leave it on (default) for maximum
+     * cold-boot robustness, or build with -DCART_FFFF_ENTRY_SAMPLE=0 to
+     * reclaim ~5 cycles per cycle (~3% of the serve deadline) once the
+     * boot scan is verified on your machine. */
+#if !defined (CART_FFFF_ENTRY_SAMPLE)
+#define CART_FFFF_ENTRY_SAMPLE 1
+#endif
+#if CART_FFFF_ENTRY_SAMPLE
     const uint16_t entry_address = (uint16_t)GPIOD->INDR;
+#endif
     uint32_t ctrl = GPIOE->INDR;
 
     /* A late VTF entry must not drive a stale byte onto the bus. */
@@ -2296,10 +2310,17 @@ void Cart_EXTI0_Slotted_Handler (void) {
     /* The entry-time sample can still be mid-transition (T1 -> T3) for the
      * BIOS power-on scan, which is exactly when the secondary-slot
      * register at FFFF is read and written. Preserve an entry-time FFFF if
-     * the later sample has already moved off it. */
+     * the later sample has already moved off it.
+     * Disabled under CART_FFFF_ENTRY_SAMPLE=0: the entry sample costs an
+     * APB read on every served cycle, and with today's fast dispatch the
+     * mid-transition window it guarded (PSRAM-latency era) no longer
+     * opens. Verify the cold-boot slot scan still finds the expanded
+     * slot before keeping it disabled. */
+#if CART_FFFF_ENTRY_SAMPLE
     if (entry_address == 0xFFFFU && address != 0xFFFFU) {
         address = 0xFFFFU;
     }
+#endif
 
     if ((ctrl & CART_MREQ_MASK) == 0U) {
         if ((ctrl & CART_RD_MASK) == 0U) {
