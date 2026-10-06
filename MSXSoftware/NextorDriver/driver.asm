@@ -149,6 +149,8 @@ MB_ABORT	equ	05h
 MB_STAPEEK	equ	06h
 MB_IDENT	equ	07h
 
+INIT_STATUS_RETRIES	equ	0Ah
+
 ; Breadcrumbs. A marker is a single store to the mailbox command
 ; register followed by ONE byte in B - the register value the step is
 ; about - and no answer. The firmware prints the name and the value.
@@ -424,6 +426,56 @@ DO_DRVQ_GET_INIT_PARAMS:
 	call	MB_HANDSHAKE_CHK
 	jr	c,DO_DRVQ_INIT_FAIL
 	pop	de
+	; The mailbox is alive, so query the cached USB-medium state once
+	; during boot. A zero means no usable USB drive was discovered.
+	; Keep the driver installed so later STATUS polling can detect insertion.
+	ld	b,INIT_STATUS_RETRIES
+DO_DRVQ_INIT_STATUS:
+	push	bc
+	push	de
+	ld	a,MB_STATUS
+	call	MB_CMD0_1BYTE
+	pop	de
+	pop	bc
+	jr	c,DO_DRVQ_INIT_STATUS_NEXT
+	or	a
+	jr	nz,DO_DRVQ_INIT_OK
+DO_DRVQ_INIT_STATUS_NEXT:
+	dec	b
+	jr	z,DO_DRVQ_INIT_STATUS_FAIL
+	push	bc
+	push	de
+	ld	hl,MSG_MEDIA_RETRY
+	call	PRINT_WITH_DE
+	pop	de
+	pop	bc
+	jr	DO_DRVQ_INIT_STATUS_WAIT
+DO_DRVQ_INIT_STATUS_FAIL:
+	ld	hl,MSG_NO_MEDIA
+	call	PRINT_WITH_DE
+	jr	DO_DRVQ_INIT_OK
+DO_DRVQ_INIT_STATUS_WAIT:
+	; Give the firmware main loop time to complete USB discovery.
+	; Roughly 1 second at 3.58 MHz between status attempts.
+	push	bc
+	push	de
+	ld	d,4
+DO_DRVQ_INIT_STATUS_WAIT_OUTER:
+	ld	c,0FFh
+	; C counts the inner delay batches; do not reinitialise it while
+	; counting down, or this loop never completes.
+DO_DRVQ_INIT_STATUS_WAIT_MIDDLE:
+	ld	b,0
+DO_DRVQ_INIT_STATUS_WAIT_INNER:
+	djnz	DO_DRVQ_INIT_STATUS_WAIT_INNER
+	dec	c
+	jr	nz,DO_DRVQ_INIT_STATUS_WAIT_MIDDLE
+	dec	d
+	jr	nz,DO_DRVQ_INIT_STATUS_WAIT_OUTER
+	pop	de
+	pop	bc
+	jr	DO_DRVQ_INIT_STATUS
+DO_DRVQ_INIT_OK:
 	xor	a		;RESULT_OK
 	ld	b,0		;no TIMER_INT / EXTBIO hooks
 	ld	hl,0		;no page-3 work area
@@ -1911,6 +1963,12 @@ MSG_DEVICE_NAME:
 
 MSG_NO_ANSWER:
 	db	" - no answer from the cartridge mailbox",0
+
+MSG_NO_MEDIA:
+	db	" - USB drive not discovered; connect a USB drive",13,10,0
+
+MSG_MEDIA_RETRY:
+	db	" - USB drive not discovered; retrying...",13,10,0
 
 MSG_BAD_MAGIC:
 	db	" - mailbox answered with the wrong bytes at index ",0

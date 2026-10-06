@@ -488,6 +488,21 @@ static uint32_t s_boot_start_ms;
 
 static uint32_t s_next_probe;       /* ms timestamp of the next probe */
 
+/* Set by the STATUS/STAPEEK command path when the medium is reported
+ * absent. Forces raw_probe() to attempt USB enumeration on the very
+ * next idle pass, bypassing the rate-limit window a missing stick would
+ * otherwise sit in for NEXTOR_PROBE_RETRY_MS. Cleared as soon as the
+ * probe has been kicked off. */
+static volatile uint8_t s_probe_forced;
+
+void Nextor_ForceProbe (void) {
+    s_probe_forced = 1U;
+    /* Open the rate-limit gate so the very next idle pass is allowed to
+     * run, not a future one (a forced probe is also a "this attempt
+     * has just happened" and the gate would otherwise defer it). */
+    s_next_probe   = 0U;
+}
+
 /* Nonzero when the Z80 driver needs the service loop: a completed request
  * is waiting for its answer, or a burst is still in flight. Long
  * background work (raw_probe, USB enumeration) polls this between its
@@ -500,6 +515,15 @@ uint8_t Nextor_RequestPending (void) {
 
 static void raw_probe (void) {
     const uint32_t now = ms_now ();
+
+    /* A STATUS/STAPEEK that answered "no medium" can ask for an
+     * immediate probe here - this is the loop the driver really cares
+     * about: it is the path that makes "drive was inserted after boot"
+     * reliable. Without the explicit kick the rate-limit window would
+     * sit at NEXTOR_PROBE_RETRY_MS and a STATUS burst would see "0"
+     * for that whole window, which is exactly the kind of
+     * "no enumeration" the driver was reporting. */
+    const uint8_t forced = s_probe_forced;
 
     /* Never start a probe while the Z80 is talking. Checked FIRST, because
      * it is the strongest of the three rules and it is the one that was
@@ -549,11 +573,17 @@ static void raw_probe (void) {
      * has_probed() rather than an unconditional delay: a stick that has
      * never been tried must not be locked out by the rate limit an
      * earlier failed attempt established. */
-    if (RawDisk_HasProbed ()
+    if ((forced == 0U)
+        && RawDisk_HasProbed ()
         && (uint32_t)(now - s_next_probe) < NEXTOR_PROBE_RETRY_MS) {
         return;
     }
     s_next_probe = now;
+    /* Consume the forced-probe flag whether or not we actually run
+     * (a Z80 request that arrived between the gate and here is the
+     * one case where we did not, and the next STATUS will set it
+     * again). */
+    s_probe_forced = 0U;
     /* The silence gate above opened before this call, and a request can
      * still land in the microseconds in between. Never hand the bus to
      * a probe while a request is already waiting. */
@@ -1297,15 +1327,23 @@ void Nextor_Service (void) {
          * not disturb query 3's tracking, or a media check in between two
          * status requests would swallow the change.
          *
-         * No USB traffic and no probing here (see the header note):
-         * STATUS is polled far more often than anything else, including
-         * by the kernel's own startup code, and an enumeration retry in
-         * the middle of it would blow the driver's command budget. */
+         * No USB traffic here (see the header note): STATUS is polled
+         * far more often than anything else, including by the kernel's
+         * own startup code, and an enumeration retry in the middle of it
+         * would blow the driver's command budget. The "no medium" answer
+         * does, however, ask the main loop to run a probe on its very
+         * next idle pass - otherwise a missing stick would sit behind
+         * the rate-limit window (NEXTOR_PROBE_RETRY_MS) and the driver
+         * would see "0" for that whole interval, which is the
+         * "no enumeration" behaviour the driver was reporting. */
         {
             const uint8_t st = RawDisk_MediaState ();
 
             if (cmd == NEXTOR_CMD_STATUS) {
                 RawDisk_MediaLatchConsume ();
+            }
+            if (st == 0U) {
+                Nextor_ForceProbe ();
             }
             s_mb.res[0]  = st;
             s_mb.res_end = s_mb.res + 1U;

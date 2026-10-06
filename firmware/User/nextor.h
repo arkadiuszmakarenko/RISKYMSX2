@@ -275,6 +275,12 @@ void Nextor_Service (void);
  * context only - NOT IRQ safe. */
 void Nextor_CacheInvalidate (void);
 
+/* Ask the service loop to run a probe on its next idle pass, bypassing
+ * the rate-limit window a missing-stick STATUS would otherwise sit
+ * behind. Called from the STATUS/STAPEEK command path when the medium
+ * is reported absent. IRQ-safe. */
+void Nextor_ForceProbe (void);
+
 /* --- Code entries for Cart_EXTI0_Nextor_Handler (IRQ context) ------- */
 
 /* Read entry. The handler calls this ONLY for addresses inside the
