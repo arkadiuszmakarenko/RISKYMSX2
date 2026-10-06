@@ -2142,6 +2142,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
 
     uint32_t ctrl = GPIOE->INDR;
     uint16_t address = (uint16_t)GPIOD->INDR;
+    const uint8_t ssr_entry = g_subslot_reg;
 
         if ((ctrl & CART_RD_MASK) == 0U) {
             /* READ cycle. */
@@ -2151,7 +2152,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                  * "slot is expanded" flag. M1 low means opcode fetch, so
                  * an ordinary FFFF instruction fetch must not be
                  * reinterpreted as an SSR read. */
-                GPIOB->OUTDR = ((uint32_t)(uint8_t)~g_subslot_reg) << 8;
+                GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
                 GPIOB->CFGHR = CART_BUS_ON;
             } else {
                 /* The normal Nextor configuration has all four pages in
@@ -2161,7 +2162,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                  * sequence below. The mailbox must stay on the full decoder;
                  * FFFF has already been handled above when M1 identifies an
                  * SSR access. */
-                if (g_subslot_reg == 0U
+                if (ssr_entry == 0U
                         && !NEXTOR_IN_MBOX_WINDOW (address)) {
                     const uint32_t bias = (address < 0x8000U)
                                         ? g_state->bankOffsets[0]
@@ -2172,7 +2173,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                     /* Expanded-slot protocol: two bits per 16 KiB CPU page
                      * select the sub-slot. Sub-slot 0 keeps the ASCII16K
                      * ROM plus mailbox; sub-slot 1 is mapper RAM; 2/3 float. */
-                    const unsigned ssr = (unsigned)g_subslot_reg;
+                    const unsigned ssr = (unsigned)ssr_entry;
                     const unsigned page = (unsigned)(address >> 14);
                     const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
 
@@ -2220,8 +2221,8 @@ void Cart_EXTI0_Nextor_Handler (void) {
              * much as the ROM-read fast path above. */
             unsigned page = 0U;
             unsigned subslot = 0U;
-            if (g_subslot_reg != 0U) {
-                const unsigned ssr = (unsigned)g_subslot_reg;
+            if (ssr_entry != 0U) {
+                const unsigned ssr = (unsigned)ssr_entry;
                 page = (unsigned)(address >> 14);
                 subslot = (ssr >> (page * 2U)) & 0x3U;
             }
