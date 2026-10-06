@@ -110,6 +110,10 @@
 #define RISKY_DEBUG 0
 #endif
 
+#if !RISKY_DEBUG
+#define printf(...) do { } while (0)
+#endif
+
 /* ========================================================================
  * Wire contract
  * ====================================================================== */
@@ -169,10 +173,12 @@ static const uint16_t s_cmd_args[NEXTOR_CMD_MAX] = {
     0U,                                       /* 0x07 IDENT     */
 };
 
+#if RISKY_DEBUG
 static const char *const s_cmd_name[NEXTOR_CMD_MAX] = {
     "HANDSHAKE", "CAPACITY", "STATUS", "READ",
     "WRITE", "ABORT", "STAPEEK", "IDENT",
 };
+#endif
 
 /* Breadcrumb names, indexed by (command byte - NEXTOR_CMD_MARK_FIRST).
  *
@@ -425,6 +431,7 @@ static uint32_t ms_now (void) {
 /* Gap since the previous call, in the same units as ms_now(). The first
  * call has no previous reading to subtract from; take the reading and
  * report a zero gap rather than a wild one. */
+#if RISKY_DEBUG
 static uint32_t ms_since_prev (void) {
     static uint32_t prev;
     static uint8_t  primed;
@@ -440,6 +447,7 @@ static uint32_t ms_since_prev (void) {
     prev = now;
     return d;
 }
+#endif
 
 /* ms_now() reading taken in Nextor_Init, used by raw_probe's boot
  * delay. 0 until then (so a host-side unit test that never calls
