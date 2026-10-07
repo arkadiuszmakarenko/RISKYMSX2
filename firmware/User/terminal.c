@@ -39,7 +39,21 @@ TerminalMailbox g_term_mbox;
  * to be ambiguous ("is this row 21 the new one or the old one?").
  * One log line at session start settles it, and it costs one string.
  * Bump this whenever the key map changes. */
-#define TERM_MENU_VERSION "v4 (N=boot)"
+#define TERM_MENU_VERSION "v7 (DIR nav)"
+
+/* Maximum depth of the current-directory path the menu can hold. The
+ * full path assembled at boot time (e.g. "0:/A/B/C/file.ROM") is built
+ * out of this same buffer, so 64 bytes is enough for ~10 levels of
+ * 8.3-style nesting. f_opendir on this stick refused to open a path
+ * deeper than about 80 bytes in practice - keep the budget well below. */
+#define TERM_PATH_MAX   64U
+
+/* Display column budgets. The MSX screen is 32 columns and column 0
+ * is reserved for the sprite arrow, so the printable width is 31.
+ * "25 name + 1 sp + 5 size" = 31, which is what FILE_NAME_MAX already
+ * encodes. Directory rows use the full 25 name columns, followed by
+ * a two-space gap and the "DIR" marker. */
+#define TERM_NAME_COLS  (FILE_NAME_MAX - 1U)   /* 25 */
 
 typedef enum {
     MENU_LIST,
@@ -50,13 +64,21 @@ typedef enum {
 static struct {
     /* SFN (8.3 short name, e.g. "METALG~1.ROM") - what f_open() gets
      * for every file operation. LFN paths fail f_open with
-     * FR_NO_FILE (4) on our stick, so all operations use the SFN. */
+     * FR_NO_FILE (4) on our stick, so all operations use the SFN.
+     *
+     * For directory rows this holds the SFN of the directory itself
+     * (fi.altname, e.g. "SUB") or the literal string ".." for the
+     * parent-entry row. */
     char    names[TERM_MAX_FILES][FILE_NAME_MAX];
     /* LFN (long name, up to 25 printable chars) - DISPLAY ONLY.
      * Drawn in the file list so the menu stays human-readable; never
-     * used for f_open / path building. */
+     * used for f_open / path building.
+     *
+     * For directory rows the LFN is the same as the SFN unless the
+     * volume was formatted with LFN support, in which case the
+     * human-readable form is shown. */
     char    lfns[TERM_MAX_FILES][FILE_NAME_MAX];
-    uint32_t sizes[TERM_MAX_FILES];  /* bytes */
+    uint32_t sizes[TERM_MAX_FILES];  /* bytes - 0 for directory rows */
     uint16_t count;
     uint16_t sel;       /* currently-highlighted index (absolute,
                          * i.e. counts across pages) */
@@ -65,6 +87,17 @@ static struct {
                          * screen - s_menu.sel is REUSED as the
                          * mapper-row index on that screen, so this
                          * preserves which LFN to display. */
+    /* Per-row type flag. 0 = file, 1 = directory (including the
+     * synthetic ".. " row at index 0 of every non-root list). The
+     * file list reuses the same array for files and dirs, so the
+     * type travels with the row rather than with a separate path. */
+    uint8_t  is_dir[TERM_MAX_FILES];
+    /* Current directory relative to the volume root. The empty
+     * string means the root. A trailing '/' is always present when
+     * the string is non-empty, so the boot path is built as
+     * "0:/" + s_menu.cwd + s_menu.picked without any case-by-case
+     * separator logic. Bounded to TERM_PATH_MAX-1 chars. */
+    char     cwd[TERM_PATH_MAX];
     uint8_t  loaded;    /* "ROM was loaded into PSRAM" */
     MenuState state;
     char     picked[FILE_NAME_MAX]; /* SFN of the selected file - the
@@ -228,6 +261,9 @@ void Terminal_Reset (void) {
     s_menu.loaded = 0;
     s_menu.state  = MENU_LIST;
     s_menu.picked[0] = '\0';
+    /* Start at the volume root. A subsequent scan_usb() will list its
+     * contents. */
+    s_menu.cwd[0] = '\0';
     s_list_pending = 1U;
 }
 
@@ -318,7 +354,11 @@ static void print_file_list (void) {
     move_cursor (0, 0);
     print_menu_title ();
 
-    /* Files of the current page. */
+    /* Keep all 20 list rows available on every level. The previous
+     * cwd header consumed a row but paging and pointer positioning
+     * still assumed 20 visible entries, causing the last row to
+     * overlap the footer in subdirectories. */
+    const uint8_t body_offset = 1U;
     uint16_t start = (uint16_t)(s_menu.page * TERM_PAGE_SIZE);
     uint16_t end   = (uint16_t)(start + TERM_PAGE_SIZE);
     if (end > s_menu.count) end = s_menu.count;
@@ -326,38 +366,75 @@ static void print_file_list (void) {
     for (uint16_t i = start; i < end; i++) {
         /* Reserve column 0 for the sprite cursor - text starts at
          * column 1. */
-        move_cursor ((uint8_t)(1 + (i - start)), 1);
-        /* print the long name, padded to FILE_NAME_MAX for a stable
-         * column layout (operations keep using the SFN - see
-         * scan_usb). */
-        const char *n = s_menu.lfns[i];
-        for (int j = 0; j < FILE_NAME_MAX - 1; j++) {
-            char c = n[j];
-            if (c == '\0') {
-                for (; j < FILE_NAME_MAX - 1; j++) out_push (' ');
-                    break;
+        move_cursor ((uint8_t)(body_offset + (i - start)), 1);
+        /* Two column layouts share the same 25-char name budget:
+         *
+         *   file:       "<name padded to 25> <size>"
+         *   directory:  "<name padded to 25>  DIR"
+         *
+         * The synthetic "<DIR> .." row uses the same 8 chars at the
+         * front as "<DIR> ..", padded to 25 - unambiguous on screen
+         * and visibly distinct from an ordinary directory name. */
+        const char *n;
+        if (s_menu.is_dir[i]) {
+            if (s_menu.names[i][0] == '.' && s_menu.names[i][1] == '.' &&
+                s_menu.names[i][2] == '\0') {
+                /* "<DIR> .." - 8 chars, padded to 25 */
+                static const char kUp[] = "<DIR> ..";
+                for (int j = 0; j < 8; j++) out_push ((uint8_t)kUp[j]);
+                for (int j = 8; j < (int)TERM_NAME_COLS; j++) out_push (' ');
+            } else {
+                /* Use the full name width; don't prefix it with DIR,
+                 * since that clipped long folder names and pushed the
+                 * type marker past the right edge of the screen. */
+                n = s_menu.lfns[i];
+                for (int j = 0; j < (int)TERM_NAME_COLS; j++) {
+                    char c = n[j];
+                    if (c == '\0') {
+                        for (; j < (int)TERM_NAME_COLS; j++) out_push (' ');
+                        break;
+                    }
+                    out_push ((uint8_t)c);
+                }
             }
-            out_push ((uint8_t)c);
+            out_str ("  DIR");
+        } else {
+            /* file: 25 chars of name, padded, then size */
+            n = s_menu.lfns[i];
+            for (int j = 0; j < (int)TERM_NAME_COLS; j++) {
+                char c = n[j];
+                if (c == '\0') {
+                    for (; j < (int)TERM_NAME_COLS; j++) out_push (' ');
+                    break;
+                }
+                out_push ((uint8_t)c);
+            }
+            out_push (' ');
+            print_size (s_menu.sizes[i]);
         }
-        out_push (' ');
-        print_size (s_menu.sizes[i]);
         newline ();
     }
     if (s_menu.count == 0U) {
-        out_str ("  (no .ROM files on USB stick)");
+        move_cursor (body_offset, 1);
+        out_str ("  (empty directory)");
         newline ();
     }
 
     /* Two hint rows at the bottom: row 21 is the page indicator, row 22
-     * carries the key map. */
+     * carries the key map. They are anchored to the SAME physical
+     * rows as before (21/22), so the body region is now 20 rows tall
+     * when the cwd header is hidden, or 19 rows when it is shown.
+     * With TERM_PAGE_SIZE = 20 the unadorned list fills the screen;
+     * the cwd line costs one body row on a deep list, which is the
+     * only honest answer to the user's "where am I?" question. */
     char buf[32];
-    move_cursor ((uint8_t)(1 + TERM_PAGE_SIZE), 1);
+    move_cursor (21, 1);
     snprintf (buf, sizeof (buf), " Pg %u/%u",
               (unsigned)(s_menu.page + 1U), (unsigned)menu_page_count ());
     out_str (buf);
     newline ();
-    move_cursor ((uint8_t)(2 + TERM_PAGE_SIZE), 1);
-    out_str (" N=nextor B=mbr F=old ESC=scan");
+    move_cursor (22, 1);
+    out_str ("N=Nextor B=MBR ESC=back");
     newline ();
 }
 
@@ -390,39 +467,126 @@ static void print_mapper_menu (void) {
 /* FAT scan                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Copy a NUL-terminated string into a fixed-size buffer. Truncates
+ * silently if the source is longer than the buffer; the destination
+ * is always NUL-terminated as long as `cap > 0`. Same semantics as
+ * snprintf(src, cap, "%s", s) but smaller and avoids pulling in the
+ * full printf machinery for two hot callers. */
+static void term_str_copy (char *dst, const char *src, size_t cap) {
+    size_t k = 0;
+    if (cap == 0U) return;
+    while (src[k] != '\0' && k + 1U < cap) {
+        dst[k] = src[k];
+        k++;
+    }
+    dst[k] = '\0';
+}
+
+/* Build "0:/<cwd><sfx>" into `out` (NUL-terminated, bounded by
+ * `out_cap`). Always emits the volume prefix; the cwd (if any) is
+ * inserted with its trailing '/'. The result is the absolute path
+ * that f_open / f_opendir accept on this volume, and is what
+ * Terminal_BootCart used to assemble by hand out of "0:/" + name.
+ *
+ * Truncation is reported by returning 0 on overflow; the caller is
+ * expected to surface that to the UART and refuse the operation, not
+ * try to f_open a path that does not fit in our buffer. The LFN
+ * truncation in scan_usb() keeps SFNs within 12 chars by design, so
+ * the only realistic overflow source is a deeply nested cwd, and
+ * the boot caller's own path check in Terminal_BootCart already
+ * guarantees 40 bytes there. */
+static int term_build_path (char *out, size_t out_cap, const char *sfx) {
+    /* "0:/" + cwd + sfx + NUL */
+    const char *prefix = "0:/";
+    size_t p = 0;
+    while (prefix[p] != '\0') {
+        if (p + 1U >= out_cap) return 0;
+        out[p] = prefix[p];
+        p++;
+    }
+    size_t i = 0;
+    while (s_menu.cwd[i] != '\0') {
+        if (p + 1U >= out_cap) return 0;
+        out[p++] = s_menu.cwd[i++];
+    }
+    size_t j = 0;
+    while (sfx[j] != '\0') {
+        if (p + 1U >= out_cap) return 0;
+        out[p++] = sfx[j++];
+    }
+    out[p] = '\0';
+    return 1;
+}
+
 static void scan_usb (void) {
     s_menu.count = 0;
     if (USB_TryEnsureMounted () != DEF_SUCCESS) {
         printf ("TERM: scan_usb - USB not mounted\r\n");
         return;
     }
-    DIR dir; FILINFO fi;
-    FRESULT fr = f_opendir (&dir, "0:/");
-    if (fr != FR_OK) {
-        printf ("TERM: scan_usb - f_opendir failed (%u)\r\n", (unsigned)fr);
+    /* Add the parent entry before opening the child directory. If the
+     * child disappeared or cannot be read, the user can still select
+     * this row to return to its parent. */
+    if (s_menu.cwd[0] != '\0') {
+        term_str_copy (s_menu.names[0], "..", FILE_NAME_MAX);
+        term_str_copy (s_menu.lfns[0],  "..", FILE_NAME_MAX);
+        s_menu.sizes[0] = 0U;
+        s_menu.is_dir[0] = 1U;
+        s_menu.count = 1U;
+    }
+    /* Open the current directory rather than always the root. The
+     * path is built from s_menu.cwd; the empty-cwd case yields the
+     * volume root. */
+    char path[TERM_PATH_MAX + 4U];   /* "0:/" + cwd (63) + NUL = 68 */
+    if (!term_build_path (path, sizeof (path), "")) {
+        printf ("TERM: scan_usb - cwd path too long ([%s])\r\n", s_menu.cwd);
         return;
     }
-    while (s_menu.count < TERM_MAX_FILES) {
-        fr = f_readdir (&dir, &fi);
-        /* End-of-directory check MUST use fi.fname - FatFS only
-         * clears fname[0] on end-of-dir, leaving altname holding a
-         * stale copy of the previous entry's SFN. Using altname made
-         * the last file repeat over and over (observed as "last file
-         * repeated 18 times" on page 2). */
-        if (fr != FR_OK || fi.fname[0] == 0) break;
-        if (fi.fattrib & AM_DIR) continue;
-        /* Accept any file - the v303 firmware filtered by extension
-         * (.ROM) but the cart loader may serve .BIN/.MX1 too.
-         *
-         * Store BOTH name forms:
+    DIR dir; FILINFO fi;
+    FRESULT fr = f_opendir (&dir, path);
+    if (fr != FR_OK) {
+        printf ("TERM: scan_usb - f_opendir([%s]) failed (%u)\r\n",
+                path, (unsigned)fr);
+        return;
+    }
+
+    /* Read the directory twice: first collect directories, then files.
+     * This keeps folders together at the top regardless of the order
+     * FatFS returns entries in, with the synthetic parent row above
+     * them. */
+    for (uint8_t pass = 0U; pass < 2U && s_menu.count < TERM_MAX_FILES; pass++) {
+        if (pass != 0U) {
+            fr = f_rewinddir (&dir);
+            if (fr != FR_OK) break;
+        }
+        while (s_menu.count < TERM_MAX_FILES) {
+            fr = f_readdir (&dir, &fi);
+            /* End-of-directory check MUST use fi.fname - FatFS only
+             * clears fname[0] on end-of-dir, leaving altname holding a
+             * stale copy of the previous entry's SFN. */
+            if (fr != FR_OK || fi.fname[0] == 0) break;
+            /* Skip "." (the directory itself) - the synthetic parent
+             * row is the only way to leave a non-root directory. */
+            if (fi.fname[0] == '.' && fi.fname[1] == '\0') continue;
+            if (fi.fattrib & AM_HID) continue;
+            if (fi.fattrib & AM_SYS) continue;
+            /* Pass zero is directories; pass one is files. */
+            if (((fi.fattrib & AM_DIR) != 0U) != (pass == 0U)) continue;
+
+        /* Store BOTH name forms:
          *   - s_menu.names[] = SFN (fi.altname, 8.3) - used for ALL
          *     file operations (f_open in Terminal_BootCart). LFN
          *     paths fail f_open with FR_NO_FILE (4) on our stick.
          *   - s_menu.lfns[]  = LFN (fi.fname) - display only, so the
          *     menu shows "Metal Gear 2 - Solid Snake" instead of
          *     METALG~1.ROM. Truncated to the printable width with a
-         *     trailing '.'-style ellipsis when longer. */
-        const char *sf = fi.altname;
+         *     trailing '.'-style ellipsis when longer.
+         *
+         * Directory rows reuse the same two columns. The SFN is what
+         * gets passed to term_build_path() when descending, and the
+         * SFN is always 8.3 for FAT volumes - so directory navigation
+         * is robust regardless of LFN formatting on the stick. */
+        const char *sf = fi.altname[0] ? fi.altname : fi.fname;
         size_t k = 0;
         while (sf[k] && k < FILE_NAME_MAX - 1) {
             s_menu.names[s_menu.count][k] = sf[k];
@@ -437,35 +601,54 @@ static void scan_usb (void) {
             k++;
         }
         s_menu.lfns[s_menu.count][k] = '\0';
-        /* If the LFN is longer than the display width, keep the
-         * extension readable: show first (width-4) chars + "~X" style
-         * ellipsis + extension. Simplest robust rule: keep the last
-         * '.' and truncate the stem. */
-        if (ln[k] != '\0') {
-            /* find extension in the SFN (always present for ROMs) */
-            const char *dot = sf;
-            for (size_t t = 0; sf[t]; t++) if (sf[t] == '.') dot = sf + t;
-            const char *ext = dot;   /* ".ROM" */
-            size_t ext_len = 0;
-            while (ext[ext_len] && (ext - sf) + ext_len < 12U) ext_len++;
-            if (ext_len > 0 && ext_len <= 4U &&
-                (size_t)(FILE_NAME_MAX - 1) > ext_len) {
-                size_t stem = (size_t)(FILE_NAME_MAX - 1) - ext_len;
-                /* copy first `stem` chars of LFN then the extension */
-                for (size_t t = 0; t < stem && ln[t]; t++) {
-                    s_menu.lfns[s_menu.count][t] = ln[t];
-                }
-                size_t w = stem < k ? stem : k;
-                for (size_t t = 0; t < ext_len; t++) {
-                    s_menu.lfns[s_menu.count][w + t] = ext[t];
-                }
-                s_menu.lfns[s_menu.count][w + ext_len] = '\0';
+        /* Files: if the LFN is longer than the display width, keep
+         * the extension readable: show first (width-4) chars + "~X"
+         * style ellipsis + extension. Simplest robust rule: keep
+         * the last '.' and truncate the stem.
+         *
+         * Directories: no extension to preserve, so show the LFN up
+         * to the full 25-character name-column width. The SFN fallback
+         * covers directory navigation independently of this display
+         * name. */
+        if (fi.fattrib & AM_DIR) {
+            if (ln[k] != '\0') {
+                /* LFN was truncated at FILE_NAME_MAX-1; just force a
+                 * NUL where the truncation happened and move on. */
+                s_menu.lfns[s_menu.count][k] = '\0';
             }
+            s_menu.sizes[s_menu.count] = 0U;
+            s_menu.is_dir[s_menu.count] = 1U;
+            printf ("TERM:   dir [%u] SFN=[%s] LFN=[%s]\r\n",
+                    s_menu.count, s_menu.names[s_menu.count], fi.fname);
+        } else {
+            if (ln[k] != '\0') {
+                /* find extension in the SFN (always present for ROMs) */
+                const char *dot = sf;
+                for (size_t t = 0; sf[t]; t++) if (sf[t] == '.') dot = sf + t;
+                const char *ext = dot;   /* ".ROM" */
+                size_t ext_len = 0;
+                while (ext[ext_len] && (ext - sf) + ext_len < 12U) ext_len++;
+                if (ext_len > 0 && ext_len <= 4U &&
+                    (size_t)(FILE_NAME_MAX - 1) > ext_len) {
+                    size_t stem = (size_t)(FILE_NAME_MAX - 1) - ext_len;
+                    /* copy first `stem` chars of LFN then the extension */
+                    for (size_t t = 0; t < stem && ln[t]; t++) {
+                        s_menu.lfns[s_menu.count][t] = ln[t];
+                    }
+                    size_t w = stem < k ? stem : k;
+                    for (size_t t = 0; t < ext_len; t++) {
+                        s_menu.lfns[s_menu.count][w + t] = ext[t];
+                    }
+                    s_menu.lfns[s_menu.count][w + ext_len] = '\0';
+                }
+            }
+            s_menu.sizes[s_menu.count] = fi.fsize;
+            s_menu.is_dir[s_menu.count] = 0U;
+            printf ("TERM:   file[%u] SFN=[%s] LFN=[%s] sz=%u\r\n",
+                    s_menu.count, s_menu.names[s_menu.count], fi.fname, (unsigned)fi.fsize);
         }
-        s_menu.sizes[s_menu.count] = fi.fsize;
-        printf ("TERM:   file[%u] SFN=[%s] LFN=[%s] sz=%u\r\n",
-                s_menu.count, s_menu.names[s_menu.count], fi.fname, (unsigned)fi.fsize);
-        s_menu.count++;
+            s_menu.count++;
+        }
     }
     f_closedir (&dir);
 }
@@ -992,18 +1175,31 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
         return;
     }
     Cart_Mapper m = kMenuToCart[mapper_idx];
-    printf ("TERM: BootCart start mapper=%u (%s) file=[%s]\r\n", mapper_idx, kMapperNames[mapper_idx], filename);
+    printf ("TERM: BootCart start mapper=%u (%s) file=[%s] cwd=[%s]\r\n",
+            mapper_idx, kMapperNames[mapper_idx], filename, s_menu.cwd);
 
-    /* Build a "0:/NAME" path. The FAT volume is "0:" on the USB
-     * stick; loader-side uses the same path scheme (see loader.c). */
-    char path[40];
-    int p = 0;
-    path[p++] = '0'; path[p++] = ':'; path[p++] = '/';
-    int i = 0;
-    while (filename[i] && p < (int)sizeof(path) - 1) {
-        path[p++] = filename[i++];
+    /* Build "0:/<cwd><filename>" using the shared helper. The path
+     * has to be assembled from the CURRENT directory, not the
+     * volume root, because the user may have descended several
+     * levels and the filename the caller holds is just the leaf
+     * (s_menu.picked) - the cwd is what gives the path context.
+     *
+     * The 40-byte budget the original code used is no longer enough
+     * for a deeply nested cwd; size the buffer at TERM_PATH_MAX plus
+     * 4 ("0:/" + cwd + filename + NUL, with the filename bounded by
+     * FILE_NAME_MAX). The 64-byte cwd ceiling set in scan_usb()
+     * means a worst-case total of 4 + 63 + 25 = 92 bytes plus NUL,
+     * which is what the buffer holds. */
+    char path[TERM_PATH_MAX + FILE_NAME_MAX + 4U];
+    if (!term_build_path (path, sizeof (path), filename)) {
+        printf ("TERM: BootCart REFUSED - path too long (cwd=[%s] "
+                "file=[%s])\r\n", s_menu.cwd, filename);
+        clear_screen ();
+        out_str (" Path too deep to boot");
+        newline ();
+        return;
     }
-    path[p] = '\0';
+    printf ("TERM: BootCart assembled path [%s]\r\n", path);
 
     clear_screen ();
     out_str (" Loading ");
@@ -1132,6 +1328,49 @@ static void nextor_boot (void) {
     soft_reset_into_cart (CART_MAP_NEXTOR);
 }
 
+/* Trim the trailing '/name' component off the end of s_menu.cwd, so
+ * "GAMES/SUB/" becomes "GAMES/" and "GAMES/" becomes "". Idempotent
+ * on an already-empty cwd. Used when the user picks the synthetic
+ * "<DIR> .." row at the top of a subdirectory listing. */
+static void cwd_pop (void) {
+    size_t n = 0U;
+    while (s_menu.cwd[n] != '\0' && n < sizeof (s_menu.cwd) - 1U) n++;
+    /* Walk back over the trailing-slash + last-component. The cwd
+     * invariant is "trailing '/' iff non-empty" - see the scan
+     * function. If n is 0 the cwd is already empty and there is
+     * nothing to pop. */
+    if (n == 0U) return;
+    /* Drop the trailing '/' (always present when n > 0). */
+    n--;
+    if (n == 0U) { s_menu.cwd[0] = '\0'; return; }
+    /* Now find the previous '/' so the surviving prefix still ends in
+     * one. */
+    while (n > 0U && s_menu.cwd[n - 1U] != '/') n--;
+    s_menu.cwd[n] = '\0';
+}
+
+/* Append "<name>/" to s_menu.cwd, bounded by TERM_PATH_MAX. The name
+ * is the SFN of the subdirectory the user picked, which is always
+ * 8.3 on this volume - so the 64-byte budget covers deep trees with
+ * plenty of room. Returns 0 on overflow (caller refuses and tells
+ * the user). */
+static int cwd_push (const char *name) {
+    size_t cur = 0U;
+    while (s_menu.cwd[cur] != '\0' && cur < sizeof (s_menu.cwd)) cur++;
+    /* cur is the NUL position. The cwd already ends in '/' when
+     * non-empty, so the next char is the start of the new component
+     * and the trailing '/' has to be appended. The total write is
+     * name + '/' + NUL. */
+    size_t need = 0U;
+    while (name[need] != '\0') need++;
+    /* + 1 for the trailing '/', + 1 for the NUL. */
+    if (cur + need + 2U > sizeof (s_menu.cwd)) return 0;
+    for (size_t k = 0U; k < need; k++) s_menu.cwd[cur + k] = name[k];
+    s_menu.cwd[cur + need]     = '/';
+    s_menu.cwd[cur + need + 1U] = '\0';
+    return 1;
+}
+
 static void handle_list_key (uint8_t key) {
     /* arrow up / down / RET / ESC / LEFT/RIGHT (page nav) */
     printf ("TERM: list key=0x%02X sel=%u count=%u page=%u\r\n",
@@ -1171,12 +1410,46 @@ static void handle_list_key (uint8_t key) {
             return;
         }
     } else if (key == 0x0D && s_menu.count > 0U) {
-        /* pick this file -> show mapper menu */
+        if (s_menu.is_dir[s_menu.sel]) {
+            /* Directory row: descend, or ascend on the synthetic
+             * "<DIR> .." entry. The list is rebuilt from disk in both
+             * cases - the directory contents may have changed since
+             * the user last visited (especially for a USB stick the
+             * user is editing on a PC), and the cost is one
+             * f_readdir loop on a small directory. */
+            const char *name = s_menu.names[s_menu.sel];
+            if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+                printf ("TERM: RET on <DIR> .. -> up\r\n");
+                cwd_pop ();
+            } else {
+                if (!cwd_push (name)) {
+                    /* The cwd ran out of room. The boot path would
+                     * also overflow, so refusing to descend is the
+                     * right answer - surface it to the UART and stay
+                     * on the current list. */
+                    printf ("TERM: REFUSED descend into [%s] - cwd full "
+                            "(len=%u)\r\n", name, (unsigned)sizeof (s_menu.cwd));
+                    out_str (" Path too deep");
+                    newline ();
+                    return;
+                }
+                printf ("TERM: RET on dir [%s] -> descend, cwd now [%s]\r\n",
+                        name, s_menu.cwd);
+            }
+            scan_usb ();
+            s_menu.page = 0;
+            s_menu.sel  = 0;
+            print_file_list ();
+            return;
+        }
+        /* file row: copy the SFN into s_menu.picked, then show the
+         * mapper menu. */
         int i = 0;
         const char *n = s_menu.names[s_menu.sel];
         while (n[i] && i < FILE_NAME_MAX - 1) { s_menu.picked[i] = n[i]; i++; }
         s_menu.picked[i] = '\0';
-        printf ("TERM: picked file [%s] -> mapper menu\r\n", s_menu.picked);
+        printf ("TERM: picked file [%s] (cwd=[%s]) -> mapper menu\r\n",
+                s_menu.picked, s_menu.cwd);
         /* Remember which file was picked (for the LFN display on the
          * mapper screen) BEFORE s_menu.sel is reused as the
          * mapper-row index. */
@@ -1188,21 +1461,19 @@ static void handle_list_key (uint8_t key) {
         s_menu.state = MENU_MAPPER;
         print_mapper_menu ();
         return;
-    } else if (key == 0x1B) {            /* ESC = rescan */
-        printf ("TERM: ESC -> rescan\r\n");
+    } else if (key == 0x1B) {            /* ESC = parent, or root rescan */
+        if (s_menu.cwd[0] != '\0') {
+            /* ESC is a quick back action inside a folder. At the root
+             * it retains its original meaning: rescan the USB volume. */
+            printf ("TERM: ESC -> parent from cwd=[%s]\r\n", s_menu.cwd);
+            cwd_pop ();
+        } else {
+            printf ("TERM: ESC -> rescan root\r\n");
+        }
         scan_usb ();
         s_menu.page = 0;
         s_menu.sel   = 0;
         print_file_list ();
-        return;
-    } else if (key == 'F' || key == 'f') {
-        /* User wants the OLD loader (FLASH mapper - serves selector_rom
-         * with the existing 0x7FF0 mailbox protocol). */
-        printf ("TERM: F -> FLASH loader\r\n");
-        clear_screen ();
-        out_str (" Switching to OLD loader");
-        newline ();
-        (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
         return;
     } else if (key == 'N' || key == 'n') {
         nextor_boot ();
@@ -1272,9 +1543,8 @@ void Terminal_Service (void) {
          * terminal would silently switch to the OLD cart loader even
          * when GRPH was not held, with no way to recover except a
          * power cycle. To keep the terminal predictable across MSX
-         * models, the GRPH-skip behaviour is removed: the user picks
-         * the FLASH loader explicitly from the menu (key F on the
-         * file list). */
+         * models, the GRPH-skip behaviour is removed and this legacy
+         * control byte is ignored. */
     }
 
     /* Drain keyboard FIFO. */
