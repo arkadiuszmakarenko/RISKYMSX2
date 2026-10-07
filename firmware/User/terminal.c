@@ -23,6 +23,11 @@ extern void Delay_Ms (uint32_t n);
  * fields directly. */
 TerminalMailbox g_term_mbox;
 
+/* FatFs logical drive 0 normally auto-detects a partition. During USB
+ * preparation the formatter temporarily pins it to partitions 1..4 so
+ * each primary FAT16 volume can be formatted in turn. */
+PARTITION VolToPart[FF_VOLUMES] = {{0U, 0U}};
+
 #define TERM_MAX_FILES   32U
 #define FILE_NAME_MAX    26U    /* printed-column width: 25 chars + NUL.
                                  * Line layout = 25 (name) + 1 (space) +
@@ -39,7 +44,7 @@ TerminalMailbox g_term_mbox;
  * to be ambiguous ("is this row 21 the new one or the old one?").
  * One log line at session start settles it, and it costs one string.
  * Bump this whenever the key map changes. */
-#define TERM_MENU_VERSION "v7 (DIR nav)"
+#define TERM_MENU_VERSION "v8 (USB manager)"
 
 /* Maximum depth of the current-directory path the menu can hold. The
  * full path assembled at boot time (e.g. "0:/A/B/C/file.ROM") is built
@@ -434,7 +439,7 @@ static void print_file_list (void) {
     out_str (buf);
     newline ();
     move_cursor (22, 1);
-    out_str ("N=Nextor B=MBR ESC=back");
+    out_str ("N=Nextor B=USB ESC=back");
     newline ();
 }
 
@@ -654,46 +659,14 @@ static void scan_usb (void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Bootable-stick helper                                               */
+/* USB drive management                                                */
 /* ------------------------------------------------------------------ */
-/*
- * The stick is the disk (NEXTOR_PLAN.md D4), so Nextor boots from the
- * stick's OWN MBR + active FAT partition - there is no image file to
- * place on it. That makes one stick shape unbootable: a single
- * whole-disk FAT volume, which is what `mkfs.fat /dev/sdX` produces and
- * what most USB-stick vendors ship. Its filesystem starts at LBA 0, so
- * there is no partition table at all, and a Nextor kernel with no
- * partition to map has no drive. The host-side fixes are `parted`,
- * `diskpart`, `sfdisk` - none of which the user necessarily has next to
- * the machine. So the terminal can do it.
- *
- * WHAT IT WRITES, exactly:
- *
- *   sector 1   the volume's existing boot sector, with the BPB's
- *              "hidden sectors" field (offset 28) set to 1
- *   sector 0   a fresh MBR: zeroed bootstrap area, one primary
- *              partition entry - active, start LBA 1, length = the rest
- *              of the medium, type derived from the volume's own
- *              cluster count - and the 55AA signature
- *
- * and NOTHING ELSE. Every sector from 2 up is left exactly as it was.
- *
- * The FAT needs no rewriting, and that is the part worth being sure
- * about, because it is the part that decides whether this is safe: a FAT
- * stores no absolute sector numbers anywhere outside its BPB. Cluster
- * numbers are relative to the partition, and the partition's start is
- * what "hidden sectors" describes. Moving a volume from LBA 0 to LBA 1
- * is therefore a two-sector operation - exactly what every partitioning
- * tool does when it shifts a partition, and the reason `sfdisk` can
- * prepend a partition table to a superfloppy at all.
- *
- * WRITE ORDER IS THE SAFETY PROPERTY. Sector 1 goes FIRST. A power cut
- * between the two writes leaves the volume intact and merely
- * unpartitioned: the stick still mounts over this terminal, and the
- * helper can simply be run again. The other order would leave a live
- * partition table pointing at a boot sector that is about to be
- * overwritten - a stick that no longer mounts anywhere.
- */
+/* The stick is the raw disk exposed to Nextor. The terminal can create
+ * up to four primary FAT16 partitions, format them, and mark one active
+ * so the kernel finds the DOS system partition. Preparation replaces
+ * the partition table and FAT metadata; it is explicitly confirmed in
+ * the UI. Files are not securely overwritten, so this is a format, not
+ * a sanitization tool. */
 
 #define MBR_SECT        512U
 #define MBR_PT_OFF      446U    /* first of the four partition entries */
@@ -701,12 +674,9 @@ static void scan_usb (void) {
 #define MBR_PT_MAX      4U
 #define MBR_SIG_OFF     510U
 
-/* Scratch for sector 0 as read, and for the MBR to write. Static rather
- * than on the stack: 1 KiB of automatic storage is a lot to ask of an
- * embedded stack, and the read-back verification reuses the first
- * buffer, so both have to outlive the individual steps. */
+/* Static sector scratch: disk setup and verification share one sector
+ * buffer rather than placing 512-byte sectors on the embedded stack. */
 static uint8_t s_sect[MBR_SECT];
-static uint8_t s_mbr[MBR_SECT];
 
 /* What sector 0 says about the stick. */
 #define MBRST_VOLUME    0U  /* no partition table: a filesystem boot sector */
@@ -720,13 +690,6 @@ static uint16_t mbr_get16 (const uint8_t *p) {
 static uint32_t mbr_get32 (const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static void mbr_put32 (uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)v;
-    p[1] = (uint8_t)(v >> 8);
-    p[2] = (uint8_t)(v >> 16);
-    p[3] = (uint8_t)(v >> 24);
 }
 
 /* --- What sector 0 is.
@@ -804,44 +767,6 @@ static uint8_t mbr_fattype (const uint8_t *s) {
     return 0x0BU;                              /* FAT32 */
 }
 
-/* --- Assemble the MBR into s_mbr.
- *
- * The 446-byte bootstrap area is left zeroed on purpose. Nothing on the
- * cartridge chain-loads an MBR - the MSX goes straight to the Z80 and
- * the Z80 maps a ROM - so boot code in that area would be dead bytes we
- * would have to invent, and inventing it is exactly the kind of thing
- * that turns a working stick into an unbootable one.
- *
- * The CHS triple in a partition entry is legacy: every reader that
- * matters uses the LBA fields, and 0xFE / 0xC0 in the head and cylinder-
- * high bytes is the conventional "this entry is LBA, ignore the CHS"
- * marker. It is filled in rather than zeroed because old CHS-only code
- * (a BIOS `int 13h`, MSX-DOS's own CHS path) does read it, and a zeroed
- * CHS reads as "cylinder 0, head 0, sector 0", which is not a sector.
- */
-static void mbr_build (uint32_t lba, uint32_t nsec, uint8_t type) {
-    uint8_t *e = s_mbr + MBR_PT_OFF;
-    uint32_t cyl;
-
-    memset (s_mbr, 0, MBR_SECT);
-    s_mbr[MBR_SIG_OFF]     = 0x55U;
-    s_mbr[MBR_SIG_OFF + 1U] = 0xAAU;
-
-    cyl = lba / 63U;
-    if (cyl > 1023U) cyl = 1023U;
-
-    e[0] = 0x80U;                              /* active / bootable         */
-    e[1] = (uint8_t)(cyl & 0xFFU);
-    e[2] = (uint8_t)(((cyl >> 8) & 0x03U) | 0xC0U);
-    e[3] = (uint8_t)((lba % 63U) + 1U);
-    e[4] = 0xFEU;
-    e[5] = type;
-    e[6] = e[2];
-    e[7] = e[3];
-    mbr_put32(&e[8], lba);
-    mbr_put32(&e[12], nsec);
-}
-
 /* --- Wait for one keypress, up to `ms`. Returns 0xFF on timeout.
  *
  * Safe to block on: the key FIFO is filled by an EXTI interrupt on this
@@ -860,199 +785,339 @@ static uint8_t term_wait_key (uint32_t ms) {
     }
 }
 
-static void mbr_end (const char *line) {
-    out_str (line);
-    newline ();
-    term_wait_drain (200U);
-    (void)term_wait_key (5000U);
+/* FAT16 partitions are deliberately capped at 2 GiB (4,194,304 sectors
+ * of 512 bytes) so cluster sizes remain compatible with DOS variants.
+ * The prep wizard creates at most four primary partitions; any extra
+ * capacity is left untouched/unpartitioned. */
+#define TERM_FAT16_PART_SECTORS  4194304UL
+#define TERM_FAT16_MIN_SECTORS   65536UL  /* 32 MiB, safely above FAT12 range */
+
+static int mbr_entry_valid (const uint8_t *e, uint32_t total) {
+    uint32_t first = mbr_get32 (&e[8]);
+    uint32_t count = mbr_get32 (&e[12]);
+    if (e[4] == 0U || first == 0U || count == 0U || first >= total) return 0;
+    if (count > total - first) return 0;
+    return 1;
 }
 
-/* --- The 'B' entry point: report what the stick looks like, and make it
- *     bootable if it is not.
- *
- * Every step reports before doing and re-reads after writing. That is
- * more output than a menu usually prints, and it is deliberate: this
- * routine rewrites sector 0 of a filesystem the user did not create here,
- * and the only thing that makes a user trust that afterwards is being
- * able to see the answer come back off the stick rather than out of the
- * firmware.
- */
-static void mbr_helper (void) {
-    uint32_t total, nsec;
-    uint8_t  state, fattype, k;
-    char buf[32];
+static const char *mbr_type_name (uint8_t type) {
+    if (type == 0x01U) return "FAT12";
+    if (type == 0x04U || type == 0x06U || type == 0x0EU) return "FAT16";
+    if (type == 0x0BU || type == 0x0CU) return "FAT32";
+    return "OTHER";
+}
 
+static int mbr_is_fat16 (uint8_t type) {
+    return type == 0x04U || type == 0x06U || type == 0x0EU;
+}
+
+static void manager_pause (const char *message) {
     clear_screen ();
-    out_str (" Bootable-stick check");
+    out_str (" USB drive manager");
     newline ();
     newline ();
+    out_str (message);
+    newline ();
+    newline ();
+    out_str (" Press any key");
+    newline ();
+    term_wait_drain (200U);
+    (void)term_wait_key (15000U);
+}
 
-    printf ("TERM: mbr_helper entry\r\n");
-
-    /* RawDisk_Probe() is the expensive one - it may have to enumerate a
-     * freshly plugged stick, which is hundreds of milliseconds. Safe
-     * here and nowhere else: the terminal mapper is active, so no
-     * Nextor mailbox request can be in flight while it runs. */
-    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U) {
-        out_str (" No USB stick found.");
-        newline ();
-        mbr_end (" Cannot read sector 0.");
-        return;
+static uint8_t manager_mark_active (uint8_t part, uint32_t total) {
+    uint8_t *e;
+    if (part >= MBR_PT_MAX || RawDisk_ReadSectors (0U, 1U, s_sect) == 0U)
+        return 0U;
+    if (s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
+    e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
+    if (!mbr_entry_valid (e, total) || !mbr_is_fat16 (e[4])) return 0U;
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        s_sect[MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE] = 0U;
     }
-    total = RawDisk_SectorCount ();
-    snprintf (buf, sizeof (buf), " Stick: %u MB, vendor [%s]",
-              (unsigned)((uint64_t)total / 2048U), RawDisk_Manufacturer ());
-    out_str (buf);
-    newline ();
+    s_sect[MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE] = 0x80U;
+    if (RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
+        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) return 0U;
+    e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
+    return (uint8_t)(e[0] == 0x80U && mbr_entry_valid (e, total));
+}
 
-    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) {
-        out_str (" Read of sector 0 FAILED.");
+static FRESULT manager_prepare_fat16 (uint32_t total) {
+    LBA_t parts[MBR_PT_MAX] = {0, 0, 0, 0};
+    /* Let FatFs choose the cluster size from the partition capacity. It
+     * selects 32 KiB clusters at 2 GiB and smaller clusters for a short
+     * final partition, while FM_FAT keeps the filesystem out of FAT32. */
+    MKFS_PARM fmt = {FM_FAT, 2U, 0U, 512U, 0U};
+    uint32_t remaining = (total > 63U) ? total - 63U : 0U;
+    uint8_t count = 0U;
+    FRESULT fr;
+
+    for (uint8_t i = 0U; i < MBR_PT_MAX &&
+         remaining >= TERM_FAT16_MIN_SECTORS; i++) {
+        uint32_t n = (remaining > TERM_FAT16_PART_SECTORS)
+                   ? TERM_FAT16_PART_SECTORS : remaining;
+        parts[i] = (LBA_t)n;
+        remaining -= n;
+        count++;
+    }
+    if (count == 0U) return FR_MKFS_ABORTED;
+    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U ||
+        RawDisk_SectorCount () != total) return FR_NOT_READY;
+
+    /* Drop FatFs's cached view before changing the partition table. */
+    USB_InvalidateMount ();
+    VolToPart[0].pd = 0U;
+    VolToPart[0].pt = 0U;
+    fr = f_fdisk (0U, parts, s_sect);
+    if (fr != FR_OK) goto done;
+
+    for (uint8_t i = 0U; i < count; i++) {
+        char line[32];
+        snprintf (line, sizeof (line), " Formatting FAT16 %u/%u",
+                  (unsigned)(i + 1U), (unsigned)count);
+        clear_screen ();
+        out_str (" Preparing USB drive");
         newline ();
-        mbr_end (" Nothing was written.");
-        return;
+        out_str (line);
+        newline ();
+        term_wait_drain (200U);
+
+        VolToPart[0].pt = (BYTE)(i + 1U);
+        fr = f_mkfs ("0:", &fmt, s_sect, sizeof (s_sect));
+        if (fr != FR_OK) goto done;
+        if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+            !mbr_is_fat16 (s_sect[MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE + 4U])) {
+            fr = FR_MKFS_ABORTED;
+            goto done;
+        }
     }
 
-    state = mbr_classify (s_sect);
-    if (state == MBRST_READY) {
-        const uint8_t *e = s_sect + MBR_PT_OFF;
-        snprintf (buf, sizeof (buf), " Already bootable: type %02Xh, LBA %u",
-                  (unsigned)e[5], (unsigned)mbr_get32(&e[8]));
+    /* f_fdisk/f_mkfs create the table and FAT volumes but leave all
+     * partitions inactive. Mark the first FAT16 partition active for
+     * Nextor's partition search and read the result back for checking. */
+    VolToPart[0].pt = 0U;
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU) {
+        fr = FR_DISK_ERR;
+        goto done;
+    }
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        s_sect[MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE] = 0U;
+    }
+    s_sect[MBR_PT_OFF] = 0x80U;
+    if (RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
+        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        mbr_classify (s_sect) != MBRST_READY ||
+        !mbr_is_fat16 (s_sect[MBR_PT_OFF + 4U])) {
+        fr = FR_DISK_ERR;
+        goto done;
+    }
+
+done:
+    VolToPart[0].pd = 0U;
+    VolToPart[0].pt = 0U;
+    if (USB_TryEnsureMounted () != DEF_SUCCESS && fr == FR_OK) {
+        fr = FR_NO_FILESYSTEM;
+    }
+    return fr;
+}
+
+static void manager_show (uint8_t present, uint32_t total) {
+    char buf[32];
+    uint8_t sector_ok;
+    clear_screen ();
+    out_str (" USB drive manager");
+    newline ();
+    if (!present) {
+        out_str (" No readable USB drive");
+        newline ();
+    } else {
+        snprintf (buf, sizeof (buf), " Stick: %u MB",
+                  (unsigned)(total / 2048U));
         out_str (buf);
         newline ();
+        out_str (" Partitions (* = active)");
         newline ();
-        out_str (" Nothing to do.");
-        newline ();
-        mbr_end ("");
-        return;
+        sector_ok = RawDisk_ReadSectors (0U, 1U, s_sect);
+        if (!sector_ok) {
+            out_str (" Cannot read partition table");
+            newline ();
+        } else if (mbr_classify (s_sect) != MBRST_VOLUME) {
+            for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+                const uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+                if (e[4] == 0U) {
+                    snprintf (buf, sizeof (buf), " %u: (empty)", (unsigned)(i + 1U));
+                } else if (!mbr_entry_valid (e, total)) {
+                    snprintf (buf, sizeof (buf), " %u: invalid", (unsigned)(i + 1U));
+                } else {
+                    snprintf (buf, sizeof (buf), " %u%c %-5s %uMB",
+                              (unsigned)(i + 1U), e[0] == 0x80U ? '*' : ' ',
+                              mbr_type_name (e[4]),
+                              (unsigned)(mbr_get32 (&e[12]) / 2048U));
+                }
+                move_cursor ((uint8_t)(3U + i), 1U);
+                out_str (buf);
+                newline ();
+            }
+        } else {
+            uint8_t type = mbr_fattype (s_sect);
+            out_str (type ? " No MBR; whole-disk FAT volume" : " No MBR/FAT volume found");
+            newline ();
+        }
     }
+    move_cursor (18U, 1U);
+    out_str ("P=prepare FAT16 (ERASES USB)");
+    newline ();
+    move_cursor (19U, 1U);
+    out_str ("A=activate FAT16 partition");
+    newline ();
+    move_cursor (20U, 1U);
+    out_str ("ESC=return");
+    newline ();
+}
 
-    fattype = mbr_fattype (s_sect);
-    if (state == MBRST_NO_PART) {
-        /* Refuse rather than guess. There IS a partition table here, so
-         * the filesystem's real start is not sector 0 and this helper
-         * has no way to find it - it would have to parse the entries and
-         * guess which one is the intended volume, and guessing at sector
-         * 0 of somebody's disk is not a thing to do. */
-        out_str (" Has a partition table, but no");
-        newline ();
-        out_str (" active partition. Not touching");
-        newline ();
-        out_str (" it - fix this on a PC.");
-        newline ();
-        mbr_end ("");
-        return;
-    }
-    if (fattype == 0U) {
-        out_str (" Sector 0 is not a 512-byte");
-        newline ();
-        out_str (" FAT boot sector, so there is");
-        newline ();
-        out_str (" no volume to partition.");
-        newline ();
-        mbr_end (" Nothing was written.");
-        return;
-    }
-
-    /* Everything checks out: a whole-disk FAT volume. */
-    nsec = total - 1U;                          /* everything past the MBR */
-    mbr_build (1U, nsec, fattype);
-
-    out_str (" Found a whole-disk volume:");
-    newline ();
-    snprintf (buf, sizeof (buf), "   %s, no partition",
-              fattype == 0x01U ? "FAT12" : fattype == 0x06U ? "FAT16" : "FAT32");
-    out_str (buf);
+static int manager_confirm_prepare (uint32_t total) {
+    uint8_t k;
+    clear_screen ();
+    out_str (" PREPARE USB AS FAT16?");
     newline ();
     newline ();
-    out_str (" Will write:");
+    out_str (" THIS ERASES ALL DATA");
     newline ();
-    out_str ("  LBA 1 = its boot sector,");
-    newline ();
-    snprintf (buf, sizeof (buf), "  LBA 0 = MBR: 1 part %02Xh, boot,",
-              (unsigned)fattype);
-    out_str (buf);
-    newline ();
-    snprintf (buf, sizeof (buf), "           start LBA 1, %u MB", (unsigned)(nsec / 2048U));
-    out_str (buf);
+    out_str (" and replaces the table.");
     newline ();
     newline ();
-    out_str (" Sectors 2 and up: UNTOUCHED.");
+    snprintf ((char *)s_sect, sizeof (s_sect), " Stick: %u MB",
+              (unsigned)(total / 2048U));
+    out_str ((const char *)s_sect);
+    newline ();
+    out_str (" Up to 4 x 2GB FAT16.");
+    newline ();
+    out_str (" Partition 1 becomes active.");
     newline ();
     newline ();
-    out_str (" Write it? (Y/N)");
+    out_str (" Confirm? Y/N");
     newline ();
-
+    term_wait_drain (200U);
     k = term_wait_key (15000U);
-    if (k != 'Y' && k != 'y') {
-        printf ("TERM: mbr_helper cancelled (key=0x%02X)\r\n", (unsigned)k);
-        mbr_end (" Cancelled - nothing written.");
-        return;
-    }
+    return (k == 'Y' || k == 'y');
+}
 
-    /* Hidden sectors = 1: the volume now starts one sector in. Set on the
-     * copy that goes to sector 1, and it is the ONLY byte of the
-     * filesystem's own metadata that changes. */
-    mbr_put32(&s_sect[28], 1U);
+static void manager_activate_partition (uint32_t total) {
+    uint8_t k, part;
+    uint8_t *e;
+    char buf[32];
 
-    printf ("TERM: mbr_helper writing LBA 1 (boot sector)\r\n");
-    if (RawDisk_WriteSectors (1U, 1U, s_sect) == 0U) {
-        printf ("TERM: mbr_helper LBA 1 write FAILED\r\n");
-        out_str (" FAILED at sector 1 - the MBR");
-        newline ();
-        out_str (" was NOT written, so the");
-        newline ();
-        out_str (" stick is unchanged.");
-        newline ();
-        mbr_end (" Run this again to retry.");
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        mbr_classify (s_sect) == MBRST_VOLUME) {
+        manager_pause (" No MBR partition table");
         return;
     }
-    printf ("TERM: mbr_helper writing LBA 0 (MBR)\r\n");
-    if (RawDisk_WriteSectors (0U, 1U, s_mbr) == 0U) {
-        printf ("TERM: mbr_helper LBA 0 write FAILED\r\n");
-        out_str (" FAILED at sector 0. Sector 1");
+    clear_screen ();
+    out_str (" Activate which FAT16?");
+    newline ();
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (mbr_entry_valid (e, total) && mbr_is_fat16 (e[4])) {
+            snprintf (buf, sizeof (buf), " %u%c FAT16 %uMB",
+                      (unsigned)(i + 1U), e[0] == 0x80U ? '*' : ' ',
+                      (unsigned)(mbr_get32 (&e[12]) / 2048U));
+        } else {
+            snprintf (buf, sizeof (buf), " %u: not FAT16", (unsigned)(i + 1U));
+        }
+        move_cursor ((uint8_t)(2U + i), 1U);
+        out_str (buf);
         newline ();
-        out_str (" now holds a boot sector but");
-        newline ();
-        out_str (" there is no partition table.");
-        newline ();
-        mbr_end (" Reformat, then run this again.");
+    }
+    move_cursor (8U, 1U);
+    out_str ("Press 1-4, ESC=cancel");
+    newline ();
+    term_wait_drain (200U);
+    k = term_wait_key (15000U);
+    if (k < '1' || k > '4') return;
+    part = (uint8_t)(k - '1');
+    e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
+    if (!mbr_entry_valid (e, total) || !mbr_is_fat16 (e[4])) {
+        manager_pause (" Selected partition is not FAT16");
         return;
     }
-
-    /* Verify against the stick, not against what we meant to write. */
-    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) {
-        mbr_end (" Wrote both sectors, but could");
-        newline ();
-        out_str (" not read sector 0 back to");
-        newline ();
-        out_str (" verify. Check on a PC.");
-        return;
-    }
-    if (mbr_classify (s_sect) != MBRST_READY) {
-        printf ("TERM: mbr_helper verify FAILED\r\n");
-        mbr_end (" Wrote, but the stick does");
-        newline ();
-        out_str (" not read back bootable.");
-        return;
-    }
-    if (RawDisk_ReadSectors (1U, 1U, s_sect) == 0U ||
-        mbr_get32(&s_sect[28]) != 1U) {
-        printf ("TERM: mbr_helper verify BPB FAILED\r\n");
-        mbr_end (" MBR is good but sector 1");
-        newline ();
-        out_str (" did not take the boot sector.");
-        return;
-    }
-
-    out_str (" Done - the stick is bootable.");
+    clear_screen ();
+    snprintf (buf, sizeof (buf), " Set partition %u active?",
+              (unsigned)(part + 1U));
+    out_str (buf);
     newline ();
     newline ();
-    out_str (" Reboot, then press N in the");
+    out_str (" This changes boot choice.");
     newline ();
-    out_str (" file list to boot Nextor.");
+    out_str (" Filesystem data is kept.");
     newline ();
-    printf ("TERM: mbr_helper OK\r\n");
-    mbr_end ("");
+    newline ();
+    out_str (" Confirm? Y/N");
+    newline ();
+    term_wait_drain (200U);
+    k = term_wait_key (15000U);
+    if (k != 'Y' && k != 'y') return;
+
+    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U ||
+        RawDisk_SectorCount () != total) {
+        manager_pause (" USB drive changed; cancelled");
+        return;
+    }
+    USB_InvalidateMount ();
+    if (!manager_mark_active (part, total)) {
+        (void)USB_TryEnsureMounted ();
+        manager_pause (" Active flag write failed");
+        return;
+    }
+    if (USB_TryEnsureMounted () != DEF_SUCCESS) {
+        manager_pause (" Active set; FAT mount failed");
+    } else {
+        manager_pause (" FAT16 partition is active");
+    }
+}
+
+/* B opens a small on-device drive-preparation wizard. Raw-sector and
+ * FatFs work only runs here while the terminal mapper owns the cartridge;
+ * the Nextor mailbox cannot have an I/O request in flight. */
+static void usb_drive_manager (void) {
+    uint32_t total = 0U;
+    uint8_t present = (uint8_t)(RawDisk_Probe () != 0U && RawDisk_IsPresent () != 0U);
+    uint8_t key;
+    if (present) total = RawDisk_SectorCount ();
+
+    for (;;) {
+        manager_show (present, total);
+        term_wait_drain (100U);
+        key = term_wait_key (15000U);
+        if (key == 0x1BU) return;
+        if (key == 'P' || key == 'p') {
+            FRESULT fr;
+            if (!present) {
+                manager_pause (" No USB drive to prepare");
+                continue;
+            }
+            if (!manager_confirm_prepare (total)) {
+                manager_pause (" Cancelled; drive unchanged");
+                continue;
+            }
+            fr = manager_prepare_fat16 (total);
+            if (fr == FR_OK) {
+                manager_pause (" Copy DOS files to partition 1");
+            } else {
+                char msg[32];
+                snprintf (msg, sizeof (msg), " Prepare failed (FatFs %u)",
+                          (unsigned)fr);
+                manager_pause (msg);
+            }
+        } else if ((key == 'A' || key == 'a') && present) {
+            manager_activate_partition (total);
+        }
+        /* Refresh capacity/presence after every action, including a
+         * format which may have caused the USB device to reset. */
+        present = (uint8_t)(RawDisk_Probe () != 0U && RawDisk_IsPresent () != 0U);
+        total = present ? RawDisk_SectorCount () : 0U;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1479,10 +1544,8 @@ static void handle_list_key (uint8_t key) {
         nextor_boot ();
         return;
     } else if (key == 'B' || key == 'b') {
-        /* Make the stick bootable, if it is not already. See the
-         * "Bootable-stick helper" section for why this is needed at
-         * all and what it is allowed to touch. */
-        mbr_helper ();
+        usb_drive_manager ();
+        scan_usb ();
         print_file_list ();
         return;
     }

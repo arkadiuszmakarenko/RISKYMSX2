@@ -987,6 +987,13 @@ void (*USB_ProgressCB) (uint32_t done, uint32_t total) = 0;
  * "am I mounted?" check out of every f_opendir / f_open. */
 static uint8_t s_fatfs_mounted = 0U;
 
+void USB_InvalidateMount (void) {
+    if (s_fatfs_mounted) {
+        (void)f_mount (NULL, "0:", 0);
+    }
+    s_fatfs_mounted = 0U;
+}
+
 /* Attempt to (re-)enumerate the USB device and mount the FAT volume.
  * Returns 0 on success, non-zero (DEF_ERR_*) on failure.
  *
