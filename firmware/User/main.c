@@ -13,8 +13,7 @@
 #include "debug.h"
 #include "cart.h"
 #include "psram.h"
-#include "scc.h"
-#include "loader.h"
+#include "scc.h"    Terminal_Reset ();
 #include "nextor.h"
 #include "raw_disk.h"
 #include "terminal.h"
@@ -69,7 +68,7 @@ int main (void) {
     /* Preserve the pending BIOS probe edge while atomically installing
      * the Nextor handler. The handler serves the held ROM read and
      * returns without waiting for SLTSL. */
-    Cart_SetMapper_Safe (CART_MAP_NEXTOR);
+    
 
 
     printf ("SystemClk:%d\r\n", SystemCoreClock);
@@ -87,10 +86,7 @@ int main (void) {
             printf ("PSRAM ready: slotted mapper at PSRAM+0x%08X\r\n",
                     (unsigned)(PSRAM_CART_BASE + CART_SLOTTED_BANK_BASE_OFFSET));
         }
-        printf ("Slotted PSRAM: %s (%u x %u KiB)\r\n",
-                psram_status == PSRAM_OK ? "OK" : "FAILED",
-                (unsigned)CART_SLOTTED_BANK_COUNT,
-                (unsigned)(CART_SLOTTED_BANK_SIZE / 1024U));
+
     }
 
     /* USBHS host init. Powers up the controller so it's ready. */
@@ -102,7 +98,9 @@ int main (void) {
      * have queued its first command and a second reset would discard it.
      * A mapper swap later from the terminal menu performs its own single
      * Nextor_Init() at the swap point. */
-    RawDisk_Init ();
+    //RawDisk_Init ();
+    Terminal_Reset ();
+    Cart_SetMapper_Safe (CART_MAP_TERMINAL);
     Delay_Ms(100);
     /* USB and the disk backend are now ready for the first Nextor
      * mailbox request. Release WAIT and let the held BIOS cycle finish. */
@@ -132,7 +130,6 @@ int main (void) {
      * waiting. */
     for (;;) {
         Nextor_Service ();
-        Loader_Service ();
         Terminal_Service ();
 
         /* No WFI — while the Nextor kernel's driver is polling a
@@ -141,6 +138,6 @@ int main (void) {
          * WFI re-entry latency can be too slow for the driver's
          * timeout. Spin instead so Nextor_Service runs immediately
          * after the ISR returns. */
-        __asm__ volatile ("nop");
+       // __asm__ volatile ("nop");
     }
 }

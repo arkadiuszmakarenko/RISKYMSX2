@@ -1,7 +1,6 @@
 #include "cart.h"
 #include "psram.h"
 #include "scc.h"
-#include "loader.h"
 #include "nextor.h"
 #include "terminal.h"
 #include "ch32v4x7.h"
@@ -54,8 +53,6 @@ void Cart_EXTI0_ROM32k_Handler (void) __attribute__((section(".ramfunc"), noinli
                                                        interrupt("WCH-Interrupt-fast")));
 void Cart_EXTI0_ROM48k_Handler (void) __attribute__((section(".ramfunc"), noinline,
                                                        interrupt("WCH-Interrupt-fast")));
-void Cart_EXTI0_Flash_Handler (void) __attribute__((section(".ramfunc"), noinline,
-                                                     interrupt("WCH-Interrupt-fast")));
 
 /* Embedded terminal ROM image (flash-resident, generated from
  * MSXSoftware/RomLoader/terminal.bin). Served by CART_MAP_TERMINAL
@@ -350,7 +347,6 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
 
-    case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
     default:                   return -1;
@@ -395,17 +391,14 @@ int Cart_SetMapper (Cart_Mapper m) {
         NVIC_DisableIRQ (EXTI9_5_IRQn);
     }
 
-    /* Flash selector mappers: reset the mailbox so the loader starts clean. */
-    if (m == CART_MAP_ROM32k || m == CART_MAP_FLASH) {
-        Loader_Reset ();
-    }
+
     /* Nextor mapper: reset every state element - the bank select, the
      * ATA register file, the PATA device signature, the sector buffer
      * and the USB lifecycle - so the kernel starts with a clean engine
      * (no stale LBA / sector buffer / IDENTIFY data from a previous
      * run, no stale state from a half-completed READ/WRITE).
      * Safe to call repeatedly. */
-    if (m == CART_MAP_NEXTOR) {
+    if (m == CART_MAP_NEXTOR || m == CART_MAP_TERMINAL) {
         Nextor_Init ();
     }
 
@@ -1791,135 +1784,7 @@ void Cart_EXTI0_ROM48k_Handler (void) {
 }
 
 
-/* ------------------------------------------------------------------ */
-/* Flash mapper stub: legacy CART_MAP_FLASH slot.                     */
-/* ------------------------------------------------------------------ */
-/* selector_rom[] (the embedded 32 KiB cart image) was removed along
- * with the MSX-side romloader.c, so CART_MAP_FLASH has no image left
- * to serve. This stub:
- *
- *   0x4000..0x7FEF  : read returns 0xFF (open bus - matches an
- *                      empty / missing cart, doesn't fault the MSX if
- *                      the F-key or CMD_SOFTRESET fallback path
- *                      installs CART_MAP_FLASH by accident).
- *   0x7FF0           : read = g_loader_mbox.status (READY|DONE bits)
- *   0x7FF1           : read = pop one result byte from g_loader_mbox
- *   0x7FF0           : write = first byte is the command; further
- *                      bytes fill g_loader_mbox.args until arg_n
- *                      reaches the per-command count, then the
- *                      command is dispatched via have_cmd.
- *
- * This is enough to keep loader.c / terminal.c / Cart_SetMapper_Safe
- * calling Cart_SetMapper(CART_MAP_FLASH) without a linker error. Any
- * caller that actually wants to boot a cart must pick a real PSRAM-
- * backed mapper instead. */
 
-static const uint8_t s_loader_args_of[8] = {
-    0,  /* LOADER_CMD_DIR_OPEN    (0x00) */
-    0,  /* LOADER_CMD_DIR_READ    (0x01) */
-    0,  /* LOADER_CMD_DIR_CLOSE   (0x02) */
-    12, /* LOADER_CMD_LOAD_ROM    (0x03): 12-byte SFN */
-    1,  /* LOADER_CMD_SET_MAPPER  (0x04): 1 byte mapper id */
-    0,  /* 0x05 unused (was RESET) */
-    0,  /* LOADER_CMD_BOOT_NEXTOR (0x06) */
-    0,  /* LOADER_CMD_SOFTRESET   (0x07) */
-};
-
-void Cart_EXTI0_Flash_Handler (void) {
-    const uint16_t address = (uint16_t)GPIOD->INDR;
-    uint32_t ctrl = GPIOE->INDR;
-
-    /* Late entry: SLTSL already high, this cycle is already over. */
-    if ((ctrl & CART_SLTSL_MASK) != 0U) {
-        GPIOB->CFGHR = CART_BUS_OFF;
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        return;
-    }
-
-    /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
-     * bail if SLTSL rises first. Same trick as the other handlers. */
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
-        }
-    }
-
-    if ((ctrl & CART_RD_MASK) == 0U) {
-        /* READ cycle. */
-        uint8_t v = 0xFFU;
-        if (address == LOADER_MBOX_ADDR) {
-            /* status */
-            v = g_loader_mbox.status;
-        } else if (address == (uint16_t)(LOADER_MBOX_ADDR + 1U)) {
-            /* pop one result byte */
-            if (g_loader_mbox.res_n > 0U) {
-                v = g_loader_mbox.res[g_loader_mbox.res_head];
-                __asm__ volatile ("fence r, r" ::: "memory");
-                g_loader_mbox.res_head = (uint8_t)(
-                    (g_loader_mbox.res_head + 1U) % LOADER_FIFO_DEPTH);
-                g_loader_mbox.res_n--;
-            } else {
-                v = 0xFFU;
-            }
-        }
-        /* Any other read in the cart window returns 0xFF (open bus). */
-        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
-                     | ((uint32_t)v << 8);
-        GPIOB->CFGHR = CART_BUS_ON;
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        }
-        GPIOB->CFGHR = CART_BUS_OFF;
-        return;
-    }
-
-    /* WRITE cycle: WR is low now; data valid on PB8..15. */
-    if ((ctrl & CART_WR_MASK) == 0U) {
-        const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
-        if (address == LOADER_MBOX_ADDR) {
-            /* Mailbox command byte stream. */
-            if (g_loader_mbox.have_cmd == 0U && g_loader_mbox.arg_n == 0U) {
-                /* No command in flight: this byte IS the cmd. */
-                g_loader_mbox.cmd = w;
-                uint8_t need = (w < 8U) ? s_loader_args_of[w] : 0U;
-                if (need == 0U) {
-                    g_loader_mbox.have_cmd = 1U;
-                    g_loader_mbox.status &= (uint8_t)~LOADER_ST_DONE;
-                } else {
-                    g_loader_mbox.arg_n = need;
-                }
-            } else if (g_loader_mbox.arg_n > 0U) {
-                /* Continuation byte of an in-flight command. */
-                uint8_t slot = (uint8_t)(LOADER_FIFO_DEPTH
-                                         - g_loader_mbox.arg_n);
-                g_loader_mbox.args[slot] = w;
-                g_loader_mbox.arg_n--;
-                if (g_loader_mbox.arg_n == 0U) {
-                    g_loader_mbox.have_cmd = 1U;
-                    g_loader_mbox.status &= (uint8_t)~LOADER_ST_DONE;
-                }
-            }
-        }
-        /* Other writes: ignore (the loader never writes elsewhere). */
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-            GPIOB->CFGHR = CART_BUS_OFF;
-        }
-        return;
-    }
-
-    /* Neither RD nor WR asserted - spurious; release. */
-    EXTI->INTFR = EXTI_INTENR_MR0;
-    if (s_msx_wait_held == 0U) {
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
-    }
-}
 
 /* ------------------------------------------------------------------ */
 /* Terminal mapper: serve the embedded terminal ROM (terminal_rom[])  */
@@ -1978,7 +1843,7 @@ void Cart_EXTI0_Terminal_Handler (void) {
     }
 
     /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
-     * bail if SLTSL rises first. Same fix as Cart_EXTI0_Flash_Handler. */
+     * bail if SLTSL rises first.  */
     while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
         ctrl = GPIOE->INDR;
         if ((ctrl & CART_SLTSL_MASK) != 0U) {
