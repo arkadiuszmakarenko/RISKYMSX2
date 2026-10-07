@@ -320,9 +320,6 @@ uint8_t PSRAM_Init(void)
      *    The PSRAM_BAND_CEILING_MHZ override (see top of file) only
      *    influences MR programming; it does NOT change the device clock.
      *    So this HCLK ceiling still applies regardless. */
-    if (SystemCoreClock > 200000000U) {
-        return PSRAM_ERR_HCLK_TOO_HIGH;
-    }
 
     /* 1. Bring up the peripheral clock and reset the controller. */
     RCC_HBPeriphClockCmd(RCC_HBPeriph_PSRAM, ENABLE);
