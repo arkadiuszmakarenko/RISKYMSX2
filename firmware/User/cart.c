@@ -102,7 +102,7 @@ void Cart_SetSlottedPSRAMReady (uint8_t ready) {
  * writes would steal I/O cycles from the rest of the machine. */
 static inline __attribute__((always_inline))
 int Cart_MapperHasSubslots (Cart_Mapper m) {
-    return (m == CART_MAP_NEXTOR) ? 1 : 0;
+    return (m == CART_MAP_NEXTOR || m == CART_MAP_TERMINAL) ? 1 : 0;
 }
 
 static inline __attribute__((always_inline))
@@ -324,7 +324,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     g_mapper = m;
 
     /* Never carry page or sub-slot selections across mapper swaps. */
-    if (m == CART_MAP_NEXTOR) {
+    if (m == CART_MAP_NEXTOR || m == CART_MAP_TERMINAL) {
         g_subslot_reg = 0x00U;
         for (unsigned page = 0U; page < 4U; page++) {
             s_slotted_bank_regs[page] = 0U;
@@ -676,9 +676,57 @@ void Cart_DriveByteFromFlash (const uint8_t *rom, uint32_t off) {
     GPIOB->CFGHR = CART_BUS_ON;
 }
 
+/* Bounded ~SLTSL cycle-end spin. Ported from MemoryMapperInSubslots
+ * (commit d9d6e38), which fixed exactly the freeze this build shows:
+ * an unbounded `while (!SLTSL)` in the cart ISR is a whole-firmware
+ * deadlock. /SLTSL is asserted by the MSX for the duration of a memory
+ * cycle and released when the cycle ends, so if the handler fails to
+ * catch the release - because it overran the cycle, because the cycle
+ * is one this handler mis-serves, or because a later cycle starts
+ * before the handler gets to look - the MCU sits at 100% inside the
+ * ISR and the main loop never runs again. Nothing else prints: UART
+ * output stops mid-stream with no fault handler, and the MSX looks
+ * hung because the mailbox stops being serviced. That matches the
+ * ROM-load capture exactly (log stops after a mid-copy line, no
+ * *** HF ***, no reboot banner, MSX frozen on the loading screen).
+ *
+ * So: give up after CART_ENDCYCLE_SPIN iterations and carry on. The
+ * MSX gets one bad byte for one cycle - it re-reads or recovers -
+ * which is strictly better than taking the cart down permanently, and
+ * g_cart_cycle_timeout records that it happened so the main loop can
+ * say so instead of going silent.
+ *
+ * Budget: a Z80 memory cycle is ~840 ns at 3.58 MHz and a GPIOE->INDR
+ * read is a handful of CPU cycles at 175 MHz, so a few dozen
+ * iterations already cover a legitimate cycle many times over. 4000
+ * gives ~200 us of slack - far beyond any real cycle, so it can only
+ * fire when something is genuinely wrong. */
+#define CART_ENDCYCLE_SPIN 4000U
+
+/* Count of cycle-end (and settle) spins that gave up. Reported from
+ * the main loop - NEVER printf from the EXTI0 ISR: printf mutexes
+ * against main-loop printf. Non-zero means a Z80 cycle was served
+ * late or not at all; the dump says so instead of going silent. */
+volatile uint32_t g_cart_cycle_timeout = 0U;
+
+/* The bounded release spin itself: wait for ~SLTSL to rise (the Z80
+ * cycle ending), counting down; on expiry, count the event and return
+ * so the caller releases the bus and moves on. Used by every handler
+ * that ends with "wait out the cycle, then tri-state". */
+static inline __attribute__((always_inline))
+void Cart_SpinUntilSltSLHigh (void) {
+    uint32_t spin = CART_ENDCYCLE_SPIN;
+    while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (--spin == 0U) {
+            g_cart_cycle_timeout++;
+            return;
+        }
+    }
+}
+
 /* Inner C handler: clear the EXTI0 pending bit, spin until SLTSL
  * rises, release the data bus. All bank-switching handlers end with
- * this. */
+ * this. Spin is bounded - see Cart_SpinUntilSltSLHigh above. */
 static inline __attribute__((always_inline))
 void Cart_EndCycle (void) {
     EXTI->INTFR = EXTI_INTENR_MR0;
@@ -686,7 +734,7 @@ void Cart_EndCycle (void) {
      * Skipped while the startup ~WAIT hold is active - Cart_HoldMSXWait_End()
      * owns the bus-off after the held cycle completes. */
     if (s_msx_wait_held == 0U) {
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        Cart_SpinUntilSltSLHigh ();
         GPIOB->CFGHR = CART_BUS_OFF;
     }
 }
@@ -701,7 +749,7 @@ static inline __attribute__((always_inline))
 void Cart_WaitForCycleEnd (void) {
     EXTI->INTFR = EXTI_INTENR_MR0;
     if (s_msx_wait_held == 0U) {
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        Cart_SpinUntilSltSLHigh ();
     }
 }
 
@@ -813,7 +861,7 @@ static void RunKonami (void) {
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            Cart_SpinUntilSltSLHigh ();
         }
         /* Bus already released above for the BIOS case; for the cart
          * case the read is done so we leave it driven until SLTSL
@@ -826,7 +874,14 @@ static void RunKonami (void) {
      * active-low so we test == 0. The Z80 may also pulse WR with
      * SLTSL low for addresses we don't care about - ignore. */
     EXTI->INTFR = EXTI_INTENR_MR0;
+    uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (--spin == 0U) {
+            /* Bounded (d9d6e38): an unbounded wait for WR/SLTSL here
+             * wedges the whole firmware if the cycle never settles. */
+            g_cart_cycle_timeout++;
+            break;
+        }
         if (s_msx_wait_held != 0U) {
             return;   /* held cycle: let Cart_HoldMSXWait_End finish */
         }
@@ -878,7 +933,7 @@ static void RunKonamiNOSCC (void) {
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            Cart_SpinUntilSltSLHigh ();
             GPIOB->CFGHR = CART_BUS_OFF;
         }
         return;
@@ -886,7 +941,14 @@ static void RunKonamiNOSCC (void) {
 
     EXTI->INTFR = EXTI_INTENR_MR0;
     if (address > 0xB000U) return;
+    uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (--spin == 0U) {
+            /* Bounded (d9d6e38): an unbounded wait for WR/SLTSL here
+             * wedges the whole firmware if the cycle never settles. */
+            g_cart_cycle_timeout++;
+            break;
+        }
         if (s_msx_wait_held != 0U) {
             return;   /* held cycle: let Cart_HoldMSXWait_End finish */
         }
@@ -986,7 +1048,7 @@ static void RunKonamiSCC (void) {
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            Cart_SpinUntilSltSLHigh ();
             GPIOB->CFGHR = CART_BUS_OFF;
         }
         return;
@@ -1001,7 +1063,14 @@ static void RunKonamiSCC (void) {
     if (address > 0xB000U) return;
 
     EXTI->INTFR = EXTI_INTENR_MR0;
+    uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (--spin == 0U) {
+            /* Bounded (d9d6e38): an unbounded wait for WR/SLTSL here
+             * wedges the whole firmware if the cycle never settles. */
+            g_cart_cycle_timeout++;
+            break;
+        }
         if (s_msx_wait_held != 0U) {
             return;   /* held cycle: let Cart_HoldMSXWait_End finish */
         }
@@ -1074,7 +1143,7 @@ static void RunNEO8 (void) {
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            Cart_SpinUntilSltSLHigh ();
         }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
@@ -1082,7 +1151,14 @@ static void RunNEO8 (void) {
 
     /* WRITE: 12-bit bank number composed from sequential writes. */
     EXTI->INTFR = EXTI_INTENR_MR0;
+    uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (--spin == 0U) {
+            /* Bounded (d9d6e38): an unbounded wait for WR/SLTSL here
+             * wedges the whole firmware if the cycle never settles. */
+            g_cart_cycle_timeout++;
+            break;
+        }
         if (s_msx_wait_held != 0U) {
             return;   /* held cycle: let Cart_HoldMSXWait_End finish */
         }
@@ -1124,7 +1200,7 @@ static void RunNEO16 (void) {
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            Cart_SpinUntilSltSLHigh ();
         }
         GPIOB->CFGHR = CART_BUS_OFF;
         return;
@@ -1132,7 +1208,14 @@ static void RunNEO16 (void) {
 
     /* WRITE: 12-bit bank number composed from sequential writes. */
     EXTI->INTFR = EXTI_INTENR_MR0;
+    uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+        if (--spin == 0U) {
+            /* Bounded (d9d6e38): an unbounded wait for WR/SLTSL here
+             * wedges the whole firmware if the cycle never settles. */
+            g_cart_cycle_timeout++;
+            break;
+        }
         if (s_msx_wait_held != 0U) {
             return;   /* held cycle: let Cart_HoldMSXWait_End finish */
         }
@@ -1177,7 +1260,7 @@ static void Cart_Banked_Dispatch (void) {
         GPIOB->CFGHR = CART_BUS_OFF;
         EXTI->INTFR  = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            Cart_SpinUntilSltSLHigh ();
         }
         break;
     }
@@ -1646,12 +1729,23 @@ void Cart_EXTI0_ROM16k_Handler (void) {
 
     /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
      * bail if SLTSL rises first (same fix as the other handlers). */
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
+    {
+        /* Bounded (d9d6e38): an unbounded wait on a line that never
+         * settles would deadlock the firmware outright. */
+        uint32_t spin = CART_ENDCYCLE_SPIN;
+        while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+            ctrl = GPIOE->INDR;
+            if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
+            if (--spin == 0U) {
+                g_cart_cycle_timeout++;
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
         }
     }
 
@@ -1672,7 +1766,7 @@ void Cart_EXTI0_ROM16k_Handler (void) {
      * Cart_HoldMSXWait_End() owns the bus-off after the cycle
      * completes. */
     if (s_msx_wait_held == 0U) {
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        Cart_SpinUntilSltSLHigh ();
         GPIOB->CFGHR = CART_BUS_OFF;
     }
 }
@@ -1712,12 +1806,23 @@ void Cart_EXTI0_ROM32k_Handler (void) {
         return;
     }
 
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
+    {
+        /* Bounded (d9d6e38): an unbounded wait on a line that never
+         * settles would deadlock the firmware outright. */
+        uint32_t spin = CART_ENDCYCLE_SPIN;
+        while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+            ctrl = GPIOE->INDR;
+            if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
+            if (--spin == 0U) {
+                g_cart_cycle_timeout++;
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
         }
     }
 
@@ -1737,7 +1842,7 @@ void Cart_EXTI0_ROM32k_Handler (void) {
 
     EXTI->INTFR = EXTI_INTENR_MR0;
     if (s_msx_wait_held == 0U) {
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        Cart_SpinUntilSltSLHigh ();
         GPIOB->CFGHR = CART_BUS_OFF;
     }
 }
@@ -1761,12 +1866,23 @@ void Cart_EXTI0_ROM48k_Handler (void) {
         return;
     }
 
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
+    {
+        /* Bounded (d9d6e38): an unbounded wait on a line that never
+         * settles would deadlock the firmware outright. */
+        uint32_t spin = CART_ENDCYCLE_SPIN;
+        while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+            ctrl = GPIOE->INDR;
+            if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
+            if (--spin == 0U) {
+                g_cart_cycle_timeout++;
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
         }
     }
 
@@ -1778,7 +1894,7 @@ void Cart_EXTI0_ROM48k_Handler (void) {
 
     EXTI->INTFR = EXTI_INTENR_MR0;
     if (s_msx_wait_held == 0U) {
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        Cart_SpinUntilSltSLHigh ();
         GPIOB->CFGHR = CART_BUS_OFF;
     }
 }
@@ -1834,6 +1950,7 @@ extern TerminalMailbox g_term_mbox;
 void Cart_EXTI0_Terminal_Handler (void) {
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
+    const uint8_t ssr_entry = g_subslot_reg;
 
     /* Late entry: SLTSL already high, this cycle is already over. */
     if ((ctrl & CART_SLTSL_MASK) != 0U) {
@@ -1844,101 +1961,263 @@ void Cart_EXTI0_Terminal_Handler (void) {
 
     /* RD/WR lag SLTSL by a gate delay - poll until one settles, or
      * bail if SLTSL rises first.  */
-    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
+    {
+        /* Bounded (d9d6e38): an unbounded wait on a line that never
+         * settles would deadlock the firmware outright. */
+        uint32_t spin = CART_ENDCYCLE_SPIN;
+        while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) == (CART_RD_MASK | CART_WR_MASK)) {
+            ctrl = GPIOE->INDR;
+            if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
+            if (--spin == 0U) {
+                g_cart_cycle_timeout++;
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
         }
     }
 
     if ((ctrl & CART_RD_MASK) == 0U) {
         /* READ cycle. */
-        uint8_t v;
-        if (address == 0x7FFFU) {
-            /* Output FIFO pop. Paired with Terminal_Service::out_push:
-             * the producer does `fence w,w` between byte-write and
-             * tail-increment, so reading tail and then the byte is safe
-             * in the IRQ context. */
-                        if (g_term_mbox.out_n > 0U) {
-                v = g_term_mbox.out_buf[g_term_mbox.out_head];
-                __asm__ volatile ("fence r, r" ::: "memory");
-                g_term_mbox.out_head = (uint16_t)(
-                    (g_term_mbox.out_head + 1U) % 2048U);
-                g_term_mbox.out_n--;
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            /* Secondary-slot register, read INVERTED - same as the
+             * Nextor handler. The MSX BIOS stores bit 7 of ~ssr into
+             * EXPTBL[slot] as its "slot is expanded" flag; decoding
+             * the SSR is what makes the BIOS CHKRAM scan walk this
+             * slot's sub-slots and find the mapper RAM in sub-slot 1.
+             * M1 low means opcode fetch, so an ordinary FFFF
+             * instruction fetch must not be reinterpreted as an SSR
+             * read. */
+            GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+            GPIOB->CFGHR = CART_BUS_ON;
+        } else if (ssr_entry == 0U) {
+            /* Fast path: SSR still at power-on default (all pages =
+             * sub-slot 0). Same shape as the Nextor handler's fast
+             * path - no page shift, no sub-slot decode. The mailbox
+             * and the terminal ROM share page 1. */
+            uint8_t v;
+            if (address == 0x7FFFU) {
+                /* Output FIFO pop. Paired with Terminal_Service::out_push:
+                 * the producer does `fence w,w` between byte-write and
+                 * tail-increment, so reading tail and then the byte is safe
+                 * in the IRQ context. */
+                if (g_term_mbox.out_n > 0U) {
+                    v = g_term_mbox.out_buf[g_term_mbox.out_head];
+                    __asm__ volatile ("fence r, r" ::: "memory");
+                    g_term_mbox.out_head = (uint16_t)(
+                        (g_term_mbox.out_head + 1U) % 2048U);
+                    g_term_mbox.out_n--;
+                } else {
+                    v = 0x00U;  /* empty: MSX loops and waits */
+                }
+            } else if (address >= 0x4000U && address < 0xC000U) {
+                /* Serve the embedded terminal ROM. The ROM image is sized
+                 * to fit just the actually-used bytes (terminal_rom_len),
+                 * not the full 32 KiB - bytes above terminal_rom_len
+                 * float to 0xFF (open-bus pattern, matches what an empty
+                 * cart would deliver if the user reads beyond the ROM).
+                 * The MSX-side terminal never fetches from 0x4100..0xBFFF,
+                 * so this saves ~31 KiB of flash per build. */
+                const uint32_t off = (uint32_t)(address - 0x4000U);
+                if (off < terminal_rom_len) {
+                    v = terminal_rom[off];
+                } else {
+                    v = 0xFFU;
+                }
             } else {
-                v = 0x00U;  /* empty: MSX loops and waits */
+                /* Out of the terminal's window: float. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
             }
-        } else if (address >= 0x4000U && address < 0xC000U) {
-            /* Serve the embedded terminal ROM. The ROM image is sized
-             * to fit just the actually-used bytes (terminal_rom_len),
-             * not the full 32 KiB - bytes above terminal_rom_len
-             * float to 0xFF (open-bus pattern, matches what an empty
-             * cart would deliver if the user reads beyond the ROM).
-             * The MSX-side terminal never fetches from 0x4100..0xBFFF,
-             * so this saves ~31 KiB of flash per build. */
-            const uint32_t off = (uint32_t)(address - 0x4000U);
-            if (off < terminal_rom_len) {
-                v = terminal_rom[off];
-            } else {
-                v = 0xFFU;
-            }
+            GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                         | ((uint32_t)v << 8);
+            GPIOB->CFGHR = CART_BUS_ON;
         } else {
-            /* Out of the terminal's window: float. */
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            if (s_msx_wait_held == 0U) {
-                while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            /* Expanded-slot protocol - identical dispatch to the
+             * Nextor handler: two bits per 16 KiB CPU page select the
+             * sub-slot. Sub-slot 0 keeps the terminal ROM; sub-slot 1
+             * is the 4 MiB PSRAM mapper RAM; 2/3 float.
+             *
+             * THE MAILBOX IS ON THE FULL DECODER, like the Nextor
+             * mailbox: 0x7FFD/0x7FFE/0x7FFF dispatch BEFORE the
+             * sub-slot decode, on page 1, regardless of the SSR.
+             * Reason: the BIOS leaves the SSR non-zero for our primary
+             * slot after its expansion walk (e.g. 0xC0 = page-3 ->
+             * sub-slot 3), and the MSX-side terminal body polls 0x7FFF
+             * with that state live. Folding the mailbox window INTO
+             * the sub-slot branches instead floats it whenever the
+             * page-1 sub-slot field is anything but 0 - the MSX reads
+             * open bus forever and the menu never renders. Correctness
+             * costs nothing: the 0x7FF0..0x7FFF slice is 16 bytes in a
+             * 16 KiB page, one AND + one compare. */
+            if (address == 0x7FFFU) {
+                /* Output FIFO pop. Paired with Terminal_Service::out_push:
+                 * the producer does `fence w,w` between byte-write and
+                 * tail-increment, so reading tail and then the byte is safe
+                 * in the IRQ context. */
+                uint8_t v;
+                if (g_term_mbox.out_n > 0U) {
+                    v = g_term_mbox.out_buf[g_term_mbox.out_head];
+                    __asm__ volatile ("fence r, r" ::: "memory");
+                    g_term_mbox.out_head = (uint16_t)(
+                        (g_term_mbox.out_head + 1U) % 2048U);
+                    g_term_mbox.out_n--;
+                } else {
+                    v = 0x00U;  /* empty: MSX loops and waits */
+                }
+                GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                             | ((uint32_t)v << 8);
+                GPIOB->CFGHR = CART_BUS_ON;
+                if (s_msx_wait_held == 0U) {
+                    Cart_SpinUntilSltSLHigh ();
+                }
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
+            /* Expanded-slot dispatch - the sub-slot decode itself is
+             * identical to the Nextor handler: two bits per 16 KiB
+             * CPU page select the sub-slot. Sub-slot 0 keeps the
+             * terminal ROM; sub-slot 1 is the 4 MiB PSRAM mapper RAM;
+             * 2/3 float. The mailbox (0x7FFF) was dispatched above,
+             * BEFORE this decode, on the full decoder. */
+            const unsigned ssr = (unsigned)ssr_entry;
+            const unsigned page = (unsigned)(address >> 14);
+            const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
+
+            if (subslot == 0U) {
+                /* Sub-slot 0: terminal ROM for anything in the cart
+                 * window. Same generous 0x4000..0xBFFF serving as the
+                 * fast path: the window is only reachably selected by
+                 * the cart slot, so there is no hazard in overlapping
+                 * the mapper-RAM pages - the BIOS/DOS never has this
+                 * primary slot selected at pages 0/3 while DOS walks
+                 * mapper banks via FC..FF. Bytes above terminal_rom_len
+                 * float to 0xFF (open-bus pattern). */
+                uint8_t v;
+                if (address >= 0x4000U && address < 0xC000U) {
+                    const uint32_t off = (uint32_t)(address - 0x4000U);
+                    if (off < terminal_rom_len) {
+                        v = terminal_rom[off];
+                    } else {
+                        v = 0xFFU;
+                    }
+                } else {
+                    /* Page 0/3 under non-default SSR: not selected by
+                     * real slot layouts - float. */
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+                GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                             | ((uint32_t)v << 8);
+                GPIOB->CFGHR = CART_BUS_ON;
+            } else if (subslot == 1U
+                       && s_slotted_psram_ready != 0U) {
+                /* Sub-slot 1 = mapper RAM: read the selected 16 KiB
+                 * bank of the PSRAM mapper window, selected by the
+                 * bank register latched from the OUT (FC..FF),A cycle
+                 * for this page (EXTI9_5 handler). Identical call to
+                 * the Nextor handler. */
+                Cart_DriveSlottedPSRAMByte (address, page);
+            } else {
+                /* Empty sub-slot: leave the data bus floating. */
                 GPIOB->CFGHR = CART_BUS_OFF;
             }
-            return;
         }
-        /* Drive the byte. */
-        GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
-                     | ((uint32_t)v << 8);
-        GPIOB->CFGHR = CART_BUS_ON;
-        EXTI->INTFR = EXTI_INTENR_MR0;
+        /* Common release: the byte is already driving (or the bus is
+         * intentionally floating); wait out the cycle, then tri-state.
+         * Every early-return path above cleared the bus itself. */
         if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+            Cart_SpinUntilSltSLHigh ();
         }
         GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
         return;
     }
 
-    /* WRITE cycle: WR is low now; data valid on PB8..15. */
-    if ((ctrl & CART_WR_MASK) == 0U) {
-        const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
-        if (address == 0x7FFDU) {
-            /* Keyboard FIFO push. Drop on overflow - the terminal
-             * never sends faster than human typing, so overflow is a
-             * firmware-side bug worth noticing. */
-            uint8_t next = (uint8_t)((g_term_mbox.kbd_tail + 1U) % 16U);
-            if (next != g_term_mbox.kbd_head) {
-                g_term_mbox.kbd_buf[g_term_mbox.kbd_tail] = w;
-                g_term_mbox.kbd_tail = next;
-                g_term_mbox.kbd_n++;
+    /* WRITE cycle: WR is low now; data valid on PB8..15.
+     * Same shape as the Nextor handler: spin until /WR rises or
+     * SLTSL rises, then decode once. */
+    {
+        uint32_t spin = CART_ENDCYCLE_SPIN;
+        while (ctrl & CART_WR_MASK) {
+            ctrl = GPIOE->INDR;
+            if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
             }
-        } else if (address == 0x7FFEU) {
-            /* Control byte. Latched verbatim - terminal.c reads and
-             * clears it (so the cart-side IRQ sees each control byte
-             * exactly once). */
-            g_term_mbox.control = w;
+            if (--spin == 0U) {
+                /* Bounded (d9d6e38): ~WR never fell and ~SLTSL never
+                 * rose - count it, release the bus, move on. */
+                g_cart_cycle_timeout++;
+                GPIOB->CFGHR = CART_BUS_OFF;
+                EXTI->INTFR = EXTI_INTENR_MR0;
+                return;
+            }
         }
-        /* Other writes: ignore. */
-        EXTI->INTFR = EXTI_INTENR_MR0;
-        if (s_msx_wait_held == 0U) {
-            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-            GPIOB->CFGHR = CART_BUS_OFF;
-        }
-        return;
     }
-
-    /* Neither RD nor WR asserted - spurious; release. */
+    {
+        const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+        unsigned page = 0U;
+        unsigned subslot = 0U;
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            /* Secondary-slot register latch - identical to the Nextor
+             * handler. The BIOS writes its EXPTBL-derived sub-slot
+             * table here during the power-on scan; latching it
+             * verbatim means the mapper starts from the BIOS's own
+             * selection. M1 must be high - a low byte at FFFF is an
+             * opcode fetch, not a register write. */
+            g_subslot_reg = w;
+        } else if (address == 0x7FFDU || address == 0x7FFEU) {
+            /* Mailbox writes live on the FULL decoder, before any
+             * sub-slot decode - mirror of the 0x7FFF read path above
+             * and of the Nextor mailbox handling. If these were folded
+             * under sub-slot 0, a BIOS that leaves the SSR non-zero
+             * (its normal state after the expansion walk) would swallow
+             * every keystroke and control byte; the menu would render
+             * but never respond. */
+            if (address == 0x7FFDU) {
+                /* Keyboard FIFO push. Drop on overflow - the
+                 * terminal never sends faster than human typing. */
+                uint8_t next = (uint8_t)((g_term_mbox.kbd_tail + 1U) % 16U);
+                if (next != g_term_mbox.kbd_head) {
+                    g_term_mbox.kbd_buf[g_term_mbox.kbd_tail] = w;
+                    g_term_mbox.kbd_tail = next;
+                    g_term_mbox.kbd_n++;
+                }
+            } else {
+                /* Control byte. Latched verbatim - terminal.c reads
+                 * and clears it (so the cart-side IRQ sees each
+                 * control byte exactly once). */
+                g_term_mbox.control = w;
+            }
+        } else {
+            if (ssr_entry != 0U) {
+                const unsigned ssr = (unsigned)ssr_entry;
+                page = (unsigned)(address >> 14);
+                subslot = (ssr >> (page * 2U)) & 0x3U;
+            }
+            if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                /* Mapper RAM write into the PSRAM window - identical
+                 * call to the Nextor handler. */
+                Cart_WriteSlottedPSRAMByte (address, page, w);
+            }
+            /* Sub-slot 0 non-mailbox writes, empty sub-slots and
+             * PSRAM-not-ready: ignore the write, same as the Nextor
+             * handler ignores writes into its ROM banks. */
+        }
+    }
+    /* The Z80 owns the data bus during writes. */
+    GPIOB->CFGHR = CART_BUS_OFF;
     EXTI->INTFR = EXTI_INTENR_MR0;
-    if (s_msx_wait_held == 0U) {
-        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-        GPIOB->CFGHR = CART_BUS_OFF;
-    }
+    return;
 }
 /* ------------------------------------------------------------------ */
 /* Nextor mapper handler: ASCII16K + mailbox.                            */
@@ -2043,14 +2322,25 @@ void Cart_EXTI0_Nextor_Handler (void) {
             }
         } 
 
-        while (ctrl &  CART_WR_MASK) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
+        {
+            /* Bounded (d9d6e38): this loop doubles as the read-cycle
+             * data-hold (spins until ~SLTSL rises) and the write
+             * settle (~WR falling). An unbounded wait here wedges the
+             * firmware mid-ISR with no further UART output. */
+            uint32_t spin = CART_ENDCYCLE_SPIN;
+            while (ctrl &  CART_WR_MASK) {
+                ctrl = GPIOE->INDR;
+                if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+                if (--spin == 0U) {
+                    g_cart_cycle_timeout++;
+                    break;
+                }
+            }
         }
-    }
         
         
         if ((ctrl & CART_WR_MASK) == 0U) {

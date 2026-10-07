@@ -881,12 +881,22 @@ static void mbr_helper (void) {
  * USB_ProgressCB hook - keep it short. */
 static void term_progress_cb (uint32_t done, uint32_t total) {
     static uint32_t s_last_pct = 0xFFFFU;
+    static int s_bar_dbg = 0;
 
     if (total == 0U) return;
     /* Throttle: only redraw when the percentage changes. */
     uint32_t pct = (uint32_t)(((uint64_t)done * 100ULL) / total);
     if (pct == s_last_pct) return;
     s_last_pct = pct;
+
+    /* DIAGNOSTIC: first few percentage changes print to the UART. If
+     * the load freezes mid-copy, the last "bar N%" line brackets which
+     * chunk the freeze happened in (1% of 16 KiB = every ~512 B for
+     * tiny ROMs, i.e. every chunk). */
+    if (s_bar_dbg < 8) {
+        printf ("TERM: bar %u%%\r\n", (unsigned)pct);
+        s_bar_dbg++;
+    }
 
     /* Backpressure: the ring is only 2048 bytes and the MSX drains at
      * ~50 µs/byte, so a bar redraw every 1% can outrun it. If out_n is

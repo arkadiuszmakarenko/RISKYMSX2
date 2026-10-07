@@ -159,6 +159,19 @@ CFLAGS_COMMON += -DCART_GAME_BASE_MB=$(GAME_BASE_MB)
 KONAMISCC_SCC_QUEUE ?= 1
 CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
 
+# Nextor engine diagnostics (mailbox command names, trace ring, gap
+# timings). nextor.c silences every printf when RISKY_DEBUG=0 (the
+# release default) - a quiet log after a mapper swap is therefore
+# expected in release and tells you nothing. Build with this set to 1
+# while diagnosing the kernel <-> driver exchange:
+#
+#     make rebuild RISKY_DEBUG=1
+#
+# NOTE: the trace_put() call runs in the EXTI0 mailbox IRQ, so this
+# build is NOT for timing-sensitive work - diagnostics only.
+RISKY_DEBUG      ?= 0
+CFLAGS_COMMON += -DRISKY_DEBUG=$(RISKY_DEBUG)
+
 # --- Flash tool --------------------------------------------------------------
 # CH32V4x7 (chip id 0xa6) is NOT supported by upstream `wlink` or `minichlink`
 # (they report "Chip Type unknown [a6]" and refuse to program). The WCH-LinkE

@@ -111,6 +111,7 @@ static uint8_t msc_class_request (uint8_t bmRequestType, uint8_t bRequest,
 
 /* Mass Storage: Bulk-Only Mass Storage Reset (bRequest=0xFF, bmRequestType=00100001b) */
 uint8_t msc_mass_storage_reset (void) {
+    printf ("USB: MSC reset (control transfer)\r\n");
     uint8_t rc = msc_class_request (0x21, 0xFF, 0x0000, msc_interface_number,
                                     NULL, NULL);
     if (rc == ERR_SUCCESS) {
@@ -590,6 +591,11 @@ uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size) {
  * into `buf`.  For high-speed sticks the bulk pipe is a 512-byte
  * multi-packet stream; we loop on the per-packet size (512) until
  * `block_size` bytes have been received. */
+/* DIAGNOSTIC counters (shared by the SCSI read path and the copy loop,
+ * re-armed at the end of each USB_FileToPSRAM run). */
+static uint32_t s_scsi_dbg = 0U;
+
+/* Single 512-byte read from the stick... */
 static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
                                       uint32_t block_size) {
     CBW_t cbw;
@@ -598,6 +604,15 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
     uint16_t plen;
     uint32_t bytes_received = 0;
     uint32_t transfer_len   = block_size;
+
+    /* DIAGNOSTIC: every sector read prints its LBA + attempt count so a
+     * mid-copy freeze pins to an exact sector. ( bounded to 64 prints
+     * per load via s_scsi_dbg; a 512B-chunk copy of an 8 MiB ROM is
+     * 16384 sectors, so the cap only matters for big files. ) */
+    if (s_scsi_dbg < 64U) {
+        printf ("USB: R lba=%lu\r\n", (unsigned long)lba);
+        s_scsi_dbg++;
+    }
 
     memset (&cbw, 0, sizeof (cbw));
     cbw.dCBWSignature          = 0x43425355;
@@ -621,7 +636,11 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
         Delay_Ms (1);
         cbw_send_retries++;
     } while (cbw_send_retries < 20);
-    if (res != ERR_SUCCESS) return 1;
+    if (res != ERR_SUCCESS) {
+        printf ("USB: R lba=%lu CBW FAIL r=%02x\r\n",
+                (unsigned long)lba, (unsigned)res);
+        return 1;
+    }
 
     while (bytes_received < block_size) {
         plen = block_size - bytes_received;
@@ -631,9 +650,25 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
             res = USBHSH_GetEndpData (usb_in_ep, &in_tog,
                                       buf + bytes_received, &plen);
             if (res != ERR_SUCCESS) {
+                /* DIAGNOSTIC: every bulk-IN NAK/error prints once per
+                 * packet, throttled to the first 64 reports per load.
+                 * A freeze inside this loop shows up as a burst of
+                 * NAK lines then silence. */
+                if (s_scsi_dbg < 64U) {
+                    printf ("USB: R lba=%lu off=%lu IN r=%02x try=%u\r\n",
+                            (unsigned long)lba,
+                            (unsigned long)bytes_received,
+                            (unsigned)res, (unsigned)nak_retries);
+                    s_scsi_dbg++;
+                }
                 Delay_Ms (1);
                 nak_retries++;
-                if (nak_retries >= 20) return 2;
+                if (nak_retries >= 20) {
+                    printf ("USB: R lba=%lu off=%lu NAK LIMIT\r\n",
+                            (unsigned long)lba,
+                            (unsigned long)bytes_received);
+                    return 2;
+                }
             }
         } while (res != ERR_SUCCESS);
         if (res != ERR_SUCCESS || plen == 0) return 2;
@@ -647,7 +682,12 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
         Delay_Ms (1);
         csw_retries++;
     } while (csw_retries < 40);
-    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
+    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
+        printf ("USB: R lba=%lu CSW FAIL r=%02x st=%u tries=%u\r\n",
+                (unsigned long)lba, (unsigned)res,
+                (unsigned)csw.bCSWStatus, (unsigned)csw_retries);
+        return 3;
+    }
     return 0;
 }
 
@@ -655,6 +695,8 @@ uint8_t usb_scsi_read_sector (uint32_t lba, uint8_t *buf, uint32_t block_size) {
     for (int attempt = 0; attempt < 2; attempt++) {
         uint8_t r = scsi_read_sector_once (lba, buf, block_size);
         if (r == 0) return 0;
+        printf ("USB: R lba=%lu attempt %u failed r=%u -> sense+reset\r\n",
+                (unsigned long)lba, (unsigned)(attempt + 1), (unsigned)r);
         uint8_t sense[18] = {0};
         (void)usb_scsi_request_sense (sense, sizeof(sense));
         (void)msc_mass_storage_reset ();
@@ -828,6 +870,10 @@ uint8_t usb_scsi_test_unit_ready (void) {
  * console isn't flooded (an 8 MiB file = 16384 chunks). */
 #define USB_DMA_DBG_CHUNKS  4U
 static uint32_t s_dbg_count = 0U;
+/* Chunk-loop top-of-iteration diagnostic counter (re-armed at the end
+ * of each USB_FileToPSRAM run; the per-sector counters live above the
+ * SCSI layer). */
+static uint32_t s_chunk_dbg = 0U;
 
 static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
                                uint32_t byte_count) {
@@ -924,8 +970,43 @@ uint8_t USB_TryEnsureEnumerated (void) {
             Nextor_CacheInvalidate ();
             return DEF_ERR_DETECT;
         }
-        if (r == DEF_SUCCESS || r == DEF_DEFAULT) break;
+        if (r == DEF_SUCCESS) break;
+
+        /* DEFINITIVE-FIX: DEF_DEFAULT is NOT success.
+         *
+         * USBHSH_CheckRootHubPortStatus() only reports state through the
+         * PORT_STATUS_CHG *edge* flag, which the FIRST PreDeal call
+         * consumed. Every later call with no new edge returns
+         * ROOT_DEV_FAILED -> USBH_PreDeal falls through to DEF_DEFAULT
+         * even while a stick sits enumerated on the port (or is attached
+         * but was never enumerated because our first call missed the
+         * edge). Treating DEF_DEFAULT as "already fine, break out"
+         * credited a fake success above and f_mount then ran against a
+         * HostCtl[] struct that had never been filled - the terminal
+         * showed "USB not mounted" on every boot while the identical
+         * code path under Nextor (RawDisk_Probe -> same function) only
+         * ever ran as the FIRST enumerating call after a connect edge
+         * and therefore worked.
+         *
+         * If the driver actually finished enumeration, credit success.
+         * Otherwise force a fresh enumeration now; USBH_EnumRootDevice
+         * is idempotent and does not need the edge flag. */
+        if (RootHubDev[DEF_USB_PORT].bStatus == ROOT_DEV_SUCCESS) break;
+
+        printf ("USB: no valid enumeration (PreDeal=%u), forcing\r\n",
+                (unsigned)r);
+        if (USBH_EnumRootDevice (DEF_USB_PORT) == ERR_SUCCESS) {
+            RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_SUCCESS;
+            r = DEF_SUCCESS;
+            break;
+        }
+        /* Still failing this pass: rate-limit and retry through the
+         * normal top-of-loop path (the forced enumeration already
+         * happened, so the next pass either sees SUCCESS or forces
+         * again). */
+        r = DEF_ERR_ENUM;
         Delay_Ms (100);
+        continue;
     }
     if (r == DEF_ERR_ENUM) {
         return DEF_ERR_ENUM;
@@ -967,11 +1048,21 @@ uint8_t USB_TryEnsureMounted (void) {
             printf ("FAT: f_mount failed (%u = %s)\r\n", (unsigned)fr, why);
             if (tries < 2) {
                 Delay_Ms (200);
-                /* disk_initialize caches the block size; force a reset
-                 * so the next f_mount re-runs it (and gives the stick
-                 * another chance to settle before the next SCSI burst). */
-                ClearUSB ();
-                (void)USBH_PreDeal ();
+                /* DEFINITIVE-FIX: recover via a real re-enumeration, not
+                 * ClearUSB(). The old sequence wiped HostCtl[] (SCSI needs
+                 * those endpoints) and then called USBH_PreDeal(), which
+                 * - with the PORT_STATUS_CHG edge already consumed -
+                 * happily returned DEF_DEFAULT without ever rebuilding the
+                 * state it just destroyed. Force-enumerate instead: the
+                 * routine is the same one PreDeal calls on a connect edge
+                 * and it refills HostCtl[] from the stick's descriptors. */
+                if (USBH_EnumRootDevice (DEF_USB_PORT) == ERR_SUCCESS) {
+                    RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_SUCCESS;
+                } else {
+                    /* Leave bStatus non-success -> disk_initialize (called
+                     * by the next f_mount) will force-enumerate again. */
+                    RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_FAILED;
+                }
             }
         }
         return DEF_ERR_ENUM;
@@ -1049,6 +1140,26 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
         uint32_t chunk = len - total;
         if (chunk > sizeof (s_sector_buf)) chunk = sizeof (s_sector_buf);
 
+        /* DIAGNOSTIC (first 8 chunks): print at the TOP of each chunk
+         * iteration. The DMA[0..3] prints inside psram_dma_copy bracket
+         * the copy itself; this print brackets the f_read that runs
+         * BEFORE each copy. With both prints present the sequence per
+         * chunk is: "chunk N" -> "DMA[N]". A log that stops after
+         * "DMA[0]" pins the freeze to either the chunk-1 f_read (stick
+         * path) or the progress-bar callback between the two. */
+        /* DIAGNOSTIC: EVERY chunk prints its index + offset while the
+         * counter is under the cap (raised to 4096 = a 2 MiB copy's
+         * worth of lines - generous for diagnosis, harmless because
+         * re-armed per load). Sequence per chunk is now unambiguous:
+         *   "chunk N" -> "R lba=..." -> "DMA[N]" (first 4) -> "bar"
+         * The last line before a freeze pins the exact chunk. */
+        if (s_chunk_dbg < 4096U) {
+            printf ("USB: chunk %lu at offset %lu\r\n",
+                    (unsigned long)(total / (uint32_t)sizeof (s_sector_buf)),
+                    (unsigned long)total);
+            s_chunk_dbg++;
+        }
+
         fr = f_read (&fp, s_sector_buf, chunk, &br);
         if (fr != FR_OK) {
             printf ("USB: f_read FAILED at offset %lu: FRESULT=%u "
@@ -1092,6 +1203,8 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
             (total == len) ? "COMPLETE" : "INCOMPLETE");
     f_close (&fp);
     s_dbg_count = 0U;   /* re-arm the first-chunk debug for next load */
+    s_chunk_dbg = 0U;
+    s_scsi_dbg  = 0U;
     return total;
 }
 

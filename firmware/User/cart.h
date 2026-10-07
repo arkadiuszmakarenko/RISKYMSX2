@@ -144,17 +144,27 @@ typedef enum {
                                   * active across SET_MAPPER + RESET so the
                                   * user can pick a new mapper from the menu. */
     CART_MAP_TERMINAL   = 12,  /* Terminal cart: serves the embedded
-                                  * terminal ROM (terminal_rom[]) at
-                                  * 0x4000..0xBFFF for ordinary reads, and
-                                  * decodes the v303-style 0x7FFD/0x7FFE/
-                                  * 0x7FFF mailbox. The MSX-side terminal
-                                  * program drives the screen + keyboard;
-                                  * the firmware hosts the menu logic
-                                  * (file list, ROM load, mapper select).
-                                  * The boot mapper for the terminal
-                                  * workflow - swap away via the menu to
-                                  * the FLASH mapper if the user prefers
-                                  * the existing mailbox-driven loader. */
+                                  * terminal ROM (terminal_rom[]) in the
+                                  * 0x4000..0x7FFF window for ordinary
+                                  * reads, and decodes the v303-style
+                                  * 0x7FFD/0x7FFE/0x7FFF mailbox. The
+                                  * MSX-side terminal program drives the
+                                  * screen + keyboard; the firmware hosts
+                                  * the menu logic. Expanded-slot mapper,
+                                  * same protocol as CART_MAP_NEXTOR:
+                                  * secondary-slot register at FFFF
+                                  * (inverted read, M1-qualified latches),
+                                  * 0xFC..0xFF I/O bank registers latched
+                                  * by the EXTI9_5 handler, sub-slot 0 =
+                                  * terminal ROM, sub-slot 1 = the
+                                  * 256 x 16 KiB (4 MiB) PSRAM mapper-RAM
+                                  * window, sub-slots 2/3 empty. This is
+                                  * what makes MSX-DOS see the mapper RAM
+                                  * while the terminal is the boot cart.
+                                  * Reached from the menu to boot game
+                                  * ROMs; N swaps to the Nextor kernel,
+                                  * T re-arms this mapper, F swaps to the
+                                  * FLASH loader. */
     CART_MAP_NEXTOR     = 13,  /* Nextor kernel mapper: ASCII16K over the
  * embedded Nextor 3.0 kernel ROM (nextor_rom[],
  * flash-resident). The 16 KiB bank visible at 0x4000..0x7FFF
@@ -190,6 +200,13 @@ extern volatile uint32_t g_cart_rd_cycles;
 extern volatile uint32_t g_cart_wr_cycles;
 uint32_t Cart_GetRdCycles (void);
 uint32_t Cart_GetWrCycles (void);
+
+/* Count of bounded cycle-end/settle spin timeouts in the cart EXTI0
+ * handler (see CART_ENDCYCLE_SPIN in cart.c). Zero is the healthy
+ * state; non-zero means the handler overran a Z80 memory cycle - the
+ * event that used to wedge the MCU inside the ISR with the UART
+ * stopped mid-line. Reported from the main loop, never from the ISR. */
+extern volatile uint32_t g_cart_cycle_timeout;
 
 /* Hardened mapper-swap primitive (see Cart_SetMapper_Safe() body in
  * cart.c for the full list of hazards it closes).

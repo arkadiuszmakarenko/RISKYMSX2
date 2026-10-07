@@ -62,14 +62,9 @@ int main (void) {
      * polls the firmware's output FIFO). */
     Init_Cart ();
     SCC_Init ();
+     USB_Initialization ();
     /* Reset the terminal mailbox before installing the mapper so the
      * EXTI0 handler starts with empty FIFOs. */
-  //  Terminal_Reset ();
-    /* Preserve the pending BIOS probe edge while atomically installing
-     * the Nextor handler. The handler serves the held ROM read and
-     * returns without waiting for SLTSL. */
-    
-
 
     printf ("SystemClk:%d\r\n", SystemCoreClock);
     printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
@@ -90,7 +85,7 @@ int main (void) {
     }
 
     /* USBHS host init. Powers up the controller so it's ready. */
-    USB_Initialization ();
+   
 
     /* RawDisk_Init() is a power-on call. Cart_SetMapper(NEXTOR) already
      * initialized the Nextor mailbox before the BIOS started executing;
@@ -98,7 +93,7 @@ int main (void) {
      * have queued its first command and a second reset would discard it.
      * A mapper swap later from the terminal menu performs its own single
      * Nextor_Init() at the swap point. */
-    //RawDisk_Init ();
+    RawDisk_Init ();
     Terminal_Reset ();
     Cart_SetMapper_Safe (CART_MAP_TERMINAL);
     Delay_Ms(100);
@@ -131,6 +126,23 @@ int main (void) {
     for (;;) {
         Nextor_Service ();
         Terminal_Service ();
+
+        /* Cycle-end spin timeouts: the cart ISR's ~SLTSL release and
+         * RD/WR settle spins are bounded (Cart_SpinUntilSltSLHigh /
+         * CART_ENDCYCLE_SPIN) and count here instead of wedging the
+         * MCU inside the ISR with the UART stopped mid-line. Report
+         * from the main loop - printf from the EXTI0 ISR would mutex
+         * against this one. Printed on change, so a burst shows as a
+         * running total. */
+        {
+            static uint32_t s_cyc_to_seen = 0U;
+            uint32_t cyc_to = g_cart_cycle_timeout;
+            if (cyc_to != s_cyc_to_seen) {
+                s_cyc_to_seen = cyc_to;
+                printf ("CART: cycle-end spin timeout x%lu (SLTSL never rose)\r\n",
+                        (unsigned long)cyc_to);
+            }
+        }
 
         /* No WFI — while the Nextor kernel's driver is polling a
          * register in a tight loop, each cart read generates an EXTI0
