@@ -1027,7 +1027,11 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
         /* len = 0 makes USB_FileToPSRAM use the real file size, so
          * the progress percentage is relative to the ROM being
          * loaded - not the full 8 MiB PSRAM window (a 1 MiB ROM
-         * would otherwise only ever reach ~12%). */
+         * would otherwise only ever reach ~12%). The address is
+         * bounded to the GAME-IMAGE window (see
+         * USB_FileToPSRAM's bounds check); a ROM that exceeds
+         * CART_GAME_MAX_BYTES is rejected with "USB: REJECT" before
+         * any byte hits PSRAM. */
         uint32_t got = USB_FileToPSRAM (path,
                                         PSRAM_CART_BASE + CART_GAME_BASE,
                                         0U);

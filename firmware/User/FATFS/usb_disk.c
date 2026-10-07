@@ -43,19 +43,33 @@
 /* Buffer placement (PSRAM)                                                 */
 /* ------------------------------------------------------------------------ */
 
-/* PSRAM layout (8 MB total @ 0x80000000):
+/* PSRAM layout (8 MB total @ 0x80000000, see cart.h for the full
+ * partition):
  *
- *   0x80000000 - 0x80000020  : DevDesc_Buf     18 bytes
- *   0x80000020 - 0x8000011F  : Com_Buffer      255 bytes
- *   0x80001000 - 0x800FF000  : psram sector buffer for SCSI read (1 MiB,
- *                              enough for a 512-byte sector + slack)
+ *   0x80000000 + 0                 .. +CART_GAME_MAX_BYTES
+ *                                          game image window (default 4 MiB)
+ *   0x80000000 + CART_GAME_BASE    .. +CART_GAME_BASE + 0
+ *                                          (== PSRAM_CART_BASE)
+ *                                          loaded game image (variable,
+ *                                          <= CART_GAME_MAX_BYTES)
+ *   0x80000000 + CART_SLOTTED_BANK_BASE_OFFSET
+ *                                .. +PSRAM_CART_SIZE
+ *                                          sub-slot 1 mapper RAM
+ *                                          (CART_SLOTTED_BANK_COUNT x
+ *                                          CART_SLOTTED_BANK_SIZE = 4 MiB)
  *
- * NB: the cart image window PSRAM_CART_BASE is at the START of PSRAM (set
- * by cart.h).  The buffers above overlap the cart image window. That's
- * OK for the buffers themselves, but it means while a USB read is in
- * progress the cart window contents are being overwritten - the cart
- * mapper is left at NONE during USB operations (see main.c).
- */
+ *   0x80000000 - 0x80000020  : DevDesc_Buf     18 bytes  (overlap warning)
+ *   0x80000020 - 0x8000011F  : Com_Buffer      255 bytes  (overlap warning)
+ *
+ * NB: DevDesc_Buf and Com_Buffer live in the cart-image window and
+ * corrupt the loaded image if read at the wrong moment. They are
+ * only touched during USB enumeration (the very first few SCSI
+ * exchanges after a stick is plugged), which never overlaps a ROM
+ * load - the SCSI read path itself writes into the SRAM scratch
+ * buffer (s_sector_buf) and not into PSRAM, so this is safe in
+ * practice. The 0x80001000+ 1 MiB "psram sector buffer" mentioned
+ * in earlier revisions is stale: scsi_read_sector_once targets the
+ * caller's buf pointer, which is always SRAM for FatFS. */
 
 /* Force 4-byte alignment; the WCH USBHS host SIE requires the
  * descriptor setup-data pointer to be 4-byte aligned. */
@@ -888,6 +902,31 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
         s_dbg_count++;
     }
 
+    /* Hold cart ~WAIT around the DMA burst so the cart EXTI0 handler
+     * cannot fire in the middle of a burst and corrupt the PSRAM
+     * controller's internal state.
+     *
+     * Without the hold, the WCH PSRAM DMA is started with global IRQs
+     * enabled. The Z80 keeps executing - it is in a tight FIFO-poll
+     * loop, so it generates EXTI0 cart reads while the DMA is in
+     * flight. The cart handler tries to read/write individual bytes
+     * from PSRAM at the same time the DMA is bursting, the PSRAM
+     * controller's internal bus arbitration loses the interleaving,
+     * the DMATF status bit never asserts, and the bounded-wait
+     * (2000000 spins / ~10 ms) eventually bails with
+     * "PSRAM DMA stuck at 0x...". The MSX-side poll loop is then
+     * stuck in a state where the firmware is no longer servicing the
+     * mailbox - the "lock" the user sees.
+     *
+     * The hold is per-chunk (~512 B = a few hundred microseconds of
+     * DMA at 200 MHz / 32-bit / 8-beat bursts) so the MSX-side
+     * progress bar still updates between chunks. The handler is
+     * allowed to fire while the hold is active - every cart EXTI0
+     * handler early-returns at the very top when s_msx_wait_held=1
+     * (see cart.c::s_msx_wait_held), so the DMA burst has the bus
+     * to itself without us needing to disable EXTI0 in the PFIC. */
+    Cart_HoldMSXWait_Begin ();
+
     PSRAMDMATypeDef dmas = {0};
     dmas.PSRAM_DMA_DAT_DIR      = DMA_DIR_PSRAM;   /* SRAM -> PSRAM */
     dmas.PSRAM_DMA_MEMORY_SIZE  = PSRAM_DMA_SIZE_32;
@@ -905,18 +944,29 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
      * observed "lock". Bail out with an error so the load fails cleanly
      * instead. */
     uint32_t guard = 2000000U;                    /* ~10 ms of spins */
+    uint8_t  rc    = 0U;
     while ((PSRAM->ISR & 0x2U) == 0U) {           /* wait DMATF */
         if (--guard == 0U) {
             PSRAM_DMA_Cmd (DISABLE);
             PSRAM_ClearITPendingBit (PSRAM_DMATF);
             printf ("USB: PSRAM DMA stuck at 0x%08lx (%lu bytes)\r\n",
                     (unsigned long)psram_addr, (unsigned long)byte_count);
-            return 2U;
+            rc = 2U;
+            break;
         }
     }
-    PSRAM_ClearITPendingBit (PSRAM_DMATF);
+    if (rc == 0U) {
+        PSRAM_ClearITPendingBit (PSRAM_DMATF);
+    }
     PSRAM_DMA_Cmd (DISABLE);
-    return 0;
+    /* Release ~WAIT. The held Z80 cycle (typically a 0x7FFF FIFO read)
+     * now completes; the EXTI0 edge latched at its start fires the
+     * handler, which runs normally (s_msx_wait_held has just been
+     * cleared by Cart_HoldMSXWait_End, so the handler serves the
+     * cycle as a fresh one - returns the FIFO byte, or 0 if empty,
+     * and the MSX-side poll loop resumes). */
+    Cart_HoldMSXWait_End ();
+    return rc;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1104,19 +1154,25 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
 
     /* Bounds check: psram_addr is the absolute PSRAM bus address
      * (always >= PSRAM_CART_BASE 0x80000000). Compare the offset
-     * within the cart window against PSRAM_CART_SIZE. The previous
-     * version compared the absolute address against PSRAM_CART_SIZE
-     * directly, which always tripped (0x80000000 >= 0x00800000) and
-     * made the loader's "copy 0 bytes -> PSRAM" silent. */
+     * within the cart window against the game-image size
+     * (CART_GAME_MAX_BYTES = PSRAM_CART_BASE + CART_GAME_BASE ..
+     * PSRAM_CART_BASE + CART_SLOTTED_BANK_BASE_OFFSET). The previous
+     * version compared against the full 8 MiB PSRAM_CART_SIZE, which
+     * let oversize ROMs write into the sub-slot 1 mapper-RAM region
+     * and silently corrupt the MSX-DOS mapper banks. */
     if (psram_addr < PSRAM_CART_BASE
-        || psram_addr - PSRAM_CART_BASE >= PSRAM_CART_SIZE) {
+        || psram_addr - PSRAM_CART_BASE >= CART_GAME_MAX_BYTES) {
         f_close (&fp);
-        printf ("USB: PSRAM address 0x%08lx out of range\r\n",
-                (unsigned long)psram_addr);
+        printf ("USB: PSRAM address 0x%08lx out of range (game window "
+                "= 0x%08lx bytes at PSRAM+0x%08lx)\r\n",
+                (unsigned long)psram_addr,
+                (unsigned long)CART_GAME_MAX_BYTES,
+                (unsigned long)(PSRAM_CART_BASE + CART_GAME_BASE));
         return 0U;
     }
-    printf ("USB: PSRAM addr in range (offset %lu)\r\n",
-            (unsigned long)(psram_addr - PSRAM_CART_BASE));
+    printf ("USB: PSRAM addr in range (offset %lu, game window %lu bytes)\r\n",
+            (unsigned long)(psram_addr - PSRAM_CART_BASE),
+            (unsigned long)CART_GAME_MAX_BYTES);
 
     if (len == 0U) {
         len = (uint32_t)f_size (&fp);
@@ -1124,11 +1180,21 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
                 (unsigned long)len);
     }
 
-    uint32_t remaining = PSRAM_CART_SIZE - (psram_addr - PSRAM_CART_BASE);
+    uint32_t remaining = CART_GAME_MAX_BYTES - (psram_addr - PSRAM_CART_BASE);
     if (len > remaining) {
-        printf ("USB: len %lu capped to remaining %lu\r\n",
-                (unsigned long)len, (unsigned long)remaining);
-        len = remaining;
+        /* Hard error, not a silent cap. A ROM that does not fit the
+         * 4 MiB game window used to be silently truncated (and the
+         * truncated tail usually left the cart unbootable). Surface
+         * the size mismatch so the user knows to re-rip at smaller
+         * size or pick a smaller ROM. */
+        printf ("USB: REJECT: file %lu bytes > game window %lu bytes "
+                "(sub-slot 1 mapper RAM is at PSRAM + 0x%08lx, "
+                "%lu MiB reserved)\r\n",
+                (unsigned long)len, (unsigned long)remaining,
+                (unsigned long)CART_SLOTTED_BANK_BASE_OFFSET,
+                (unsigned long)(CART_SLOTTED_BANK_BASE_OFFSET / (1024UL * 1024UL)));
+        f_close (&fp);
+        return 0U;
     }
     printf ("USB: copy plan: %lu bytes in %lu x %u-byte chunks\r\n",
             (unsigned long)len,

@@ -55,7 +55,17 @@
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
  * image window. Konami/ASCII mappers can map up to 1 MiB; NEO up to 256
- * KiB; the unused upper portion is just not mapped to a Z80 bank. */
+ * KiB; the unused upper portion is just not mapped to a Z80 bank.
+ *
+ * LAYOUT (verified by the static asserts below):
+ *   0x80000000 + 0  ............  +CART_GAME_MAX_SIZE   game image window
+ *   0x80000000 + CART_SLOTTED_BANK_BASE_OFFSET
+ *                            ......  +PSRAM_CART_SIZE    sub-slot 1
+ *                                                    mapper RAM (4 MiB)
+ *
+ * The two regions MUST NOT overlap. The game-image window is sized so a
+ * ROM up to (CART_SLOTTED_BANK_BASE_OFFSET - CART_GAME_BASE) bytes can
+ * be loaded without scribbling on the sub-slot 1 bank RAM. */
 #define PSRAM_CART_BASE   0x80000000UL
 #define PSRAM_CART_SIZE   (8U * 1024U * 1024U)   /* 8 MiB */
 
@@ -81,10 +91,13 @@
  * not a mapper/bank-switching logic bug.
  *
  * Set it from the build:
- *     make rebuild GAME_BASE_MB=4        # image at PSRAM + 4 MiB
  *     make rebuild GAME_BASE_MB=0        # default: image at PSRAM + 0
- * Valid: 0..7 (must leave room for the image, max 8 MiB window).
- * CART_GAME_BASE is the byte offset (MiB * 1048576). */
+ *     make rebuild GAME_BASE_MB=2        # image at PSRAM + 2 MiB
+ * Valid: 0 .. (CART_GAME_MAX_MB - 1). CART_GAME_BASE is the byte
+ * offset (MiB * 1048576). The CART_GAME_MAX_MB ceiling keeps the
+ * game-image window clear of the sub-slot 1 mapper RAM
+ * (CART_SLOTTED_BANK_BASE_OFFSET) and is the place to look when
+ * "GAME_BASE_MB=4 used to work" regressions appear. */
 #ifndef CART_GAME_BASE_MB
 #define CART_GAME_BASE_MB   0
 #endif
@@ -93,9 +106,34 @@
 #if (CART_GAME_BASE_MB) < 0
 #error "CART_GAME_BASE_MB must be >= 0"
 #endif
-#if (CART_GAME_BASE_MB) > 7
-#error "CART_GAME_BASE_MB must be <= 7 (8 MiB window)"
+
+/* Max PSRAM MiB that can be used for the cart image. Computed from the
+ * sub-slot 1 region base, with a 1 MiB headroom for any future
+ * scratch/relocation buffer (USB bulk-IN, etc.). Updates automatically
+ * if the sub-slot 1 base moves. */
+#define CART_GAME_MAX_BYTES  (CART_SLOTTED_BANK_BASE_OFFSET - CART_GAME_BASE)
+#define CART_GAME_MAX_MB     ((CART_GAME_MAX_BYTES) / (1024UL * 1024UL))
+
+/* Preprocessor can't cast, so we use the raw integer division
+ * (MiB count, truncated). The cast-style version is used in C
+ * expressions (see usb_disk.c). */
+#if (CART_GAME_BASE_MB) >= (CART_SLOTTED_BANK_BASE_OFFSET / (1024U * 1024U))
+#error "CART_GAME_BASE_MB must leave room for the sub-slot 1 mapper RAM at PSRAM + CART_SLOTTED_BANK_BASE_OFFSET"
 #endif
+
+/* Compile-time tripwire: catch the original layout bug at build time
+ * (a future edit that puts the game image on top of the sub-slot 1
+ * region would compile silently and silently corrupt the mapper RAM
+ * during a ROM load). */
+_Static_assert (CART_GAME_BASE + CART_GAME_MAX_BYTES
+                <= CART_SLOTTED_BANK_BASE_OFFSET,
+                "game image window overlaps sub-slot 1 PSRAM region");
+_Static_assert (CART_GAME_MAX_BYTES > 0U,
+                "game image window is empty - sub-slot 1 region too large for PSRAM");
+_Static_assert (PSRAM_CART_SIZE >= (CART_SLOTTED_BANK_BASE_OFFSET
+                                    + (CART_SLOTTED_BANK_COUNT
+                                       * CART_SLOTTED_BANK_SIZE)),
+                "sub-slot 1 region must fit inside PSRAM_CART_SIZE");
 
 /* Mapper selection.
  *

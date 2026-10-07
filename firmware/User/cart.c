@@ -193,7 +193,12 @@ uint32_t Cart_GetRdCycles (void) { return g_cart_rd_cycles; }
 uint32_t Cart_GetWrCycles (void) { return g_cart_wr_cycles; }
 
 uint32_t Cart_GetImageBase (void) { return PSRAM_CART_BASE; }
-uint32_t Cart_GetImageSize (void) { return PSRAM_CART_SIZE; }
+/* Max bytes writable for a game image in the cart window. Returns the
+ * game-image window size (PSRAM_CART_BASE + CART_GAME_BASE .. PSRAM_CART_BASE
+ *  + CART_SLOTTED_BANK_BASE_OFFSET), NOT the full 8 MiB PSRAM size -
+ * the upper 4 MiB is the sub-slot 1 mapper RAM and a ROM that grew
+ * into it would silently corrupt the bank registers. */
+uint32_t Cart_GetImageSize (void) { return CART_GAME_MAX_BYTES; }
 uint32_t Cart_GetGameBase (void) { return CART_GAME_BASE; }
 
 /* ------------------------------------------------------------------ */
