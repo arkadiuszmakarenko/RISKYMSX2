@@ -214,25 +214,24 @@ extern "C" {
 /* --- Breadcrumbs -------------------------------------------------------
  *
  * Reserved command bytes the driver writes to NEXTOR_MBOX_CMD to say
- * "I got this far", with no arguments and no answer. They exist because
- * everything else the Z80 does is invisible from here: it has no console
- * the firmware can read, and a driver that dies half way through
+ * "I got this far", with one diagnostic argument and no result data. They
+ * exist because everything else the Z80 does is invisible from here: it
+ * has no console the firmware can read, and a driver that dies half way through
  * READ_WRITE produces NO mailbox traffic at all - not one line, because
  * the last thing it managed to do was not send a command. In that
  * situation the log cannot tell "the kernel never called READ_WRITE" from
  * "READ_WRITE crashed on its third instruction", and those need opposite
  * fixes.
  *
- * A single store to the command register is the whole mechanism, so a
- * breadcrumb costs 4 bytes of ROM, no protocol change and no answer -
- * Nextor_Service prints the name and returns. The driver is free to leave
- * DONE set afterwards: the next real command clears it.
+ * The lightweight markers are fire-and-forget; the detailed PROBES build
+ * sends an argument and waits for DONE so its diagnostic traffic cannot
+ * overwrite a pending request. Neither form changes the mailbox protocol.
  *
- * Bytes 0x20..0x3F, chosen to be far from the 8 real commands and from
+ * Bytes 0x20..0x5F, chosen to be far from the 8 real commands and from
  * the 0x08..0x1F range a corrupted stack is more likely to produce, so a
  * marker in the log is a marker and not a wild write. */
 #define NEXTOR_CMD_MARK_FIRST      0x20U
-#define NEXTOR_CMD_MARK_COUNT      0x20U
+#define NEXTOR_CMD_MARK_COUNT      0x40U
 #define NEXTOR_CMD_MARK(n)         (NEXTOR_CMD_MARK_FIRST + (n))
 
 /* A breadcrumb carries ONE argument: the register value the step is about.

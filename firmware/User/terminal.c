@@ -662,8 +662,8 @@ static void scan_usb (void) {
 /* USB drive management                                                */
 /* ------------------------------------------------------------------ */
 /* The stick is the raw disk exposed to Nextor. The terminal can create
- * up to four primary FAT16 partitions, format them, and mark one active
- * so the kernel finds the DOS system partition. Preparation replaces
+ * up to four primary FAT16 partitions, format them, and mark each active
+ * so Nextor 3 can assign a drive to each one at boot. Preparation replaces
  * the partition table and FAT metadata; it is explicitly confirmed in
  * the UI. Files are not securely overwritten, so this is a format, not
  * a sanitization tool. */
@@ -833,14 +833,47 @@ static uint8_t manager_mark_active (uint8_t part, uint32_t total) {
         return 0U;
     e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
     if (!mbr_entry_valid (e, total) || !mbr_is_fat16 (e[4])) return 0U;
-    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
-        s_sect[MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE] = 0U;
-    }
+    /* Set this partition active without clearing any other active flags;
+     * Nextor 3 can automap one drive per active FAT partition. */
     s_sect[MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE] = 0x80U;
     if (RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
-        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) return 0U;
+        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
     e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
     return (uint8_t)(e[0] == 0x80U && mbr_entry_valid (e, total));
+}
+
+/* Mark every valid primary FAT16 partition active, preserving the rest of
+ * the MBR. Returns the number verified after writing, or zero on failure. */
+static uint8_t manager_mark_all_active (uint32_t total) {
+    uint8_t count = 0U;
+
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
+
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (mbr_entry_valid (e, total) && mbr_is_fat16 (e[4])) {
+            e[0] = 0x80U;
+            count++;
+        }
+    }
+    if (count == 0U || RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
+        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
+
+    count = 0U;
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        const uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (mbr_entry_valid (e, total) && mbr_is_fat16 (e[4])) {
+            if (e[0] != 0x80U) return 0U;
+            count++;
+        }
+    }
+    return count;
 }
 
 static FRESULT manager_prepare_fat16 (uint32_t total) {
@@ -894,8 +927,8 @@ static FRESULT manager_prepare_fat16 (uint32_t total) {
     }
 
     /* f_fdisk/f_mkfs create the table and FAT volumes but leave all
-     * partitions inactive. Mark the first FAT16 partition active for
-     * Nextor's partition search and read the result back for checking. */
+     * partitions inactive. Mark every created FAT16 partition active so
+     * Nextor 3 can allocate one drive per partition, then verify the MBR. */
     VolToPart[0].pt = 0U;
     if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
         s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU) {
@@ -903,15 +936,27 @@ static FRESULT manager_prepare_fat16 (uint32_t total) {
         goto done;
     }
     for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
-        s_sect[MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE] = 0U;
+        uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (i < count &&
+            (!mbr_entry_valid (e, total) || !mbr_is_fat16 (e[4]))) {
+            fr = FR_DISK_ERR;
+            goto done;
+        }
+        e[0] = (i < count) ? 0x80U : 0U;
     }
-    s_sect[MBR_PT_OFF] = 0x80U;
     if (RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
         RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
-        mbr_classify (s_sect) != MBRST_READY ||
-        !mbr_is_fat16 (s_sect[MBR_PT_OFF + 4U])) {
+        mbr_classify (s_sect) != MBRST_READY) {
         fr = FR_DISK_ERR;
         goto done;
+    }
+    for (uint8_t i = 0U; i < count; i++) {
+        const uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (e[0] != 0x80U || !mbr_entry_valid (e, total) ||
+            !mbr_is_fat16 (e[4])) {
+            fr = FR_DISK_ERR;
+            goto done;
+        }
     }
 
 done:
@@ -973,6 +1018,9 @@ static void manager_show (uint8_t present, uint32_t total) {
     out_str ("A=activate FAT16 partition");
     newline ();
     move_cursor (20U, 1U);
+    out_str ("M=activate all FAT16");
+    newline ();
+    move_cursor (21U, 1U);
     out_str ("ESC=return");
     newline ();
 }
@@ -994,7 +1042,9 @@ static int manager_confirm_prepare (uint32_t total) {
     newline ();
     out_str (" Up to 4 x 2GB FAT16.");
     newline ();
-    out_str (" Partition 1 becomes active.");
+    out_str (" All created partitions active.");
+    newline ();
+    out_str (" Nextor can assign A-D.");
     newline ();
     newline ();
     out_str (" Confirm? Y/N");
@@ -1048,7 +1098,9 @@ static void manager_activate_partition (uint32_t total) {
     out_str (buf);
     newline ();
     newline ();
-    out_str (" This changes boot choice.");
+    out_str (" This adds a boot choice.");
+    newline ();
+    out_str (" Other active flags stay set.");
     newline ();
     out_str (" Filesystem data is kept.");
     newline ();
@@ -1074,6 +1126,52 @@ static void manager_activate_partition (uint32_t total) {
         manager_pause (" Active set; FAT mount failed");
     } else {
         manager_pause (" FAT16 partition is active");
+    }
+}
+
+static void manager_activate_all_partitions (uint32_t total) {
+    uint8_t k, count;
+    char message[32];
+
+    clear_screen ();
+    out_str (" ACTIVATE ALL FAT16?");
+    newline ();
+    newline ();
+    out_str (" All valid primary FAT16");
+    newline ();
+    out_str (" partitions become active.");
+    newline ();
+    out_str (" Filesystem data is kept.");
+    newline ();
+    out_str (" Nextor may assign one drive");
+    newline ();
+    out_str (" per partition at reboot.");
+    newline ();
+    newline ();
+    out_str (" Confirm? Y/N");
+    newline ();
+    term_wait_drain (200U);
+    k = term_wait_key (15000U);
+    if (k != 'Y' && k != 'y') return;
+
+    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U ||
+        RawDisk_SectorCount () != total) {
+        manager_pause (" USB drive changed; cancelled");
+        return;
+    }
+    USB_InvalidateMount ();
+    count = manager_mark_all_active (total);
+    if (count == 0U) {
+        (void)USB_TryEnsureMounted ();
+        manager_pause (" No FAT16 partitions or write failed");
+        return;
+    }
+    if (USB_TryEnsureMounted () != DEF_SUCCESS) {
+        manager_pause (" Active flags set; FAT mount failed");
+    } else {
+        snprintf (message, sizeof (message), " %u FAT16 partitions active",
+                  (unsigned)count);
+        manager_pause (message);
     }
 }
 
@@ -1112,6 +1210,8 @@ static void usb_drive_manager (void) {
             }
         } else if ((key == 'A' || key == 'a') && present) {
             manager_activate_partition (total);
+        } else if ((key == 'M' || key == 'm') && present) {
+            manager_activate_all_partitions (total);
         }
         /* Refresh capacity/presence after every action, including a
          * format which may have caused the USB device to reset. */

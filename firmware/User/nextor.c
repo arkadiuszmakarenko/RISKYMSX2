@@ -196,7 +196,7 @@ static const char *const s_cmd_name[NEXTOR_CMD_MAX] = {
 /* NEXTOR_MARK_DEFINED counts the entries above; the reserved range is
  * deliberately wider (see NEXTOR_CMD_MARK_COUNT), so the difference has to
  * be bounded rather than assumed away. */
-#define NEXTOR_MARK_DEFINED        30U
+#define NEXTOR_MARK_DEFINED        36U
 
 static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "RW:enter",              /* MB_MK_RW_ENTER       device number     */
@@ -229,6 +229,12 @@ static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "RW:bad buffer low",    /* MB_MK_RW_BADBUFL     invalid buffer low */
     "RW:bad buffer high",   /* MB_MK_RW_BADBUFH     invalid buffer high*/
     "RW:buf high byte",     /* MB_MK_RW_BUFPG       dest page: 81h=DTA */
+    "DQ2 device number",    /* MB_MK_DQ_INIT_DEVICE device query 2 C  */
+    "DQ2 buffer supplied",  /* MB_MK_DQ_INIT_BUFFER HL=0?             */
+    "DRVQ3 free drives",    /* MB_MK_DQ3_DRIVES     query 3 input B   */
+    "DRVQ3 input flags",    /* MB_MK_DQ3_FLAGS      query 3 input C   */
+    "DRVQ4 input flags",    /* MB_MK_DQ4_FLAGS      query 4 input C   */
+    "DRVQ5 max devices",    /* MB_MK_DQ5_MAXDEV     query 5 output B  */
 };
 
 /* A command byte is a breadcrumb rather than a mistake if it lands in the
@@ -842,7 +848,7 @@ static void trace_dump (void) {
  * Windows as exFAT/NTFS comes back 07, and that is a "this will never
  * mount in Nextor" rather than a bug worth chasing.
  * ====================================================================== */
-static void dump_mbr (const uint8_t *sec) {
+static void dump_mbr (const uint8_t *sec, const char *source) {
     /* Indexed by (type & 0x0F), the low nibble of the MBR type byte - the
      * high nibble is the "LBA" flag and Nextor looks at the low one. The
      * 16 entries are exhaustive on purpose: a stick formatted as exFAT
@@ -858,7 +864,8 @@ static void dump_mbr (const uint8_t *sec) {
     uint8_t       part;
     uint8_t       usable = 0U;
 
-    printf ("[nx] MBR lba=0: %02x %02x %02x %02x  sig=%04x%s\r\n",
+    printf ("[nx] MBR %s lba=0: %02x %02x %02x %02x  sig=%04x%s\r\n",
+            source,
             (unsigned)sec[0], (unsigned)sec[1], (unsigned)sec[2],
             (unsigned)sec[3], (unsigned)sig,
             (sig == 0xAA55U) ? "" : "  *** NOT A VALID MBR ***");
@@ -875,8 +882,8 @@ static void dump_mbr (const uint8_t *sec) {
         if (typ != 0U) {
             usable++;
         }
-        printf ("[nx]   part%u type=%02x %-10s boot=%s lba=%-10lu sectors=%-10lu",
-                (unsigned)part, (unsigned)typ,
+        printf ("[nx]   part%u type=%02x %-10s active=%s lba=%-10lu sectors=%-10lu",
+                (unsigned)(part + 1U), (unsigned)typ,
                 type_name[typ & 0x0FU],
                 boot_flag ? "yes" : "no ",
                 (unsigned long)lba, (unsigned long)cnt);
@@ -898,13 +905,13 @@ static void dump_mbr (const uint8_t *sec) {
     }
 
     if (sig != 0xAA55U) {
-        printf ("[nx] MBR lba=0: sector 0 has no 55AA signature. Nextor cannot"
+        printf ("[nx] MBR %s: sector 0 has no 55AA signature. Nextor cannot"
                 " automap this stick as-is - it needs a real MBR with a"
                 " bootable FAT12/16 partition (the B key in the terminal"
-                " menu writes one).\r\n");
+                " menu writes one).\r\n", source);
     } else if (usable == 0U) {
-        printf ("[nx] MBR lba=0: signature present but all four partition"
-                " entries are empty.\r\n");
+        printf ("[nx] MBR %s: signature present but all four partition"
+                " entries are empty.\r\n", source);
     }
 }
 
@@ -1421,7 +1428,7 @@ void Nextor_Service (void) {
          * successful reads also shows WHY there is no drive. */
         if ((snap_lba == 0U) && (s_mb.mbr_dumped == 0U)) {
             s_mb.mbr_dumped = 1U;
-            dump_mbr (s_mb.res);
+            dump_mbr (s_mb.res, "read");
         }
         s_mb.res_end = s_mb.res + NEXTOR_SECTOR_SIZE;
         break;
@@ -1449,10 +1456,21 @@ void Nextor_Service (void) {
             printf ("[nx]   no medium, write rejected\r\n");
             break;
         }
+        /* FDISK creates/replaces the primary partition table by writing
+         * sector 0. Dump the exact candidate before sending it to USB so
+         * the debug log can distinguish a bad table produced by the kernel
+         * from a failed/short media write. The result line below confirms
+         * whether the raw write completed. */
+        if (snap_lba == 0U) {
+            dump_mbr (&s_mb.args[4], "write candidate");
+        }
         if (RawDisk_WriteSectors (snap_lba, 1U, &s_mb.args[4]) == 0U) {
             s_mb.err = NEXTOR_ERR_IO;
             printf ("[nx]   write failed: %s\r\n", RawDisk_LastFailure ());
             break;
+        }
+        if (snap_lba == 0U) {
+            printf ("[nx] MBR write completed\r\n");
         }
         break;
 

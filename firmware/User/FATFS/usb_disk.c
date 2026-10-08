@@ -39,6 +39,10 @@
 #include "ch32v4x7_psram.h"
 #include <string.h>
 
+#ifndef RISKY_DEBUG
+#define RISKY_DEBUG 0
+#endif
+
 /* ------------------------------------------------------------------------ */
 /* Buffer placement (PSRAM)                                                 */
 /* ------------------------------------------------------------------------ */
@@ -605,9 +609,11 @@ uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size) {
  * into `buf`.  For high-speed sticks the bulk pipe is a 512-byte
  * multi-packet stream; we loop on the per-packet size (512) until
  * `block_size` bytes have been received. */
-/* DIAGNOSTIC counters (shared by the SCSI read path and the copy loop,
- * re-armed at the end of each USB_FileToPSRAM run). */
+/* DIAGNOSTIC counter for the SCSI read path, re-armed at the end of each
+ * USB_FileToPSRAM run. Keep it out of normal builds with the trace it caps. */
+#if RISKY_DEBUG
 static uint32_t s_scsi_dbg = 0U;
+#endif
 
 /* Single 512-byte read from the stick... */
 static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
@@ -619,14 +625,14 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
     uint32_t bytes_received = 0;
     uint32_t transfer_len   = block_size;
 
-    /* DIAGNOSTIC: every sector read prints its LBA + attempt count so a
-     * mid-copy freeze pins to an exact sector. ( bounded to 64 prints
-     * per load via s_scsi_dbg; a 512B-chunk copy of an 8 MiB ROM is
-     * 16384 sectors, so the cap only matters for big files. ) */
+    /* DIAGNOSTIC: per-sector chatter is useful for tracing a stuck read,
+     * but floods the normal log during directory scans and file loads. */
+#if RISKY_DEBUG
     if (s_scsi_dbg < 64U) {
         printf ("USB: R lba=%lu\r\n", (unsigned long)lba);
         s_scsi_dbg++;
     }
+#endif
 
     memset (&cbw, 0, sizeof (cbw));
     cbw.dCBWSignature          = 0x43425355;
@@ -664,10 +670,9 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
             res = USBHSH_GetEndpData (usb_in_ep, &in_tog,
                                       buf + bytes_received, &plen);
             if (res != ERR_SUCCESS) {
-                /* DIAGNOSTIC: every bulk-IN NAK/error prints once per
-                 * packet, throttled to the first 64 reports per load.
-                 * A freeze inside this loop shows up as a burst of
-                 * NAK lines then silence. */
+                /* Detailed per-packet retry traces are debug-only. The
+                 * terminal NAK LIMIT message below remains in normal logs. */
+#if RISKY_DEBUG
                 if (s_scsi_dbg < 64U) {
                     printf ("USB: R lba=%lu off=%lu IN r=%02x try=%u\r\n",
                             (unsigned long)lba,
@@ -675,6 +680,7 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
                             (unsigned)res, (unsigned)nak_retries);
                     s_scsi_dbg++;
                 }
+#endif
                 Delay_Ms (1);
                 nak_retries++;
                 if (nak_retries >= 20) {
@@ -1277,7 +1283,9 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
     f_close (&fp);
     s_dbg_count = 0U;   /* re-arm the first-chunk debug for next load */
     s_chunk_dbg = 0U;
+#if RISKY_DEBUG
     s_scsi_dbg  = 0U;
+#endif
     return total;
 }
 
