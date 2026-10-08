@@ -138,23 +138,11 @@
           ""
         ],
         [
-          "lib_footprint_mismatch|154450000|102010000|fce3cb93-d508-4f82-b03c-0ee285f7c877|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
           "lib_footprint_mismatch|155260000|107230000|4d2557d2-6baa-4b43-a80b-66aa0002002e|00000000-0000-0000-0000-000000000000",
           ""
         ],
         [
           "lib_footprint_mismatch|155907500|90380000|544953e0-6ec2-4e32-82a0-260643af182f|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
-          "lib_footprint_mismatch|155950000|102010000|57bff980-dee0-4dee-bff9-8173890c281d|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
-          "lib_footprint_mismatch|160090000|97770000|a493991c-f9a1-47ea-a7c0-d6fec29c0edb|00000000-0000-0000-0000-000000000000",
           ""
         ],
         [
@@ -249,7 +237,7 @@
       },
       "rules": {
         "max_error": 0.005,
-        "min_clearance": 0.2032,
+        "min_clearance": 0.15,
         "min_connection": 0.0,
         "min_copper_edge_clearance": 0.1016,
         "min_groove_width": 0.0,
@@ -618,7 +606,7 @@
     "classes": [
       {
         "bus_width": 12,
-        "clearance": 0.2032,
+        "clearance": 0.1524,
         "diff_pair_gap": 0.25,
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
@@ -777,7 +765,7 @@
   "sheets": [
     [
       "fc019b67-ed7d-41f4-b5ff-4488bb70230a",
-      "RISKYMSXCart"
+      "RISKYMSX2"
     ]
   ],
   "text_variables": {},
