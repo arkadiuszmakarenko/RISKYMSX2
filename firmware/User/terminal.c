@@ -157,9 +157,10 @@ static const Cart_Mapper kMenuToCart[] = {
 /* ------------------------------------------------------------------ */
 
 static int out_push (uint8_t b) {
-    uint16_t next = (uint16_t)((g_term_mbox.out_tail + 1U) % 2048U);
+    uint16_t tail = g_term_mbox.out_tail;
+    uint16_t next = (uint16_t)((tail + 1U) % TERM_OUT_FIFO_DEPTH);
     if (next == g_term_mbox.out_head) return 0;  /* full */
-    g_term_mbox.out_buf[g_term_mbox.out_tail] = b;
+    g_term_mbox.out_buf[tail] = b;
     /* Memory barrier: make sure the byte write above is visible to the
      * IRQ-side consumer (Cart_EXTI0_Terminal_Handler) BEFORE the
      * tail increment that exposes the slot. RV32 needs a store-store
@@ -167,15 +168,24 @@ static int out_push (uint8_t b) {
      * standard RISC-V mnemonics. */
     __asm__ volatile ("fence w, w" ::: "memory");
     g_term_mbox.out_tail = next;
-    g_term_mbox.out_n++;
     return 1;
 }
 
+/* Occupancy, derived from the SPSC indices rather than a shared counter
+ * (see terminal.h). The main loop may observe one byte more than is
+ * actually queued if the EXTI0 consumer advances out_head mid-read;
+ * every caller treats this as a scheduling hint, so the conservative
+ * over-estimate is harmless. */
+uint16_t Terminal_OutLevel (void) {
+    return (uint16_t)((g_term_mbox.out_tail - g_term_mbox.out_head)
+                      & (TERM_OUT_FIFO_DEPTH - 1U));
+}
+
 static int kbd_pop (uint8_t *out) {
-    if (g_term_mbox.kbd_n == 0U) return 0;
+    if (g_term_mbox.kbd_head == g_term_mbox.kbd_tail) return 0;
     *out = g_term_mbox.kbd_buf[g_term_mbox.kbd_head];
-    g_term_mbox.kbd_head = (uint8_t)((g_term_mbox.kbd_head + 1U) % 16U);
-    g_term_mbox.kbd_n--;
+    g_term_mbox.kbd_head = (uint8_t)((g_term_mbox.kbd_head + 1U)
+                                     % TERM_KBD_FIFO_DEPTH);
     return 1;
 }
 
@@ -230,7 +240,7 @@ static void newline (void) {
     out_push ('\n');
 }
 
-/* Spin until the MSX has drained the output FIFO (out_n == 0) or the
+/* Spin until the MSX has drained the output FIFO (level == 0) or the
  * given millisecond budget expires, whichever comes first.
  *
  * Clock-derived calibration: empirically 4,000,000 iterations = 20 ms
@@ -241,7 +251,7 @@ static void term_wait_drain (uint32_t ms) {
     const uint32_t iters = ms * (SystemCoreClock / 1000U);
     uint32_t i;
     for (i = 0; i < iters; i++) {
-        if (g_term_mbox.out_n == 0U) break;
+        if (Terminal_OutLevel () == 0U) break;
         __asm__ volatile ("nop");
     }
 }
@@ -259,8 +269,8 @@ static void term_wait_drain (uint32_t ms) {
 static uint8_t s_list_pending = 1;
 
 void Terminal_Reset (void) {
-    g_term_mbox.kbd_head = g_term_mbox.kbd_tail = g_term_mbox.kbd_n = 0;
-    g_term_mbox.out_head = g_term_mbox.out_tail = g_term_mbox.out_n = 0;
+    g_term_mbox.kbd_head = g_term_mbox.kbd_tail = 0;
+    g_term_mbox.out_head = g_term_mbox.out_tail = 0;
     g_term_mbox.control = 0xFFU;
     s_menu.count = 0;
     s_menu.sel   = 0;
@@ -1323,14 +1333,14 @@ static void term_progress_cb (uint32_t done, uint32_t total) {
     }
 
     /* Backpressure: the ring is only 2048 bytes and the MSX drains at
-     * ~50 µs/byte, so a bar redraw every 1% can outrun it. If out_n is
-     * high, SKIP this redraw - a skipped cosmetic update is harmless,
-     * but out_push() silently drops bytes when full, and dropping the
-     * trailing " OK - booting MSX into cart" + 0x03 launch byte (see
-     * soft_reset_into_cart) leaves the MSX in the terminal loop and
-     * the cart never boots. Threading the ring below ~50% always
-     * leaves room for the launch sequence. */
-    if (g_term_mbox.out_n > 1024U) return;
+     * ~50 µs/byte, so a bar redraw every 1% can outrun it. If the
+     * queue is high, SKIP this redraw - a skipped cosmetic update is
+     * harmless, but out_push() silently drops bytes when full, and
+     * dropping the trailing " OK - booting MSX into cart" + 0x03 launch
+     * byte (see soft_reset_into_cart) leaves the MSX in the terminal
+     * loop and the cart never boots. Threading the ring below ~50%
+     * always leaves room for the launch sequence. */
+    if (Terminal_OutLevel () > 1024U) return;
 
     /* Row 3, column 0 - must match the header layout in
      * Terminal_BootCart. */
@@ -1385,10 +1395,10 @@ static void soft_reset_into_cart (Cart_Mapper m) {
          * so this race now has huge margins instead of being a
          * knife-edge. */
         Delay_Ms (20U);
-        if (g_term_mbox.out_n != 0U) {
-            printf ("TERM: WARNING FIFO not drained (out_n=%u at swap "
+        if (Terminal_OutLevel () != 0U) {
+            printf ("TERM: WARNING FIFO not drained (level=%u at swap "
                     "time) - MSX has not read the 0x03 yet, it may "
-                    "show rubbish\r\n", g_term_mbox.out_n);
+                    "show rubbish\r\n", (unsigned)Terminal_OutLevel ());
         }
     }
     printf ("TERM: soft_reset swap mapper=%d\r\n", (int)m);
@@ -1520,10 +1530,10 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
          * µs/byte (~102 ms) with margin; normally it returns in tens
          * of ms. */
         term_wait_drain (600U);
-        if (g_term_mbox.out_n != 0U) {
-            printf ("TERM: WARNING MSX still draining (out_n=%u after "
+        if (Terminal_OutLevel () != 0U) {
+            printf ("TERM: WARNING MSX still draining (level=%u after "
                     "600 ms) - launch text will queue behind it\r\n",
-                    g_term_mbox.out_n);
+                    (unsigned)Terminal_OutLevel ());
         }
         out_str (" OK - booting MSX into cart");
         newline ();

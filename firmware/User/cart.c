@@ -364,32 +364,35 @@ int Cart_SetMapper (Cart_Mapper m) {
     EXTI->INTFR = EXTI_INTENR_MR8;
     if (Cart_MapperHasSubslots (m)) {
         EXTI->INTENR |= EXTI_INTENR_MR8;
-        /* EXTI9_5 dispatch: VECTOR TABLE (see the VTF experiment
-         * conclusion above), but at priority 0x10 - a strictly LOWER
-         * preemption group than EXTI0's 0x00. This is the one piece the
-         * earlier experiments never isolated:
+        /* EXTI9_5 dispatch: vector table, at priority 0x80 - a strictly
+         * LOWER preemption level than EXTI0's 0x00, so the cycle-critical
+         * cart handler can always preempt the /IORQ bank capture.
          *
-         *   With the two IRQs in the same group (0x01 vs 0x00, or the
-         *   equal-VTF config), EXTI0 CANNOT preempt this handler - and
-         *   this handler contains a settle spin that runs up to ~600 ns
-         *   inside the /IORQ cycle. A Z80 memory cycle that pends during
-         *   that spin waits non-preemptibly, past the Z80's data-sample
-         *   point: the served opcode byte arrives late, the Z80 fetches
-         *   garbage, and the PC derails - the trace showed exactly that
-         *   (a burst interrupted by a storm of wild writes executing
-         *   data as code). It only takes one corrupted fetch, which is
-         *   why it is "time to time" and not constant.
+         * Why the exact value matters: this core runs with
+         * HW_POPDM_CTLR[3:2] (CSR 0x804) = 1, i.e. a 1-bit preemption
+         * field - bit[7] of the priority register is the preemption
+         * level and bits[6:4] are sub-priority (see the reference
+         * manual, "HW_POPDM_CTLR"). The old 0x10 therefore had bit[7]=0,
+         * the SAME preemption level as EXTI0's 0x00: EXTI0 could NOT
+         * preempt this handler, and the earlier note claiming 0x10 was a
+         * strictly lower group was wrong. A Z80 memory cycle that pended
+         * while this handler sat in its /IORQ settle spin then waited
+         * non-preemptibly, past the Z80 data-sample point - one corrupted
+         * opcode fetch and the Z80 PC derails ("screen shifts", "bottom
+         * colour" artefacts, game loads but never starts). 0x80 sets
+         * bit[7]=1, actually putting EXTI9_5 in the lower level. The
+         * /IORQ handler is a normal vector interrupt (not a second VTF
+         * channel), so VTF-to-VTF preemption - the configuration that
+         * used to lock the chip up - is not involved.
          *
-         *   At 0x10, EXTI0 (VTF, group 0) preempts this handler at any
-         *   point; the bank capture resumes after the fetch is served.
-         *   Vector dispatch + standard nesting is the reliable path -
-         *   the broken config was VTF-to-VTF preemption, which is gone.
-         *
-         * The residual theoretical race (EXTI0 preempting between the
-         * port sample and the bank-register store, delaying a bank
-         * switch by one cycle) only affects mapper-RAM software, and is
-         * strictly better than corrupting opcode fetches system-wide. */
-        NVIC_SetPriority (EXTI9_5_IRQn, 0x10);
+         * The residual race (EXTI0 preempting between the port sample and
+         * the bank-register store, delaying a bank switch by one cycle)
+         * only affects mapper-RAM software, and is strictly better than
+         * corrupting opcode fetches system-wide. The bank capture runs
+         * inside the OUT cycle while /SLTSL is high, so a preemption can
+         * only land at the cycle boundary, after the byte is sampled -
+         * see the manual: memory and I/O cycles are mutually exclusive. */
+        NVIC_SetPriority (EXTI9_5_IRQn, 0x80);
         NVIC_EnableIRQ (EXTI9_5_IRQn);
     } else {
         EXTI->INTENR &= ~EXTI_INTENR_MR8;
@@ -573,11 +576,14 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR8) | EXTI_FTENR_TR8;
     EXTI->INTENR &= ~EXTI_INTENR_MR8;
     EXTI->INTFR = EXTI_INTENR_MR8;
-    /* Vector-table dispatch, strictly below EXTI0's preemption group so
-     * the fetch handler can always preempt the bank capture - see
-     * Cart_SetMapper for the full rationale. Masked here; Cart_SetMapper
-     * arms it for expanded-slot mappers. */
-    NVIC_SetPriority (EXTI9_5_IRQn, 0x10);
+    /* Vector-table dispatch, at a strictly LOWER preemption level than
+     * the cycle-critical EXTI0 handler so a pending cart fetch can always
+     * preempt the /IORQ bank capture. The core's HW_POPDM_CTLR (CSR
+     * 0x804)[3:2] = 1 means only bit[7] of the priority register is the
+     * preemption level, so 0x10 sat in the SAME level as EXTI0's 0x00
+     * (no preemption) - see Cart_SetMapper for the full analysis. Masked
+     * here; Cart_SetMapper arms it for expanded-slot mappers. */
+    NVIC_SetPriority (EXTI9_5_IRQn, 0x80);
     NVIC_DisableIRQ (EXTI9_5_IRQn);
 
     /* No VTF entry is installed until the real mapper is selected.
@@ -1943,13 +1949,9 @@ void Cart_EXTI0_ROM48k_Handler (void) {
  * by the FLASH loader mailbox.
  */
 
-#define TERM_KBD_FIFO_DEPTH  16U
-#define TERM_OUT_FIFO_DEPTH  2048U
-
-/* TerminalMailbox struct + g_term_mbox definition live in terminal.h /
- * terminal.c. cart.c just touches the fields through the extern decl
- * below. */
-
+/* TerminalMailbox struct + depth macros + g_term_mbox live in
+ * terminal.h / terminal.c. cart.c just touches the fields through the
+ * extern decl below. */
 extern TerminalMailbox g_term_mbox;
 
 void Cart_EXTI0_Terminal_Handler (void) {
@@ -2010,12 +2012,16 @@ void Cart_EXTI0_Terminal_Handler (void) {
                  * the producer does `fence w,w` between byte-write and
                  * tail-increment, so reading tail and then the byte is safe
                  * in the IRQ context. */
-                if (g_term_mbox.out_n > 0U) {
-                    v = g_term_mbox.out_buf[g_term_mbox.out_head];
+                if (g_term_mbox.out_head != g_term_mbox.out_tail) {
+                    /* Acquire: the producer publishes out_tail with a
+                     * store-store fence only after the byte is written,
+                     * so the byte must be loaded after the new tail is
+                     * observed. Volatile + in-order loads already give
+                     * that on this single hart; the fence documents it. */
                     __asm__ volatile ("fence r, r" ::: "memory");
+                    v = g_term_mbox.out_buf[g_term_mbox.out_head];
                     g_term_mbox.out_head = (uint16_t)(
-                        (g_term_mbox.out_head + 1U) % 2048U);
-                    g_term_mbox.out_n--;
+                        (g_term_mbox.out_head + 1U) % TERM_OUT_FIFO_DEPTH);
                 } else {
                     v = 0x00U;  /* empty: MSX loops and waits */
                 }
@@ -2066,12 +2072,16 @@ void Cart_EXTI0_Terminal_Handler (void) {
                  * tail-increment, so reading tail and then the byte is safe
                  * in the IRQ context. */
                 uint8_t v;
-                if (g_term_mbox.out_n > 0U) {
-                    v = g_term_mbox.out_buf[g_term_mbox.out_head];
+                if (g_term_mbox.out_head != g_term_mbox.out_tail) {
+                    /* Acquire: the producer publishes out_tail with a
+                     * store-store fence only after the byte is written,
+                     * so the byte must be loaded after the new tail is
+                     * observed. Volatile + in-order loads already give
+                     * that on this single hart; the fence documents it. */
                     __asm__ volatile ("fence r, r" ::: "memory");
+                    v = g_term_mbox.out_buf[g_term_mbox.out_head];
                     g_term_mbox.out_head = (uint16_t)(
-                        (g_term_mbox.out_head + 1U) % 2048U);
-                    g_term_mbox.out_n--;
+                        (g_term_mbox.out_head + 1U) % TERM_OUT_FIFO_DEPTH);
                 } else {
                     v = 0x00U;  /* empty: MSX loops and waits */
                 }
@@ -2191,11 +2201,15 @@ void Cart_EXTI0_Terminal_Handler (void) {
             if (address == 0x7FFDU) {
                 /* Keyboard FIFO push. Drop on overflow - the
                  * terminal never sends faster than human typing. */
-                uint8_t next = (uint8_t)((g_term_mbox.kbd_tail + 1U) % 16U);
+                uint8_t next = (uint8_t)((g_term_mbox.kbd_tail + 1U)
+                                         % TERM_KBD_FIFO_DEPTH);
                 if (next != g_term_mbox.kbd_head) {
                     g_term_mbox.kbd_buf[g_term_mbox.kbd_tail] = w;
+                    /* Publish the tail only after the byte. The main-loop
+                     * consumer derives emptiness from head != tail, so a
+                     * torn index here can no longer desync a counter. */
+                    __asm__ volatile ("fence w, w" ::: "memory");
                     g_term_mbox.kbd_tail = next;
-                    g_term_mbox.kbd_n++;
                 }
             } else {
                 /* Control byte. Latched verbatim - terminal.c reads

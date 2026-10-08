@@ -28,15 +28,35 @@
 extern "C" {
 #endif
 
+/* Depth of the two FIFOs. Shared by terminal.c (producer side) and
+ * cart.c (EXTI0 consumer side) so both compute the same wrap. */
+#define TERM_KBD_FIFO_DEPTH  16U
+#define TERM_OUT_FIFO_DEPTH  2048U
+
 /* Terminal mailbox (lives in cart.c so the EXTI0 handler can touch it
  * directly - kept in zero-wait-state SRAM via the existing volatile
- * qualifiers). */
+ * qualifiers).
+ *
+ * Both rings are strict single-producer/single-consumer. The ONLY shared
+ * state is the two indices; each index is written by exactly one side:
+ *
+ *   kbd_buf/head/tail : producer = EXTI0 (0x7FFD write),
+ *                       consumer = terminal.c main loop.
+ *   out_buf/head/tail : producer = terminal.c main loop,
+ *                       consumer = EXTI0 (0x7FFF read).
+ *
+ * Do NOT keep a separate byte count that both sides read-modify-write
+ * (the old kbd_n / out_n fields): a load-store pair on a counter is not
+ * atomic against the other side's interrupt, so an interrupt landing
+ * between the load and the store silently loses an update. That
+ * desynchronised the count from the indices and produced the
+ * "copy screen duplicates every print" and "menu drops a line" bugs.
+ * Occupancy is derived from the indices instead (Terminal_OutLevel). */
 typedef struct {
     /* keyboard FIFO: MSX pushes a byte at 0x7FFD; terminal.c drains. */
-    volatile uint8_t  kbd_buf[16];
+    volatile uint8_t  kbd_buf[TERM_KBD_FIFO_DEPTH];
     volatile uint8_t  kbd_head;
     volatile uint8_t  kbd_tail;
-    volatile uint8_t  kbd_n;
     /* output FIFO: terminal.c pushes; MSX pops at 0x7FFF. Sized to
      * hold an entire file-list refresh plus title, screen-clear,
      * sprite-position and a comfortable safety margin (~800 bytes
@@ -48,10 +68,9 @@ typedef struct {
      * and a uint8_t index would alias after 256 bytes - which was
      * exactly the "only 6 files render, second page repeats one
      * file" bug. */
-    volatile uint8_t  out_buf[2048];
+    volatile uint8_t  out_buf[TERM_OUT_FIFO_DEPTH];
     volatile uint16_t out_head;
     volatile uint16_t out_tail;
-    volatile uint16_t out_n;
     /* control byte: latched on every 0x7FFE write. terminal.c reads
      * and clears. Set to 0xFF to mean "no control yet" (since valid
      * control values are 0x00/0x03/0x04 - all small, so 0xFF never
@@ -60,6 +79,11 @@ typedef struct {
 } TerminalMailbox;
 
 extern TerminalMailbox g_term_mbox;
+
+/* Bytes currently queued in the output FIFO, derived from the SPSC
+ * indices. Safe to call from the main loop at any time: it never
+ * writes the indices, so it cannot race the EXTI0 consumer. */
+uint16_t Terminal_OutLevel (void);
 
 /* Reset the terminal mailbox (call when installing the TERMINAL mapper
  * to drop any stale FIFO contents from a previous session). */
