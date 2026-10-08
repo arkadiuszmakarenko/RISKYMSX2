@@ -28,7 +28,10 @@ TerminalMailbox g_term_mbox;
  * each primary FAT16 volume can be formatted in turn. */
 PARTITION VolToPart[FF_VOLUMES] = {{0U, 0U}};
 
-#define TERM_MAX_FILES   32U
+/* Keep a useful multi-page directory listing instead of truncating it after
+ * two pages. Each entry costs about 57 bytes across the parallel name/size
+ * arrays, so 512 entries use roughly 29 KiB of SRAM and allow 26 pages. */
+#define TERM_MAX_FILES   512U
 #define FILE_NAME_MAX    26U    /* printed-column width: 25 chars + NUL.
                                  * Line layout = 25 (name) + 1 (space) +
                                  * up to 5 (size, e.g. "1023K") = 31
@@ -523,6 +526,78 @@ static int term_build_path (char *out, size_t out_cap, const char *sfx) {
     return 1;
 }
 
+static uint8_t term_fold_ascii (uint8_t c) {
+    if (c >= (uint8_t)'A' && c <= (uint8_t)'Z') {
+        c = (uint8_t)(c + ((uint8_t)'a' - (uint8_t)'A'));
+    }
+    return c;
+}
+
+static int term_name_compare (const char *left, const char *right) {
+    while (*left != '\0' && *right != '\0') {
+        const uint8_t a = term_fold_ascii ((uint8_t)*left++);
+        const uint8_t b = term_fold_ascii ((uint8_t)*right++);
+        if (a != b) return (a < b) ? -1 : 1;
+    }
+    if (*left == *right) return 0;
+    return (*left == '\0') ? -1 : 1;
+}
+
+/* Directories sort before files; within each group use the displayed LFN
+ * case-insensitively. The SFN breaks ties consistently when two displayed
+ * names truncate to the same text. */
+static int menu_entry_compare (uint16_t left, uint16_t right) {
+    if (s_menu.is_dir[left] != s_menu.is_dir[right]) {
+        return s_menu.is_dir[left] ? -1 : 1;
+    }
+    {
+        const int lfn_order = term_name_compare (s_menu.lfns[left],
+                                                s_menu.lfns[right]);
+        if (lfn_order != 0) return lfn_order;
+    }
+    return term_name_compare (s_menu.names[left], s_menu.names[right]);
+}
+
+static void menu_entry_swap (uint16_t left, uint16_t right) {
+    char name_tmp[FILE_NAME_MAX];
+    char lfn_tmp[FILE_NAME_MAX];
+    uint32_t size_tmp;
+    uint8_t dir_tmp;
+
+    memcpy (name_tmp, s_menu.names[left], sizeof (name_tmp));
+    memcpy (s_menu.names[left], s_menu.names[right], sizeof (name_tmp));
+    memcpy (s_menu.names[right], name_tmp, sizeof (name_tmp));
+    memcpy (lfn_tmp, s_menu.lfns[left], sizeof (lfn_tmp));
+    memcpy (s_menu.lfns[left], s_menu.lfns[right], sizeof (lfn_tmp));
+    memcpy (s_menu.lfns[right], lfn_tmp, sizeof (lfn_tmp));
+
+    size_tmp = s_menu.sizes[left];
+    s_menu.sizes[left] = s_menu.sizes[right];
+    s_menu.sizes[right] = size_tmp;
+    dir_tmp = s_menu.is_dir[left];
+    s_menu.is_dir[left] = s_menu.is_dir[right];
+    s_menu.is_dir[right] = dir_tmp;
+}
+
+/* Shell sort the collected directory entries. Keep the synthetic parent
+ * row fixed at index 0 so it remains the first entry on every subfolder. */
+static void sort_menu_entries (void) {
+    const uint16_t first = (s_menu.cwd[0] != '\0') ? 1U : 0U;
+    uint16_t gap = (uint16_t)((s_menu.count - first) / 2U);
+
+    while (gap > 0U) {
+        for (uint16_t i = (uint16_t)(first + gap); i < s_menu.count; i++) {
+            uint16_t j = i;
+            while (j >= (uint16_t)(first + gap) &&
+                   menu_entry_compare ((uint16_t)(j - gap), j) > 0) {
+                menu_entry_swap ((uint16_t)(j - gap), j);
+                j = (uint16_t)(j - gap);
+            }
+        }
+        gap = (uint16_t)(gap / 2U);
+    }
+}
+
 static void scan_usb (void) {
     s_menu.count = 0;
     if (USB_TryEnsureMounted () != DEF_SUCCESS) {
@@ -656,6 +731,7 @@ static void scan_usb (void) {
         }
     }
     f_closedir (&dir);
+    sort_menu_entries ();
 }
 
 /* ------------------------------------------------------------------ */
