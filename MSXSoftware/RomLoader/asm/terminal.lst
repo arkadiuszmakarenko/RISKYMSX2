@@ -97,7 +97,7 @@
       004025                         97 bg_run:
       004025 21r33r40         [10]   98         ld      hl, #body              ; source in ROM
       004028 11 00 E0         [10]   99         ld      de, #0xE000            ; destination in MSX RAM
-      00402B 01 B6 00         [10]  100         ld      bc, #BODY_SIZE         ; byte count
+      00402B 01 C4 00         [10]  100         ld      bc, #BODY_SIZE         ; byte count
       00402E ED B0            [21]  101         ldir
       004030 C3 00 E0         [10]  102         jp      0xE000                 ; jump into the relocated copy
                                     103 
@@ -130,7 +130,7 @@
                                     130         ;; the copy is explicit. Body RAM base = 0xE000 (body ROM
                                     131         ;; base is whatever the assembler assigns, currently 0x4033),
                                     132         ;; so 0xE100 is well clear of the copy.
-      004033 21rD3r40         [10]  133         ld      hl, #ugly_patch
+      004033 21rE1r40         [10]  133         ld      hl, #ugly_patch
       004036 11 00 E1         [10]  134         ld      de, #0xE100
       004039 01 05 00         [10]  135         ld      bc, #5
       00403C ED B0            [21]  136         ldir
@@ -143,7 +143,7 @@
       004049 22 E9 F3         [16]  143         ld      (0xF3E9), hl
       00404C 3E 01            [ 7]  144         ld      a, #1
       00404E CD 5F 00         [17]  145         call    0x005F
-      004051 21rF0r40         [10]  146         ld      hl, #arrow
+      004051 21rF7r40         [10]  146         ld      hl, #arrow
       004054 11 00 38         [10]  147         ld      de, #0x3800
       004057 01 08 00         [10]  148         ld      bc, #8
       00405A CD 5C 00         [17]  149         call    0x005C
@@ -168,101 +168,131 @@
       004077 21 01 1B         [10]  168         ld      hl, #0x1B01
       00407A CD 4D 00         [17]  169         call    0x004D
                                     170 
-      00407D                        171 loop:
-                                    172         ;; Poll firmware FIFO at 0x7FFF.
-      00407D 3A FF 7F         [13]  173         ld      a, (0x7FFF)
-      004080 FE 03            [ 7]  174         cp      #3
-      004082 28 2B            [12]  175         jr      z, rom_start            ; "boot the cart"
-      004084 FE 04            [ 7]  176         cp      #4
-      004086 28 14            [12]  177         jr      z, sprite               ; "move the cursor"
-      004088 A7               [ 4]  178         and     a
-      004089 CCrDEr40         [17]  179         call    z, wait                 ; empty -> wait one refresh
-      00408C C4 A2 00         [17]  180         call    nz, 0x00A2              ; non-empty -> CHPUT (BIOS print)
-                                    181         ;; Poll keyboard and forward on 0x7FFD.
-      00408F CD 9C 00         [17]  182         call    0x009C                  ; CHSNS - any key?
-      004092 28 E9            [12]  183         jr      z, loop
-      004094 CD 9F 00         [17]  184         call    0x009F                  ; CHGET - read key
-      004097 32 FD 7F         [13]  185         ld      (0x7FFD), a
-      00409A 18 E1            [12]  186         jr      loop
-                                    187 
-      00409C                        188 sprite:
-      00409C 3A FF 7F         [13]  189         ld      a, (0x7FFF)             ; X
-      00409F 21 01 1B         [10]  190         ld      hl, #0x1B01
-      0040A2 CD 4D 00         [17]  191         call    0x004D
-      0040A5 3A FF 7F         [13]  192         ld      a, (0x7FFF)             ; Y
-      0040A8 3D               [ 4]  193         dec     a
-      0040A9 2D               [ 4]  194         dec     l
-      0040AA CD 4D 00         [17]  195         call    0x004D
-      0040AD 18 CE            [12]  196         jr      loop
-                                    197 
-      0040AF                        198 rom_start:
-                                    199         ;; >= ~35 ms for the firmware to settle: wait two JIFFY ticks.
-                                    200         ;; INLINED and executed from MSX RAM - no cart access from
-                                    201         ;; here on (the firmware swaps the mapper during this window;
-                                    202         ;; a `call wait` would fetch the swapped-in cart's bytes).
-      0040AF FB               [ 4]  203         ei
-      0040B0 21 9E FC         [10]  204         ld      hl, #0xFC9E             ; JIFFY
-      0040B3 7E               [ 7]  205         ld      a, (hl)
-      0040B4                        206 rs_w1:
-      0040B4 BE               [ 7]  207         cp      (hl)
-      0040B5 28 FD            [12]  208         jr      z, rs_w1                ; jiffy change #1
-      0040B7 7E               [ 7]  209         ld      a, (hl)
-      0040B8                        210 rs_w2:
-      0040B8 BE               [ 7]  211         cp      (hl)
-      0040B9 28 FD            [12]  212         jr      z, rs_w2                ; ... and #2
-      0040BB 2A B1 F6         [16]  213         ld      hl, (0xF6B1)
-      0040BE 11 F4 FF         [10]  214         ld      de, #-12
-      0040C1 19               [11]  215         add     hl, de
-      0040C2 E5               [11]  216         push    hl
-      0040C3 5E               [ 7]  217         ld      e, (hl)
-      0040C4 23               [ 6]  218         inc     hl
-      0040C5 56               [ 7]  219         ld      d, (hl)
-      0040C6 21 A3 7D         [10]  220         ld      hl, #0x7DA3
-      0040C9 E7               [11]  221         rst     #0x20                   ; COMPARE HL, DE (BIOS helper)
-      0040CA E1               [10]  222         pop     hl
-      0040CB 20 0B            [12]  223         jr      nz, unknown
-                                    224         ;; Patch the BIOS INIT-return frame to 0xE100 (little-endian
-                                    225         ;; 00 E1): the launch patch executes from MSX RAM, safe under
-                                    226         ;; the mapper swap.
-      0040CD 36 00            [10]  227         ld      (hl), #0x00
-      0040CF 23               [ 6]  228         inc     hl
-      0040D0 36 E1            [10]  229         ld      (hl), #0xE1
-      0040D2 C9               [10]  230         ret
-                                    231 
-      0040D3                        232 ugly_patch:
-      0040D3 C1               [10]  233         pop     bc
-      0040D4 E1               [10]  234         pop     hl
-      0040D5 C3 84 7D         [10]  235         jp      0x7D84
-                                    236 
-      0040D8                        237 unknown:
-      0040D8 1E 52            [ 7]  238         ld      e, #'R'
-      0040DA CD B1 FF         [17]  239         call    0xFFB1
-      0040DD C7               [11]  240         rst     0
-                                    241 
-      0040DE                        242 wait:
-      0040DE F5               [11]  243         push    af
-      0040DF FB               [ 4]  244         ei
-      0040E0 21 9E FC         [10]  245         ld      hl, #0xFC9E             ; JIFFY
-      0040E3 7E               [ 7]  246         ld      a, (hl)
-      0040E4                        247 wait_loop:
-      0040E4 BE               [ 7]  248         cp      (hl)
-      0040E5 28 FD            [12]  249         jr      z, wait_loop
-      0040E7 F1               [10]  250         pop     af
-      0040E8 C9               [10]  251         ret
-      0040E9                        252 body_end:
-                                    253 
-                           0000B6   254 BODY_SIZE = body_end - body
-                                    255 
-                                    256 ;-------------------------------------------------------------------------------
-                                    257 ; Cursor arrow sprite pattern - sits just past the relocated body.
-                                    258 ;-------------------------------------------------------------------------------
-      0040F0                        259         .org    0x40F0
-      0040F0                        260 arrow:
-      0040F0 20                     261         .db     0b00100000
-      0040F1 30                     262         .db     0b00110000
-      0040F2 38                     263         .db     0b00111000
-      0040F3 3C                     264         .db     0b00111100
-      0040F4 38                     265         .db     0b00111000
-      0040F5 30                     266         .db     0b00110000
-      0040F6 20                     267         .db     0b00100000
-      0040F7 00                     268         .db     0b00000000
+                                    171         ;; Disable the BIOS function-key display (equivalent to
+                                    172         ;; BASIC's `KEY OFF`). In text screen modes the BIOS draws
+                                    173         ;; the default F1-F10 macros ("color", "auto", "goto",
+                                    174         ;; "list", "run", ...) on the bottom screen line by default,
+                                    175         ;; and redraws them on screen events - that line lands under
+                                    176         ;; the terminal footer, so the macros keep reappearing over
+                                    177         ;; the menu. CNSDFG (0xF3DE) = 0 means "hidden" (see
+                                    178         ;; Nextor's msx_workarea.h); FNKSB (0x00C9) erases the
+                                    179         ;; currently displayed line. Must run AFTER CHGMOD, which
+                                    180         ;; is what draws it in the first place.
+      00407D 3E 00            [ 7]  181         ld      a, #0
+      00407F 32 DE F3         [13]  182         ld      (0xF3DE), a
+      004082 CD C9 00         [17]  183         call    0x00C9                  ; FNKSB - erase the key display
+                                    184 
+      004085                        185 loop:
+                                    186         ;; Poll firmware FIFO at 0x7FFF.
+      004085 3A FF 7F         [13]  187         ld      a, (0x7FFF)
+      004088 FE 03            [ 7]  188         cp      #3
+      00408A 28 31            [12]  189         jr      z, rom_start            ; "boot the cart"
+      00408C FE 04            [ 7]  190         cp      #4
+      00408E 28 14            [12]  191         jr      z, sprite               ; "move the cursor"
+      004090 A7               [ 4]  192         and     a
+      004091 CCrECr40         [17]  193         call    z, wait                 ; empty -> wait one refresh
+      004094 C4 A2 00         [17]  194         call    nz, 0x00A2              ; non-empty -> CHPUT (BIOS print)
+                                    195         ;; Poll keyboard and forward on 0x7FFD.
+      004097 CD 9C 00         [17]  196         call    0x009C                  ; CHSNS - any key?
+      00409A 28 E9            [12]  197         jr      z, loop
+      00409C CD 9F 00         [17]  198         call    0x009F                  ; CHGET - read key
+      00409F 32 FD 7F         [13]  199         ld      (0x7FFD), a
+      0040A2 18 E1            [12]  200         jr      loop
+                                    201 
+      0040A4                        202 sprite:
+                                    203         ;; The firmware pushes 0x04, X then Y as three separate FIFO
+                                    204         ;; writes. An EXTI0 can therefore hand us the 0x04 before X/Y
+                                    205         ;; are queued; reading 0x7FFF while empty returns 0x00, which
+                                    206         ;; would be taken as a real coordinate and shift the cursor off
+                                    207         ;; the text stream (stray cursor jumps / partial screens).
+                                    208         ;; Both coordinates are never 0 (col*8+1 and row*8+1), so spin
+                                    209         ;; until a nonzero byte arrives before consuming it.
+      0040A4                        210 spr_x:
+      0040A4 3A FF 7F         [13]  211         ld      a, (0x7FFF)             ; X
+      0040A7 A7               [ 4]  212         and     a
+      0040A8 28 FA            [12]  213         jr      z, spr_x
+      0040AA 21 01 1B         [10]  214         ld      hl, #0x1B01
+      0040AD CD 4D 00         [17]  215         call    0x004D
+      0040B0                        216 spr_y:
+      0040B0 3A FF 7F         [13]  217         ld      a, (0x7FFF)             ; Y
+      0040B3 A7               [ 4]  218         and     a
+      0040B4 28 FA            [12]  219         jr      z, spr_y
+      0040B6 3D               [ 4]  220         dec     a
+      0040B7 2D               [ 4]  221         dec     l
+      0040B8 CD 4D 00         [17]  222         call    0x004D
+      0040BB 18 C8            [12]  223         jr      loop
+                                    224 
+      0040BD                        225 rom_start:
+                                    226         ;; >= ~35 ms for the firmware to settle: wait two JIFFY ticks.
+                                    227         ;; INLINED and executed from MSX RAM - no cart access from
+                                    228         ;; here on (the firmware swaps the mapper during this window;
+                                    229         ;; a `call wait` would fetch the swapped-in cart's bytes).
+      0040BD FB               [ 4]  230         ei
+      0040BE 21 9E FC         [10]  231         ld      hl, #0xFC9E             ; JIFFY
+      0040C1 7E               [ 7]  232         ld      a, (hl)
+      0040C2                        233 rs_w1:
+      0040C2 BE               [ 7]  234         cp      (hl)
+      0040C3 28 FD            [12]  235         jr      z, rs_w1                ; jiffy change #1
+      0040C5 7E               [ 7]  236         ld      a, (hl)
+      0040C6                        237 rs_w2:
+      0040C6 BE               [ 7]  238         cp      (hl)
+      0040C7 28 FD            [12]  239         jr      z, rs_w2                ; ... and #2
+      0040C9 2A B1 F6         [16]  240         ld      hl, (0xF6B1)
+      0040CC 11 F4 FF         [10]  241         ld      de, #-12
+      0040CF 19               [11]  242         add     hl, de
+      0040D0 E5               [11]  243         push    hl
+      0040D1 5E               [ 7]  244         ld      e, (hl)
+      0040D2 23               [ 6]  245         inc     hl
+      0040D3 56               [ 7]  246         ld      d, (hl)
+      0040D4 21 A3 7D         [10]  247         ld      hl, #0x7DA3
+      0040D7 E7               [11]  248         rst     #0x20                   ; COMPARE HL, DE (BIOS helper)
+      0040D8 E1               [10]  249         pop     hl
+      0040D9 20 0B            [12]  250         jr      nz, unknown
+                                    251         ;; Patch the BIOS INIT-return frame to 0xE100 (little-endian
+                                    252         ;; 00 E1): the launch patch executes from MSX RAM, safe under
+                                    253         ;; the mapper swap.
+      0040DB 36 00            [10]  254         ld      (hl), #0x00
+      0040DD 23               [ 6]  255         inc     hl
+      0040DE 36 E1            [10]  256         ld      (hl), #0xE1
+      0040E0 C9               [10]  257         ret
+                                    258 
+      0040E1                        259 ugly_patch:
+      0040E1 C1               [10]  260         pop     bc
+      0040E2 E1               [10]  261         pop     hl
+      0040E3 C3 84 7D         [10]  262         jp      0x7D84
+                                    263 
+      0040E6                        264 unknown:
+      0040E6 1E 52            [ 7]  265         ld      e, #'R'
+      0040E8 CD B1 FF         [17]  266         call    0xFFB1
+      0040EB C7               [11]  267         rst     0
+                                    268 
+      0040EC                        269 wait:
+      0040EC F5               [11]  270         push    af
+      0040ED FB               [ 4]  271         ei
+      0040EE 21 9E FC         [10]  272         ld      hl, #0xFC9E             ; JIFFY
+      0040F1 7E               [ 7]  273         ld      a, (hl)
+      0040F2                        274 wait_loop:
+      0040F2 BE               [ 7]  275         cp      (hl)
+      0040F3 28 FD            [12]  276         jr      z, wait_loop
+      0040F5 F1               [10]  277         pop     af
+      0040F6 C9               [10]  278         ret
+      0040F7                        279 body_end:
+                                    280 
+                           0000C4   281 BODY_SIZE = body_end - body
+                                    282 
+                                    283 ;-------------------------------------------------------------------------------
+                                    284 ; Cursor arrow sprite pattern - emitted immediately after the body. It used to
+                                    285 ; sit at a hard-coded .org 0x40F0; when the body grew past that address the
+                                    286 ; assembler overwrote the trailing `ret` of `wait`, hanging the body (no keys,
+                                    287 ; no boot). Letting it follow body_end keeps the two from ever colliding; it
+                                    288 ; still lands inside the 256-byte trimmed cartridge window.
+                                    289 ;-------------------------------------------------------------------------------
+      0040F7                        290 arrow:
+      0040F7 20                     291         .db     0b00100000
+      0040F8 30                     292         .db     0b00110000
+      0040F9 38                     293         .db     0b00111000
+      0040FA 3C                     294         .db     0b00111100
+      0040FB 38                     295         .db     0b00111000
+      0040FC 30                     296         .db     0b00110000
+      0040FD 20                     297         .db     0b00100000
+      0040FE 00                     298         .db     0b00000000

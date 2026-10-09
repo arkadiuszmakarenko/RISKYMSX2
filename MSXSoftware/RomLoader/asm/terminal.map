@@ -13,11 +13,9 @@ Area                                    Addr        Size        Decimal Bytes (A
      00000000  s__HEADER                       
      00000000  s__HEADER0                      
      00000000  s__HEADER1                      
-     00000000  s__HEADER2                      
      00000001  l__DATA                         
-     00000008  l__HEADER2                      
      00000010  l__HEADER0                      
-     000000D9  l__HEADER1                      
+     000000EF  l__HEADER1                      
      00000200  s__CODE                         
      00008000  s__DATA                         
 
@@ -44,26 +42,17 @@ Hexadecimal  [32-Bits]
 
 Area                                    Addr        Size        Decimal Bytes (Attributes)
 --------------------------------        ----        ----        ------- ----- ------------
-_HEADER1                            00000000    000000D9 =         217. bytes (ABS,CON)
+_HEADER1                            00000000    000000EF =         239. bytes (ABS,CON)
 
       Value  Global                              Global Defined In Module
       -----  --------------------------------   ------------------------
 ASxxxx Linker V03.00 + NoICE + sdld,  page 5.
-Hexadecimal  [32-Bits]
-
-Area                                    Addr        Size        Decimal Bytes (Attributes)
---------------------------------        ----        ----        ------- ----- ------------
-_HEADER2                            00000000    00000008 =           8. bytes (ABS,CON)
-
-      Value  Global                              Global Defined In Module
-      -----  --------------------------------   ------------------------
-ASxxxx Linker V03.00 + NoICE + sdld,  page 6.
 
 Files Linked                              [ module(s) ]
 
 terminal.rel                              [ terminal ]
 
-ASxxxx Linker V03.00 + NoICE + sdld,  page 7.
+ASxxxx Linker V03.00 + NoICE + sdld,  page 6.
 
 User Base Address Definitions
 

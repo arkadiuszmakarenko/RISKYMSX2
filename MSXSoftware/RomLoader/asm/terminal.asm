@@ -168,6 +168,20 @@ body:
         ld      hl, #0x1B01
         call    0x004D
 
+        ;; Disable the BIOS function-key display (equivalent to
+        ;; BASIC's `KEY OFF`). In text screen modes the BIOS draws
+        ;; the default F1-F10 macros ("color", "auto", "goto",
+        ;; "list", "run", ...) on the bottom screen line by default,
+        ;; and redraws them on screen events - that line lands under
+        ;; the terminal footer, so the macros keep reappearing over
+        ;; the menu. CNSDFG (0xF3DE) = 0 means "hidden" (see
+        ;; Nextor's msx_workarea.h); FNKSB (0x00C9) erases the
+        ;; currently displayed line. Must run AFTER CHGMOD, which
+        ;; is what draws it in the first place.
+        ld      a, #0
+        ld      (0xF3DE), a
+        call    0x00C9                  ; FNKSB - erase the key display
+
 loop:
         ;; Poll firmware FIFO at 0x7FFF.
         ld      a, (0x7FFF)
@@ -186,10 +200,23 @@ loop:
         jr      loop
 
 sprite:
+        ;; The firmware pushes 0x04, X then Y as three separate FIFO
+        ;; writes. An EXTI0 can therefore hand us the 0x04 before X/Y
+        ;; are queued; reading 0x7FFF while empty returns 0x00, which
+        ;; would be taken as a real coordinate and shift the cursor off
+        ;; the text stream (stray cursor jumps / partial screens).
+        ;; Both coordinates are never 0 (col*8+1 and row*8+1), so spin
+        ;; until a nonzero byte arrives before consuming it.
+spr_x:
         ld      a, (0x7FFF)             ; X
+        and     a
+        jr      z, spr_x
         ld      hl, #0x1B01
         call    0x004D
+spr_y:
         ld      a, (0x7FFF)             ; Y
+        and     a
+        jr      z, spr_y
         dec     a
         dec     l
         call    0x004D
@@ -254,9 +281,12 @@ body_end:
 BODY_SIZE = body_end - body
 
 ;-------------------------------------------------------------------------------
-; Cursor arrow sprite pattern - sits just past the relocated body.
+; Cursor arrow sprite pattern - emitted immediately after the body. It used to
+; sit at a hard-coded .org 0x40F0; when the body grew past that address the
+; assembler overwrote the trailing `ret` of `wait`, hanging the body (no keys,
+; no boot). Letting it follow body_end keeps the two from ever colliding; it
+; still lands inside the 256-byte trimmed cartridge window.
 ;-------------------------------------------------------------------------------
-        .org    0x40F0
 arrow:
         .db     0b00100000
         .db     0b00110000

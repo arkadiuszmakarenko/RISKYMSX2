@@ -1927,10 +1927,9 @@ void Cart_EXTI0_ROM48k_Handler (void) {
  *                     directly - identical layout to the FLASH mapper)
  *   0x7FFD  WRITE   : MSX -> firmware keyboard FIFO (push 1 byte)
  *   0x7FFE  WRITE   : MSX -> firmware control byte
- *                        0x00 = "show the menu / stay in terminal"
- *                        0x04 = "user held GRPH - skip terminal, boot
- *                                the cart image straight away"
- *                        0x03 = "user chose to launch the cart image"
+ *                        0x00 = GRAPH held at boot -> show terminal
+ *                        0x01 = GRAPH not held      -> boot Nextor
+ *                        0x04 = legacy boot code (treated as terminal)
  *   0x7FFF  READ    : firmware -> MSX output FIFO (pop 1 byte)
  *                        0x00 = empty (no byte to print, MSX loops)
  *                        0x01..0xFF = printable / control byte to print

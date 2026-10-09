@@ -156,10 +156,32 @@ static const Cart_Mapper kMenuToCart[] = {
 /* FIFO helpers (main-loop side)                                       */
 /* ------------------------------------------------------------------ */
 
+/* Owner-side spin budget for one free output slot. The MSX drains one
+ * byte per terminal-loop iteration (cart.c 0x7FFF read), so waiting in
+ * out_push() is the backpressure that keeps a multi-byte transaction
+ * (ESC Y r c, or the 0x04 X Y cursor command) from being split by a
+ * full queue - split sequences are what produced the partial screens
+ * and stray cursor jumps. The wait MUST be bounded: if the MSX stops
+ * polling (mapper swapped away, or a hung BIOS), blocking forever would
+ * wedge the firmware. On expiry the byte is counted and dropped, which
+ * is no worse than the old silent drop but at least visible. */
+#define TERM_OUT_PUSH_SPIN  200000U
+
 static int out_push (uint8_t b) {
     uint16_t tail = g_term_mbox.out_tail;
     uint16_t next = (uint16_t)((tail + 1U) % TERM_OUT_FIFO_DEPTH);
-    if (next == g_term_mbox.out_head) return 0;  /* full */
+    if (next == g_term_mbox.out_head) {
+        /* Full: wait for the EXTI0 consumer to free a slot. tail is
+         * ours alone, so `next` stays valid for the whole wait. */
+        uint32_t spin = TERM_OUT_PUSH_SPIN;
+        while (next == g_term_mbox.out_head) {
+            if (--spin == 0U) {
+                g_term_mbox.out_dropped++;
+                return 0;  /* consumer stalled: counted, not silent */
+            }
+            __asm__ volatile ("nop");
+        }
+    }
     g_term_mbox.out_buf[tail] = b;
     /* Memory barrier: make sure the byte write above is visible to the
      * IRQ-side consumer (Cart_EXTI0_Terminal_Handler) BEFORE the
@@ -280,6 +302,26 @@ static uint8_t s_list_pending = 1;
  * the pre-gate firmware did. */
 static uint8_t  s_bootgate_done = 0U;
 static uint32_t s_bootgate_t0   = 0U;
+static uint32_t s_reported_out_dropped = 0U;
+
+/* Set the moment a soft-reset launch starts swapping the mapper away
+ * from the terminal. Once that happens the terminal mailbox is dead
+ * (the MSX-side body is about to reboot into the launched ROM), so the
+ * key-drain loop must stop immediately and Terminal_Service must not
+ * touch the USB/menu again - otherwise keys still queued behind the
+ * launch key get "handled" against a mapper that is no longer ours.
+ * Re-armed by Terminal_Reset(). */
+static uint8_t  s_launching = 0U;
+
+/* Maximum keys handled per Terminal_Service pass. A burst (auto-repeat
+ * or the user mashing keys) used to be drained in one go, so one pass
+ * could emit several full-list repaints back to back. Each repaint is
+ * ~800 bytes; the output ring is 2048, so more than two repaints in a
+ * single pass can outrun the MSX drain and force out_push() to drop -
+ * the truncated ESC-Y / sprite sequences that show up as partial
+ * screens. Two keeps a whole pass inside the ring with margin while
+ * still draining faster than any human can type. */
+#define TERM_KEY_BUDGET 2U
 
 /* Core-cycle counter, used only for the boot-gate safety timeout. The
  * threshold below is deliberately coarse (it only has to be "a few
@@ -299,6 +341,7 @@ static inline uint32_t term_rdcycle (void) {
 void Terminal_Reset (void) {
     g_term_mbox.kbd_head = g_term_mbox.kbd_tail = 0;
     g_term_mbox.out_head = g_term_mbox.out_tail = 0;
+    g_term_mbox.out_dropped = 0U;
     g_term_mbox.control = 0xFFU;
     s_menu.count = 0;
     s_menu.sel   = 0;
@@ -313,6 +356,8 @@ void Terminal_Reset (void) {
     s_list_pending = 1U;
     s_bootgate_done = 0U;
     s_bootgate_t0   = 0U;
+    s_reported_out_dropped = 0U;
+    s_launching = 0U;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1378,6 +1423,9 @@ static void term_progress_cb (uint32_t done, uint32_t total) {
 }
 
 static void soft_reset_into_cart (Cart_Mapper m) {
+    /* Once this starts, the terminal is being torn down for good:
+     * block any further key handling / menu servicing this session. */
+    s_launching = 1U;
     printf ("TERM: soft_reset push 0x03 to FIFO\r\n");
     /* Two MSX-side reboot paths exist, both must end up with the
      * NEW mapper live so the slot probe finds the user ROM's 'AB':
@@ -1849,9 +1897,26 @@ void Terminal_Service (void) {
         s_bootgate_done = 1U;
     }
 
-    /* Drain keyboard FIFO. */
+    /* Report output backpressure drops from the main loop (never from
+     * the EXTI0 ISR). A nonzero count means the MSX stopped draining
+     * long enough to expire the out_push() wait, and a multi-byte
+     * sequence may have been truncated - the signal that this needs
+     * more attention than a bounded wait can give. */
+    if (g_term_mbox.out_dropped != s_reported_out_dropped) {
+        s_reported_out_dropped = g_term_mbox.out_dropped;
+        printf ("TERM: out FIFO backpressure timeout - dropped %lu byte(s)\r\n",
+                (unsigned long)s_reported_out_dropped);
+    }
+
+    /* Drain keyboard FIFO, but only a bounded batch per pass (see
+     * TERM_KEY_BUDGET). A key that launches a ROM (N / RET on a file /
+     * a mapper pick) flips s_launching and swaps the mapper inside
+     * handle_*_key, so stop at once: any keys still queued belong to a
+     * session that no longer exists. */
     uint8_t key;
-    while (kbd_pop (&key)) {
+    unsigned drained = 0U;
+    while (drained < TERM_KEY_BUDGET && kbd_pop (&key)) {
+        drained++;
         switch (s_menu.state) {
         case MENU_MAPPER:
             handle_mapper_key (key);
@@ -1865,6 +1930,14 @@ void Terminal_Service (void) {
             handle_list_key (key);
             break;
         }
+        if (s_launching != 0U) {
+            break;
+        }
+    }
+    if (s_launching != 0U) {
+        /* Launch in progress: do not scan the USB or repaint the menu
+         * on top of the mapper swap. */
+        return;
     }
 
     /* On the first service pass of each terminal session, render the

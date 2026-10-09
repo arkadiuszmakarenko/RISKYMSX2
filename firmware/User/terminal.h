@@ -71,6 +71,11 @@ typedef struct {
     volatile uint8_t  out_buf[TERM_OUT_FIFO_DEPTH];
     volatile uint16_t out_head;
     volatile uint16_t out_tail;
+    /* Producer-owned diagnostic: number of output bytes dropped because
+     * the bounded backpressure wait in out_push() expired (the MSX
+     * stopped draining). Not part of the SPSC ring protocol; only the
+     * main loop writes it, and it is reported from the main loop. */
+    volatile uint32_t out_dropped;
     /* control byte: latched on every 0x7FFE write. terminal.c reads
      * and clears. Set to 0xFF to mean "no control yet" (since valid
      * control values are 0x00/0x01/0x04 - all small, so 0xFF never
