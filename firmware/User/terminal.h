@@ -73,10 +73,23 @@ typedef struct {
     volatile uint16_t out_tail;
     /* control byte: latched on every 0x7FFE write. terminal.c reads
      * and clears. Set to 0xFF to mean "no control yet" (since valid
-     * control values are 0x00/0x03/0x04 - all small, so 0xFF never
+     * control values are 0x00/0x01/0x04 - all small, so 0xFF never
      * collides). */
     volatile uint8_t  control;
 } TerminalMailbox;
+
+/* Boot-gate control bytes written by the MSX-side terminal ROM's init()
+ * at 0x7FFE before it starts polling. The firmware gates its first menu
+ * render on one of these, so a no-GRAPH power-on goes straight to Nextor
+ * with no menu flash:
+ *
+ *   TERM_CTL_BOOT_TERMINAL : GRAPH held at power-on -> full terminal menu.
+ *   TERM_CTL_BOOT_NEXTOR   : GRAPH not held         -> boot Nextor.
+ *
+ * Any other value (including the legacy v303 0x04) is treated as
+ * TERMINAL, and a missing value falls back to TERMINAL after a timeout. */
+#define TERM_CTL_BOOT_TERMINAL 0x00U
+#define TERM_CTL_BOOT_NEXTOR   0x01U
 
 extern TerminalMailbox g_term_mbox;
 
@@ -96,10 +109,9 @@ void Terminal_Reset (void);
 void Terminal_Service (void);
 
 /* Boot-path boot of the user cart image. Called when the user picks a
- * ROM file and a mapper (or when the user held GRPH at boot). Applies
- * the chosen mapper and triggers the MSX-side soft reset by writing
- * 0x03 into the output FIFO (the MSX terminal jumps to the UGLY_PATCH
- * path on that byte). */
+ * ROM file and a mapper from the menu. Applies the chosen mapper and
+ * triggers the MSX-side soft reset by writing 0x03 into the output FIFO
+ * (the MSX terminal jumps to the UGLY_PATCH path on that byte). */
 void Terminal_BootCart (uint8_t mapper_idx, const char *filename);
 
 #ifdef __cplusplus

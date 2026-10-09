@@ -262,11 +262,39 @@ static void term_wait_drain (uint32_t ms) {
 
 /* Set once per terminal session: the next Terminal_Service pass scans
  * the stick and renders the file list. Terminal_Reset() re-arms it, so
- * a session entered via the boot gate (BOOTGATE -> TERMINAL swap)
- * renders even though Terminal_Service already ran while the boot
- * gate was active (the firmware main loop calls every service
- * unconditionally). */
+ * a session entered via the boot gate (the MSX-side init reports GRAPH
+ * held) renders on its first post-gate pass even though Terminal_Service
+ * already ran while the gate was still waiting for that report. */
 static uint8_t s_list_pending = 1;
+
+/* Boot gate. At power-on the MSX-side terminal ROM's init probes GRAPH
+ * and writes its decision to the control mailbox before it starts
+ * polling:
+ *   0x00 -> GRAPH held     -> render the terminal menu (this pass).
+ *   0x01 -> GRAPH not held -> boot Nextor instead of rendering.
+ * Until that byte arrives the main loop must NOT render the menu (else
+ * a no-GRAPH power-on flashes the menu for ~40 ms before Nextor boots),
+ * so the first render is gated on s_bootgate_done. A timeout keyed off
+ * rdcycle is the safety net: if the byte never arrives (e.g. a stale
+ * MSX-side ROM that writes nothing) the menu still renders, exactly as
+ * the pre-gate firmware did. */
+static uint8_t  s_bootgate_done = 0U;
+static uint32_t s_bootgate_t0   = 0U;
+
+/* Core-cycle counter, used only for the boot-gate safety timeout. The
+ * threshold below is deliberately coarse (it only has to be "a few
+ * seconds"), so no Delay_Ms-based calibration is needed: the core clock
+ * is a few hundred MHz (400 MHz on this part), and even a 2x error still
+ * gives a multi-second fallback well under the ~10 s rdcycle wrap.
+ * 2.4e9 cycles ~= 6 s at 400 MHz. Unsigned subtraction makes wrap
+ * harmless. */
+#define TERM_BOOTGATE_TIMEOUT_CYC 2400000000U
+
+static inline uint32_t term_rdcycle (void) {
+    uint32_t c;
+    __asm__ volatile ("rdcycle %0" : "=r" (c));
+    return c;
+}
 
 void Terminal_Reset (void) {
     g_term_mbox.kbd_head = g_term_mbox.kbd_tail = 0;
@@ -283,6 +311,8 @@ void Terminal_Reset (void) {
      * contents. */
     s_menu.cwd[0] = '\0';
     s_list_pending = 1U;
+    s_bootgate_done = 0U;
+    s_bootgate_t0   = 0U;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1778,22 +1808,45 @@ static void handle_mapper_key (uint8_t key) {
 }
 
 void Terminal_Service (void) {
-    /* Drop the control byte if the cart wrote one (the IRQ latches
-     * it; we consume it once and clear it). */
+    /* Boot gate. The MSX-side ROM's init() writes its GRAPH decision to
+     * the control mailbox before it starts polling; consume it once.
+     *   0x00 -> GRAPH held     -> render the terminal menu.
+     *   0x01 -> GRAPH not held -> boot Nextor instead of rendering.
+     * Any other value (e.g. the legacy v303 0x04) is treated as
+     * "terminal" so a stale/older MSX-side ROM can never silently boot
+     * Nextor. */
     uint8_t c = g_term_mbox.control;
     if (c != 0xFFU) {
         g_term_mbox.control = 0xFFU;
-        /* Note: the previous version had a "GRPH-skip" branch that
-         * switched to CART_MAP_FLASH on control=0x04. v303's MSX-side
-         * asm probes GRPH via CALL #141 and writes 0x04 to 0x7FFE
-         * when GRPH is held - but CALL #141 is GTSIZE, which is
-         * model-dependent (Panasonic MSX2+ returns GRPH bit, some
-         * clones return 0x04 always). On affected hardware the
-         * terminal would silently switch to the OLD cart loader even
-         * when GRPH was not held, with no way to recover except a
-         * power cycle. To keep the terminal predictable across MSX
-         * models, the GRPH-skip behaviour is removed and this legacy
-         * control byte is ignored. */
+        if (!s_bootgate_done) {
+            s_bootgate_done = 1U;
+            if (c == TERM_CTL_BOOT_NEXTOR) {
+                printf ("TERM: boot gate -> GRAPH not held, booting Nextor\r\n");
+                /* Do not render the menu: hand straight to the Nextor
+                 * launch, which pushes its own text + 0x03. */
+                s_list_pending = 0U;
+                nextor_boot ();
+                return;
+            }
+            printf ("TERM: boot gate -> GRAPH held, terminal menu\r\n");
+        }
+    }
+
+    /* Waiting for the boot-gate decision: do not render yet, or a
+     * no-GRAPH power-on would flash the menu for ~40 ms before Nextor
+     * boots. The timeout is the safety net for a missing/stale
+     * MSX-side ROM - it falls back to the pre-gate behaviour (menu). */
+    if (!s_bootgate_done) {
+        if (s_bootgate_t0 == 0U) {
+            s_bootgate_t0 = term_rdcycle ();
+            if (s_bootgate_t0 == 0U) s_bootgate_t0 = 1U;  /* keep != 0 */
+        }
+        if ((uint32_t)(term_rdcycle () - s_bootgate_t0)
+            < TERM_BOOTGATE_TIMEOUT_CYC) {
+            return;
+        }
+        printf ("TERM: boot gate timeout - rendering menu\r\n");
+        s_bootgate_done = 1U;
     }
 
     /* Drain keyboard FIFO. */

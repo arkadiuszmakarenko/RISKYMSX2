@@ -13,9 +13,9 @@
 ;
 ;   0x7FFD  WRITE   - keyboard byte (firmware pops the byte, decides key)
 ;   0x7FFE  WRITE   - control byte
-;                        0x00 = "continue / terminal menu"
-;                        0x04 = "user held GRPH - skip the terminal, boot
-;                                the cart image straight away"
+;                        0x00 = "boot gate: GRAPH held -> terminal menu"
+;                        0x01 = "boot gate: GRAPH not held -> boot Nextor"
+;                        0x04 = legacy v303 "user held GRPH" (ignored)
 ;   0x7FFF  READ    - firmware output FIFO (CHAR by CHAR; 0 = empty, the
 ;                     byte itself is the printable character; 0x03 = "user
 ;                     asked to abort / soft-reset the MSX into ROM");
@@ -29,12 +29,15 @@
 ;                           present", 0 = "no stick yet")
 ;
 ; Boot flow:
-;   1. INIT copies the post-init body to RAM at 0xE000. The body length
-;      is a fixed constant (BODY_SIZE bytes). The terminal is ALWAYS
-;      the boot cart: no GRPH probe at boot, GRAPH does nothing until
-;      the menu is running. To reach Nextor, pick it from the menu
-;      (key N) instead of holding GRAPH during power-on.
-;   2. Set 32-column screen, palette, sprite cursor, then loop:
+;   1. INIT probes the GRAPH key (SNSMAT row 6, bit 2) and tells the
+;      firmware which path to take on 0x7FFE BEFORE it starts polling:
+;        - GRAPH held     -> 0x00: full terminal menu.
+;        - GRAPH not held -> 0x01: boot Nextor directly.
+;      The firmware gates its first menu render on this byte, so a
+;      no-GRAPH power-on goes straight to Nextor with no menu flash.
+;   2. INIT then copies the post-init body to RAM at 0xE000. The body
+;      length is a fixed constant (BODY_SIZE bytes).
+;   3. Set 32-column screen, palette, sprite cursor, then loop:
 ;      read 0x7FFF, print whatever the firmware puts there, poll keyboard
 ;      and forward each keystroke on 0x7FFD.
 ;-------------------------------------------------------------------------------
@@ -73,12 +76,25 @@
         ;; printing, so we run from RAM.
         .org    0x4010
 init:
-        ;; Always boot the terminal menu: copy the body to MSX RAM
-        ;; and run it. No GRPH probe at boot - CALL #141 (GTSIZE) is
-        ;; model-dependent (Panasonic returns the GRPH bit, some
-        ;; clones always return 0x04), so GRAPH-based boot gating is
-        ;; unreliable. The menu is the single, predictable entry
-        ;; point; Nextor is reached from the menu (key N).
+        ;; Boot gate. Probe the GRAPH key via the BIOS SNSMAT matrix
+        ;; reader (entry 0x0141 - it is SNSMAT, not GTSIZE). Row 6,
+        ;; bit 2, active-low: 0 = held. Tell the firmware the decision
+        ;; on 0x7FFE BEFORE copying/running the body, so the firmware
+        ;; main loop can skip the menu render and go straight to
+        ;; Nextor on a no-GRAPH power-on.
+        ld      a, #6
+        call    0x0141                  ; SNSMAT - A = row, returns matrix
+        and     #0x04                   ; GRAPH = row 6 bit 2, 0 = held
+        jr      z, bg_terminal          ; held -> terminal menu
+        ;; GRAPH not held -> ask the firmware to boot Nextor.
+        ld      a, #0x01
+        ld      (0x7FFE), a
+        jr      bg_run
+bg_terminal:
+        ;; GRAPH held -> full terminal menu.
+        ld      a, #0x00
+        ld      (0x7FFE), a
+bg_run:
         ld      hl, #body              ; source in ROM
         ld      de, #0xE000            ; destination in MSX RAM
         ld      bc, #BODY_SIZE         ; byte count
@@ -86,7 +102,7 @@ init:
         jp      0xE000                 ; jump into the relocated copy
 
 ;-------------------------------------------------------------------------------
-; Body to copy to RAM. Same shape as v303: GRPH-probe, screen setup,
+; Body to copy to RAM. Same shape as v303: screen setup,
 ; poll-FIFO + forward-keyboard loop, ROM_START path.
 ;
 ; IMPORTANT: do NOT use .org here - let the assembler place body right
@@ -100,14 +116,10 @@ init:
 ; assembler place body sequentially keeps the LDIR source correct.
 ;-------------------------------------------------------------------------------
 body:
-        ;; GRPH-key probe is DISABLED: the v303 CALL #141 (GTSIZE)
-        ;; behaviour is model-dependent (Panasonic returns GRPH bit,
-        ;; some clones always return 0x04). When the firmware treated
-        ;; that as "boot the OLD loader", the terminal would silently
-        ;; disappear on affected hardware with no recovery path. The
-        ;; terminal menu is now always shown; the user picks the OLD
-        ;; loader from the menu by pressing F. Just initialise the
-        ;; screen + cursor and enter the main loop.
+        ;; The GRAPH boot gate ran in init() (see above); by the time
+        ;; control reaches here the firmware already knows whether to
+        ;; render the menu or boot Nextor. Just initialise the screen +
+        ;; cursor and enter the main loop.
 
         ;; Relocate the 5-byte launch patch to a FIXED MSX RAM address
         ;; (0xE100). The BIOS executes it later - after the firmware
@@ -115,8 +127,9 @@ body:
         ;; ROM-resident patch would fetch game bytes as code. The
         ;; v303 original solved this with PHASE #E000 (all body labels
         ;; resolved to RAM); the sdasz80 port keeps ROM addresses, so
-        ;; the copy is explicit. Body RAM base = 0xE000, body ROM
-        ;; base = 0x4026, so 0xE100 is well clear of the copy.
+        ;; the copy is explicit. Body RAM base = 0xE000 (body ROM
+        ;; base is whatever the assembler assigns, currently 0x4033),
+        ;; so 0xE100 is well clear of the copy.
         ld      hl, #ugly_patch
         ld      de, #0xE100
         ld      bc, #5
