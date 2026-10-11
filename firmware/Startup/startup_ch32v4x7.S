@@ -328,29 +328,84 @@ handle_reset:
 
 	la sp, _eusrstack
 
-/* Assert cartridge ~WAIT before the MSX can reach the cartridge probe.
+/* Assert cartridge ~WAIT at the first safe Z80 clock phase.
+ *
+ * The Z80 samples ~WAIT at the falling edge of T2.  Keeping it low across
+ * cycles is intentional and is the only way to stop the MSX before the
+ * first cartridge access: whichever cycle is in progress when the sample
+ * sees WAIT low is stretched, and WAIT remains active for later cycles.
+ * Do not qualify this with /SLTSL; waiting for a cartridge cycle would let
+ * the CPU run arbitrary BIOS/RAM cycles before the hold took effect.  Use
+ * SLOTCLK instead: configure PE3 as a released open-drain output, wait for
+ * the next high-to-low clock transition, and assert it with one atomic GPIO
+ * store during the following low phase.  This avoids a random-phase WAIT
+ * setup violation while still stopping whichever CPU cycle is first sampled
+ * afterward.
+ *
  * The C startup path synchronizes the hold flag, installs Nextor, brings
  * up USB/RawDisk, and releases WAIT only after the mailbox backend is
  * ready. The active cart handler serves the held ROM cycle and skips its
  * normal SLTSL wait while the hold flag is set. */
 	li	t0, 0x40			/* RCC_IOPEEN */
 	li	t1, 0x40021018			/* RCC->PB2PCENR */
+	ori	t0, t0, 0x04			/* RCC_IOPCEN: PC9 /SLOTCLK */
 	sw	t0, 0(t1)
 
+	/* PC9 is the MSX slot clock.  Configure it as a floating input without
+	 * disturbing the other GPIOC pins. */
+	li	t1, 0x40011004			/* GPIOC->CFGHR */
+	lw	t0, 0(t1)
+	li	t2, ~(0xFU << 4)			/* PC9 configuration nibble */
+	and	t0, t0, t2
+	li	t2, (0x4U << 4)		/* PC9 floating input */
+	or	t0, t0, t2
+	sw	t0, 0(t1)
+
+	/* Put PE3 in released open-drain output mode before synchronizing.  The
+	 * high latch means this is electrically floating, not an assertion. */
 	li	t1, 0x4001180C			/* GPIOE->OUTDR */
 	lw	t0, 0(t1)
-	li	t2, 0x08			/* PE3 /WAIT */
-	not	t2, t2
-	and	t0, t0, t2
-	sw	t0, 0(t1)			/* output latch low before mode change */
-
+	ori	t0, t0, 0x08			/* PE3 latch high = released for OD */
+	sw	t0, 0(t1)
+	fence	iorw, iorw
 	li	t1, 0x40011800			/* GPIOE->CFGLR */
 	lw	t0, 0(t1)
 	li	t2, ~(0xFU << 12)
 	and	t0, t0, t2
-	li	t2, (0x3U << 12)		/* PE3 push-pull output, low */
+	li	t2, (0x5U << 12)		/* PE3 10 MHz open-drain output */
 	or	t0, t0, t2
 	sw	t0, 0(t1)
+
+	/* Synchronize to SLOTCLK when it is available.  First observe high, then
+	 * wait for the high-to-low transition.  The assertion store then occurs
+	 * in the low phase, well before the following falling-edge sample.
+	 *
+	 * Some MSX machines do not present SLOTCLK while their CPU is held in
+	 * reset.  Never let that prevent the MCU from reaching main: the bounded
+	 * fallback asserts WAIT anyway if no usable clock transition appears. */
+	li	t1, 0x40011008			/* GPIOC->INDR */
+	li	t3, 0x1000
+1:
+	lw	t0, 0(t1)
+	andi	t0, t0, 0x0200			/* PC9 /SLOTCLK */
+	bnez	t0, 2f
+	addi	t3, t3, -1
+	bnez	t3, 1b
+	j	4f				/* no clock: bounded fallback */
+2:
+	li	t3, 0x1000
+	lw	t0, 0(t1)
+	andi	t0, t0, 0x0200
+	beqz	t0, 4f
+	addi	t3, t3, -1
+	bnez	t3, 2b
+
+	/* Assert on timeout as well; the MSX clock was absent or stopped. */
+4:
+	/* Atomic PE3 latch reset.  BSHR bit 19 drives the open-drain output low. */
+	li	t1, 0x40011810			/* GPIOE->BSHR */
+	li	t2, (1U << (3 + 16))
+	sw	t2, 0(t1)
 
 /* Load data section from flash to RAM */
 	la a0, _data_lma
@@ -397,4 +452,3 @@ handle_reset:
 	la t0, main
 	csrw mepc, t0
 	mret
-

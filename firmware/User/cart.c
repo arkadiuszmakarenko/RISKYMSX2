@@ -598,10 +598,12 @@ void Init_Cart (void) {
 /* ------------------------------------------------------------------ */
 /* ~WAIT is a cartridge-defined active-low input to the Z80, so unlike the
  * optional cart-edge reset signal it is intended to be driven by a cart.
- * The startup asm in startup_ch32v4x7.S drives ~WAIT low before any
- * clock/peripheral setup, guaranteeing the bus is held from the very
- * first Z80 cycle. main() calls Cart_HoldMSXWait_End() once the cart
- * handler is installed and ready to serve the held cycle.
+ * The startup asm in startup_ch32v4x7.S synchronizes to SLOTCLK and then
+ * drives ~WAIT low before the next Z80 sampling edge.  This global hold is
+ * intentional: it stops the CPU at whatever cycle is sampled first, before
+ * it can reach an unserved cartridge access. main() calls
+ * Cart_HoldMSXWait_End() once the cart handler is installed and ready to
+ * serve the held cycle.
  *
  * Why a hold during boot: the MSX BIOS may already be leaving its own
  * reset while the MCU is still coming up. Without a hold, the BIOS
@@ -617,7 +619,7 @@ void Init_Cart (void) {
  * secondary cart that wants to assert wait). */
 
 /* Assert cartridge ~WAIT (PE3) from C code. The startup asm already
- * does this before any clock setup; this entry point exists so a
+ * does this during the earliest reset path; this entry point exists so a
  * secondary hold can be installed later (e.g. around a mapper swap
  * that needs to span a cart cycle). Idempotent. */
 void Cart_HoldMSXWait_Begin (void) {

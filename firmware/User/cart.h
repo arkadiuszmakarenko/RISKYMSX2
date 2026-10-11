@@ -306,8 +306,8 @@ void Init_Cart (void);
  * input and waits for the held bus cycle to finish. Must be called
  * with global IRQs disabled around the End sequence so the held cycle
  * is served exactly once. The startup assembler in startup_ch32v4x7.S
- * asserts ~WAIT before any clock/peripheral setup runs; main() calls
- * End after the slotted/flash handler is installed. */
+ * synchronizes to SLOTCLK and asserts ~WAIT before peripheral setup runs;
+ * main() calls End after the slotted/flash handler is installed. */
 void Cart_HoldMSXWait_Begin (void);
 void Cart_HoldMSXWait_End (void);
 
