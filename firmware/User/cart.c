@@ -35,6 +35,8 @@ static void RunKonami  (void) __attribute__((section(".ramfunc"), noinline));
 static void RunKonamiSCC (void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO8    (void) __attribute__((section(".ramfunc"), noinline));
 static void RunNEO16   (void) __attribute__((section(".ramfunc"), noinline));
+static void RunASCII8k (void) __attribute__((section(".ramfunc"), noinline));
+static void RunASCII16k (void) __attribute__((section(".ramfunc"), noinline));
 
 #ifndef KONAMISCC_SCC_QUEUE
 #define KONAMISCC_SCC_QUEUE 1
@@ -102,18 +104,102 @@ void Cart_SetSlottedPSRAMReady (uint8_t ready) {
  * writes would steal I/O cycles from the rest of the machine. */
 static inline __attribute__((always_inline))
 int Cart_MapperHasSubslots (Cart_Mapper m) {
-    return (m == CART_MAP_NEXTOR || m == CART_MAP_TERMINAL) ? 1 : 0;
+    /* All game mappers: the MSX BIOS maps main RAM into sub-slot 1
+     * (largest RAM wins), so a game launch that swaps to a mapper
+     * WITHOUT the sub-slot decode yanks the RAM out from under the
+     * running Z80 - the machine dies at the swap and never reaches
+     * the reset (proven by game-image reads +0 in the post-launch
+     * counters). With the decode the RAM layout survives the swap
+     * and the BIOS auto-boots sub-slot 0. */
+    return (m == CART_MAP_NEXTOR || m == CART_MAP_TERMINAL
+            || m == CART_MAP_ROM16k  || m == CART_MAP_ROM32k
+            || m == CART_MAP_ROM48k
+            || m == CART_MAP_KONAMI  || m == CART_MAP_KONAMISCC
+            || m == CART_MAP_KONAMINOSCC
+            || m == CART_MAP_ASCII8k || m == CART_MAP_ASCII16k
+            || m == CART_MAP_NEO8    || m == CART_MAP_NEO16) ? 1 : 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Mapper-RAM (sub-slot 1) hot-path timing diagnostics.                 */
+/*                                                                     */
+/* Every other cart read path (terminal ROM, Nextor ROM, game ROM) is   */
+/* short enough to answer the Z80 memory cycle with margin. The mapper- */
+/* RAM read is the exception: it adds the sub-slot / page / bank decode */
+/* plus a PSRAM load on top of that, and that is the branch suspected   */
+/* of the unreliable boots. These counters measure the real cost on     */
+/* hardware instead of inferring it, so the eventual fix (an asm fast   */
+/* path, a /WAIT stretch, or a shorter decode) can be validated:        */
+/*                                                                     */
+/*   g_cart_slotted_reads    sub-slot 1 reads served                    */
+/*   g_cart_slotted_late     reads driven after ~SLTSL had already      */
+/*                           returned high - the Z80 had latched by     */
+/*                           then, so the MSX saw open bus: a hard      */
+/*                           deadline miss                              */
+/*   g_cart_slotted_cyc_min  MCU (mcycle) cycles from handler entry to  */
+/*   g_cart_slotted_cyc_max  the OUTDR drive, min/max over all reads    */
+/*                                                                     */
+/* All bookkeeping happens AFTER the bus is driven, so it cannot delay  */
+/* the byte the Z80 samples. Define CART_TIMING_STATS=0 to compile it   */
+/* back out.                                                            */
+/* ------------------------------------------------------------------ */
+#ifndef CART_TIMING_STATS
+#define CART_TIMING_STATS 1
+#endif
+
+volatile uint32_t g_cart_slotted_reads   = 0U;
+volatile uint32_t g_cart_slotted_late    = 0U;
+volatile uint32_t g_cart_slotted_cyc_min = 0xFFFFFFFFU;
+volatile uint32_t g_cart_slotted_cyc_max = 0U;
+
+/* Same instrumentation for the game-image ROM mappers (ROM16k first -
+ * the current failing boot path). The ROM16k handler serves the BIOS
+ * slot probe and the game's INIT/code fetches from the PSRAM game
+ * image, and nothing counted those: "post-launch reads +0" was blind
+ * for this path. Same semantics as the slotted set above. */
+volatile uint32_t g_cart_game_reads   = 0U;
+volatile uint32_t g_cart_game_late    = 0U;
+volatile uint32_t g_cart_game_cyc_min = 0xFFFFFFFFU;
+volatile uint32_t g_cart_game_cyc_max = 0U;
+
 static inline __attribute__((always_inline))
-void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page) {
+uint32_t Cart_RdMcycle (void) {
+    uint32_t c;
+    __asm__ volatile ("csrr %0, mcycle" : "=r"(c));
+    return c;
+}
+
+#if CART_TIMING_STATS
+#define CART_T_ENTRY()  Cart_RdMcycle ()
+#else
+#define CART_T_ENTRY()  0U
+#endif
+
+static inline __attribute__((always_inline))
+void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
+                                 uint32_t t_entry) {
     const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
                        + ((uint32_t)s_slotted_bank_regs[page]
                           * CART_SLOTTED_BANK_SIZE)
                        + ((uint32_t)address & 0x3FFFU);
     const uint8_t value = *(const volatile uint8_t *)(PSRAM_CART_BASE + off);
+    const uint32_t t_drive = Cart_RdMcycle ();
     GPIOB->OUTDR = (uint32_t)value << 8;
     GPIOB->CFGHR = CART_BUS_ON;
+#if CART_TIMING_STATS
+    {
+        const uint32_t dt = t_drive - t_entry;
+        g_cart_slotted_reads++;
+        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+            g_cart_slotted_late++;
+        }
+        if (dt < g_cart_slotted_cyc_min) g_cart_slotted_cyc_min = dt;
+        if (dt > g_cart_slotted_cyc_max) g_cart_slotted_cyc_max = dt;
+    }
+#else
+    (void)t_entry;
+    (void)t_drive;
+#endif
 }
 
 static inline __attribute__((always_inline))
@@ -328,7 +414,14 @@ int Cart_SetMapper (Cart_Mapper m) {
 
     g_mapper = m;
 
-    /* Never carry page or sub-slot selections across mapper swaps. */
+    /* Never carry page or sub-slot selections across mapper swaps -
+     * EXCEPT into the sub-slot game mappers (ROM16k, then ROM32k/48k
+     * when they gain the decode): the machine's main RAM lives in
+     * sub-slot 1 (largest RAM wins), so the BIOS-set SSR + bank
+     * layout MUST survive the launch swap or the running Z80 loses
+     * its RAM mid-instruction. TERMINAL/NEXTOR reset because those two
+     * installs are boot entry points where the BIOS re-walks the
+     * expansion from scratch anyway. */
     if (m == CART_MAP_NEXTOR || m == CART_MAP_TERMINAL) {
         g_subslot_reg = 0x00U;
         for (unsigned page = 0U; page < 4U; page++) {
@@ -348,9 +441,9 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_KONAMISCC:
     case CART_MAP_KONAMINOSCC:
     case CART_MAP_NEO8:
-    case CART_MAP_NEO16:       h = (uint32_t)Cart_Banked_Dispatch; break;
-    case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
-    case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
+    case CART_MAP_NEO16:
+    case CART_MAP_ASCII8k:
+    case CART_MAP_ASCII16k:    h = (uint32_t)Cart_Banked_Dispatch; break;
 
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
@@ -657,6 +750,25 @@ void Cart_HoldMSXWait_End (void) {
     s_msx_wait_held = 0U;
 }
 
+/* TFMSX development reset.  PE4 is normally never driven because the
+ * reset pin on ordinary MSX cartridges may be read-only.  TFMSX provides
+ * the required open-drain reset connection, so use the same safe pattern
+ * as the wired-OR WAIT line: preload the low latch before selecting output,
+ * and release by returning the pin to a floating input. */
+void Cart_HardReset_Assert (void) {
+    RCC_PB2PeriphClockCmd (RCC_PB2Periph_GPIOE, ENABLE);
+    GPIOE->OUTDR &= ~CART_RESET_MASK;
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 16)) | (0x5U << 16);
+    __asm__ volatile ("fence iorw, iorw");
+}
+
+void Cart_HardReset_Release (void) {
+    /* Release the external pull-up first, then make PE4 an input. */
+    GPIOE->OUTDR |= CART_RESET_MASK;
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 16)) | (0x4U << 16);
+    __asm__ volatile ("fence iorw, iorw");
+}
+
 /* ------------------------------------------------------------------ */
 /* Shared C-side helpers used by the bank-switching mappers.           */
 /* ------------------------------------------------------------------ */
@@ -856,37 +968,96 @@ void EXTI9_5_IRQHandler (void) {
  *   Z80_page_start = i * 0x2000.
  */
 static void RunKonami (void) {
-    /* Debug: toggle PA0 so we can see on the LA that this fired. */
-    GPIOA->OUTDR ^= (1u << 0);
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     const uint32_t ctrl   = GPIOE->INDR;
     const uint32_t bank   = address >> 13;  /* 2..3 valid, 0..1 ignored */
 
-    if ((ctrl & CART_RD_MASK) == 0U) {
-        /* READ cycle. Drive one byte from PSRAM onto the bus. */
-        if (bank >= 2U && bank <= 3U) {
-            const uint32_t bias = g_state->bankOffsets[bank];
-            Cart_DriveByteFromPSRAM (address, bias);
-        } else {
-            /* Page 0/1 (BIOS / cart header) - cart does not drive the
-             * bus; release and let the MSX's own devices respond. */
+    /* SSR readback - same rationale as the other handlers. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U
+        && (ctrl & CART_RD_MASK) == 0U) {
+        GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
             GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
+
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        /* READ cycle. Sub-slot decode when the SSR is non-zero. */
+        const unsigned subslot =
+            ((unsigned)ssr_entry >> ((bank > 1U ? (bank - 1U) : 0U) * 2U))
+            & 0x3U;
+        if (ssr_entry != 0U) {
+            if (subslot == 0U) {
+                if (bank >= 2U && bank <= 3U) {
+                    const uint32_t bias = g_state->bankOffsets[bank];
+                    Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                const unsigned ram_page = (bank > 1U) ? (bank - 1U) : bank;
+                Cart_DriveSlottedPSRAMByte (address, ram_page, t_entry);
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        } else {
+            /* Fast path: SSR still at the power-on default. */
+            if (bank >= 2U && bank <= 3U) {
+                const uint32_t bias = g_state->bankOffsets[bank];
+                Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                {
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                /* Page 0/1 (BIOS / cart header) - cart does not drive
+                 * the bus; release and let the MSX's own devices
+                 * respond. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
             Cart_SpinUntilSltSLHigh ();
         }
-        /* Bus already released above for the BIOS case; for the cart
-         * case the read is done so we leave it driven until SLTSL
-         * rises. */
         GPIOB->CFGHR = CART_BUS_OFF;
+        return;
+    }
+
+    /* WRITE cycle. SSR latch at 0xFFFF (M1 high). */
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
         return;
     }
 
     /* WRITE cycle: only meaningful at 0x6000/0x8000/0xA000. WR is
      * active-low so we test == 0. The Z80 may also pulse WR with
      * SLTSL low for addresses we don't care about - ignore. */
-    EXTI->INTFR = EXTI_INTENR_MR0;
     uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
         if (--spin == 0U) {
@@ -900,6 +1071,20 @@ static void RunKonami (void) {
         }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
+            /* Sub-slot decode on writes: sub-slot 1 = mapper RAM. */
+            if (ssr_entry != 0U) {
+                const unsigned subslot =
+                    ((unsigned)ssr_entry >> ((bank > 1U ? (bank - 1U) : 0U) * 2U))
+                    & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    const unsigned ram_page = (bank > 1U) ? (bank - 1U) : bank;
+                    Cart_WriteSlottedPSRAMByte (address, ram_page, w);
+                    return;
+                }
+                if (subslot != 0U) {
+                    return;
+                }
+            }
             /* Bank 0 -> page-2 low (offset 2). Bank 1 -> page-2 high.
              * Bank 2 -> page-3 low (offset 4). Bank 3 -> page-3 high
              * (offset 5). */
@@ -933,16 +1118,89 @@ static void RunKonami (void) {
  * currently installed (the VTF slot holds Cart_Banked_Dispatch).
  */
 static void RunKonamiNOSCC (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     const uint32_t ctrl    = GPIOE->INDR;
-    const uint32_t page    = address >> 13;
+
+    /* SSR readback - same rationale as the ROM/TERMINAL/NEXTOR
+     * handlers: the MSX BIOS sets bit 7 of ~ssr in EXPTBL[slot] to
+     * mark the slot as expanded. M1 low means opcode fetch, not an
+     * SSR read. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U
+        && (ctrl & CART_RD_MASK) == 0U) {
+        GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
 
     if ((ctrl & CART_RD_MASK) == 0U) {
-        if (page >= 2U && page <= 5U) {
-            const uint32_t bias = g_state->bankOffsets[page];
-            Cart_DriveByteFromPSRAM (address, bias);
+        /* READ. Sub-slot decode (two bits per 16 KiB CPU page) when
+         * the SSR is non-zero - sub-slot 0 keeps the Konami image,
+         * sub-slot 1 is the 4 MiB mapper RAM (bank selected by the
+         * FC..FF register latched for this page), 2/3 float. */
+        const unsigned page    = (unsigned)(address >> 13);
+        const unsigned subslot =
+            ((unsigned)ssr_entry >> ((page > 1U ? (page - 1U) : 0U) * 2U))
+            & 0x3U;
+        if (ssr_entry != 0U) {
+            /* Expanded-slot path: page index used for the RAM dispatch
+             * is the 16 KiB page number (0..3), NOT the 8 KiB page
+             * number the banked-mapper read uses (2..5). Convert. */
+            if (subslot == 0U) {
+                /* Cart image at sub-slot 0 - same window as the
+                 * primary-slot fast path: 0x4000..0xBFFF, indexed by
+                 * the Konami bank registers. */
+                if (page >= 2U && page <= 5U) {
+                    const uint32_t bias = g_state->bankOffsets[page];
+                    Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                const unsigned ram_page = (page > 1U) ? (page - 1U) : page;
+                Cart_DriveSlottedPSRAMByte (address, ram_page, t_entry);
+            } else {
+                /* Empty sub-slot: float. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
         } else {
-            GPIOB->CFGHR = CART_BUS_OFF;
+            /* Fast path: SSR still at the power-on default. Konami
+             * page filter: 0x4000..0xBFFF (page 2..5) - identical to
+             * the pre-slot-capable behavior. */
+            if (page >= 2U && page <= 5U) {
+                const uint32_t bias = g_state->bankOffsets[page];
+                Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                {
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
@@ -953,6 +1211,12 @@ static void RunKonamiNOSCC (void) {
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
+    /* WRITE. SSR latch at 0xFFFF (M1 high) - same rationale as the
+     * other handlers. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
+        return;
+    }
     if (address > 0xB000U) return;
     uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
@@ -967,6 +1231,25 @@ static void RunKonamiNOSCC (void) {
         }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
+            const unsigned page = (unsigned)(address >> 13);
+            /* Sub-slot decode on writes too: sub-slot 1 = the RAM
+             * needs writes to work. The cart's bank registers (and
+             * the 0x4000..0xBFFF filter) only apply to sub-slot 0. */
+            if (ssr_entry != 0U) {
+                const unsigned subslot =
+                    ((unsigned)ssr_entry >> ((page > 1U ? (page - 1U) : 0U) * 2U))
+                    & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    const unsigned ram_page = (page > 1U) ? (page - 1U) : page;
+                    Cart_WriteSlottedPSRAMByte (address, ram_page, w);
+                    return;
+                }
+                if (subslot != 0U) {
+                    /* Sub-slot 0 below: bank-switch write. */
+                } else {
+                    /* Sub-slot 0 (cart) below. */
+                }
+            }
             const uint32_t page_start = (uint32_t)(address & 0xE000U);
             g_state->bankOffsets[page] = ((uint32_t)w << 13) - page_start;
             return;
@@ -1047,17 +1330,73 @@ static void RunKonamiSCC (void) {
      * page extraction is hot enough that we inlined it here rather
      * than factoring into a helper (helper call would cost a jal +
      * return + an extra register spill). */
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     const uint32_t ctrl    = GPIOE->INDR;
-    const uint32_t page    = address >> 13;
 
-    /* ---- READ cycle (byte-for-byte identical to RunKonamiNOSCC). */
-    if ((ctrl & CART_RD_MASK) == 0U) {
-        if (page >= 2U && page <= 5U) {
-            const uint32_t bias = g_state->bankOffsets[page];
-            Cart_DriveByteFromPSRAM (address, bias);
-        } else {
+    /* SSR readback - same rationale as the other handlers. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U
+        && (ctrl & CART_RD_MASK) == 0U) {
+        GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
             GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
+
+    /* ---- READ cycle (identical discipline to RunKonamiNOSCC). */
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        const unsigned page    = (unsigned)(address >> 13);
+        const unsigned subslot =
+            ((unsigned)ssr_entry >> ((page > 1U ? (page - 1U) : 0U) * 2U))
+            & 0x3U;
+        if (ssr_entry != 0U) {
+            if (subslot == 0U) {
+                if (page >= 2U && page <= 5U) {
+                    const uint32_t bias = g_state->bankOffsets[page];
+                    Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                const unsigned ram_page = (page > 1U) ? (page - 1U) : page;
+                Cart_DriveSlottedPSRAMByte (address, ram_page, t_entry);
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        } else {
+            if (page >= 2U && page <= 5U) {
+                const uint32_t bias = g_state->bankOffsets[page];
+                Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                {
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
@@ -1067,12 +1406,15 @@ static void RunKonamiSCC (void) {
         return;
     }
 
-    /* ---- WRITE cycle. Filter non-cart addresses identically to
-     *      RunKonamiNOSCC: `address > 0xB000U` catches page 0 (BIOS
-     *      0x0000..0x3FFF), page 6 + 7 (high RAM 0xC000..0xFFFF) in
-     *      one unsigned SLTIU compare against an immediate - cheaper
-     *      than a pair of page-bound compares plus an OR. */
+    /* ---- WRITE cycle. SSR latch at 0xFFFF (M1 high). */
     EXTI->INTFR = EXTI_INTENR_MR0;
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
+        return;
+    }
+    /* Filter non-cart addresses identically to RunKonamiNOSCC:
+     * `address > 0xB000U` catches page 0 (BIOS 0x0000..0x3FFF),
+     * page 6 + 7 (high RAM 0xC000..0xFFFF). */
     if (address > 0xB000U) return;
 
     EXTI->INTFR = EXTI_INTENR_MR0;
@@ -1088,13 +1430,26 @@ static void RunKonamiSCC (void) {
             return;   /* held cycle: let Cart_HoldMSXWait_End finish */
         }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
-            /* Latch data bus ONCE while ~WR is low (Z80 only drives
-             * the data bus during the ~WR pulse; reading earlier
-             * latches stale / floating garbage, which corrupts both
-             * the bank value AND the SCC queue entry - that was the
-             * second KONAMISCC freeze cause, fixed here by latching
-             * inside the WR-low block, matching NOSCC exactly). */
+            /* Latch data bus ONCE while ~WR is low. */
             const uint8_t w = Cart_ReadWriteData();
+            const unsigned page = (unsigned)(address >> 13);
+            /* Sub-slot decode on writes: sub-slot 1 = mapper RAM
+             * (needs writes to work). The cart's bank registers +
+             * the SCC window only apply to sub-slot 0. */
+            if (ssr_entry != 0U) {
+                const unsigned subslot =
+                    ((unsigned)ssr_entry >> ((page > 1U ? (page - 1U) : 0U) * 2U))
+                    & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    const unsigned ram_page = (page > 1U) ? (page - 1U) : page;
+                    Cart_WriteSlottedPSRAMByte (address, ram_page, w);
+                    return;
+                }
+                if (subslot != 0U) {
+                    /* Sub-slot 2/3: no cart, no RAM - ignore. */
+                    return;
+                }
+            }
 
             /* Common bank-switch update - identical formula to
              * RunKonamiNOSCC. (w << 13) - page_start where
@@ -1139,20 +1494,78 @@ static void RunKonamiSCC (void) {
  *   write to addr+1   -> high nibble of bank
  */
 static void RunNEO8 (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     const uint32_t ctrl    = GPIOE->INDR;
 
+    /* SSR readback - same rationale as the other handlers. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U
+        && (ctrl & CART_RD_MASK) == 0U) {
+        GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
+
     if ((ctrl & CART_RD_MASK) == 0U) {
         const uint32_t bank = (uint32_t)(address >> 13);
-        if (bank <= 5U) {
-            const uint32_t bias = g_state->bankOffsets[bank] << 13;
-            Cart_DriveByteFromPSRAM (address & 0x1FFFU, bias);
+        const unsigned subslot =
+            ((unsigned)ssr_entry >> ((bank > 1U ? (bank - 1U) : 0U) * 2U))
+            & 0x3U;
+        if (ssr_entry != 0U) {
+            if (subslot == 0U) {
+                if (bank <= 5U) {
+                    const uint32_t bias = g_state->bankOffsets[bank] << 13;
+                    Cart_DriveByteFromPSRAM (address & 0x1FFFU, bias);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    GPIOB->OUTDR = 0xFFU << 8;
+                    GPIOB->CFGHR = CART_BUS_ON;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                const unsigned ram_page = (bank > 1U) ? (bank - 1U) : bank;
+                Cart_DriveSlottedPSRAMByte (address, ram_page, t_entry);
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
         } else {
-            /* Outside the cart's bank range. Drive 0xFF on the data
-             * bus (open-bus pattern for unpopulated slots) so the Z80
-             * reads a deterministic value. */
-            GPIOB->OUTDR = 0xFFU << 8;
-            GPIOB->CFGHR = CART_BUS_ON;
+            /* Fast path: SSR still at the power-on default. */
+            if (bank <= 5U) {
+                const uint32_t bias = g_state->bankOffsets[bank] << 13;
+                Cart_DriveByteFromPSRAM (address & 0x1FFFU, bias);
+#if CART_TIMING_STATS
+                {
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                /* Outside the cart's bank range. Drive 0xFF on the
+                 * data bus (open-bus pattern for unpopulated slots)
+                 * so the Z80 reads a deterministic value. */
+                GPIOB->OUTDR = 0xFFU << 8;
+                GPIOB->CFGHR = CART_BUS_ON;
+            }
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
@@ -1164,6 +1577,11 @@ static void RunNEO8 (void) {
 
     /* WRITE: 12-bit bank number composed from sequential writes. */
     EXTI->INTFR = EXTI_INTENR_MR0;
+    /* SSR latch at 0xFFFF (M1 high). */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
+        return;
+    }
     uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
         if (--spin == 0U) {
@@ -1177,8 +1595,26 @@ static void RunNEO8 (void) {
         }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
-            uint32_t bank = ((uint32_t)(address >> 11) & 0x7U) - 2U;
-            if (bank > 5U) return;
+            const uint32_t bank_raw =
+                ((uint32_t)(address >> 11) & 0x7U) - 2U;
+            if (bank_raw > 5U) return;
+            /* Sub-slot decode on writes: sub-slot 1 = mapper RAM. */
+            if (ssr_entry != 0U) {
+                const unsigned subslot =
+                    ((unsigned)ssr_entry
+                     >> ((bank_raw > 1U ? (bank_raw - 1U) : 0U) * 2U))
+                    & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    const unsigned ram_page =
+                        (bank_raw > 1U) ? (bank_raw - 1U) : bank_raw;
+                    Cart_WriteSlottedPSRAMByte (address, ram_page, w);
+                    return;
+                }
+                if (subslot != 0U) {
+                    return;
+                }
+            }
+            const uint32_t bank = bank_raw;
             if (address & 1U) {
                 g_state->bankOffsets[bank] =
                     (((uint32_t)w & 0x0FU) << 8) |
@@ -1197,19 +1633,77 @@ static void RunNEO8 (void) {
  * is BIOS-mirrored from page 2 by the slot logic).
  */
 static void RunNEO16 (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     const uint32_t ctrl    = GPIOE->INDR;
 
+    /* SSR readback - same rationale as the other handlers. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U
+        && (ctrl & CART_RD_MASK) == 0U) {
+        GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
+
     if ((ctrl & CART_RD_MASK) == 0U) {
         const uint32_t bank = (uint32_t)(address >> 14);
-        if (bank <= 2U) {
-            const uint32_t bias = g_state->bankOffsets[bank] << 14;
-            Cart_DriveByteFromPSRAM (address & 0x3FFFU, bias);
+        const unsigned subslot =
+            ((unsigned)ssr_entry >> ((bank > 1U ? (bank - 1U) : 0U) * 2U))
+            & 0x3U;
+        if (ssr_entry != 0U) {
+            if (subslot == 0U) {
+                if (bank <= 2U) {
+                    const uint32_t bias = g_state->bankOffsets[bank] << 14;
+                    Cart_DriveByteFromPSRAM (address & 0x3FFFU, bias);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    GPIOB->OUTDR = 0xFFU << 8;
+                    GPIOB->CFGHR = CART_BUS_ON;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                const unsigned ram_page = (bank > 1U) ? (bank - 1U) : bank;
+                Cart_DriveSlottedPSRAMByte (address, ram_page, t_entry);
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
         } else {
-            /* Outside the cart's bank range. Drive 0xFF on the data
-             * bus so the Z80 reads a deterministic value. */
-            GPIOB->OUTDR = 0xFFU << 8;
-            GPIOB->CFGHR = CART_BUS_ON;
+            /* Fast path: SSR still at the power-on default. */
+            if (bank <= 2U) {
+                const uint32_t bias = g_state->bankOffsets[bank] << 14;
+                Cart_DriveByteFromPSRAM (address & 0x3FFFU, bias);
+#if CART_TIMING_STATS
+                {
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                /* Outside the cart's bank range. Drive 0xFF on the
+                 * data bus so the Z80 reads a deterministic value. */
+                GPIOB->OUTDR = 0xFFU << 8;
+                GPIOB->CFGHR = CART_BUS_ON;
+            }
         }
         EXTI->INTFR = EXTI_INTENR_MR0;
         if (s_msx_wait_held == 0U) {
@@ -1221,6 +1715,11 @@ static void RunNEO16 (void) {
 
     /* WRITE: 12-bit bank number composed from sequential writes. */
     EXTI->INTFR = EXTI_INTENR_MR0;
+    /* SSR latch at 0xFFFF (M1 high). */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
+        return;
+    }
     uint32_t spin = CART_ENDCYCLE_SPIN;
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
         if (--spin == 0U) {
@@ -1234,8 +1733,26 @@ static void RunNEO16 (void) {
         }
         if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
             const uint8_t w = Cart_ReadWriteData();
-            uint32_t bank = ((uint32_t)(address >> 12) & 0x3U) - 1U;
-            if (bank > 2U) return;
+            const uint32_t bank_raw =
+                ((uint32_t)(address >> 12) & 0x3U) - 1U;
+            if (bank_raw > 2U) return;
+            /* Sub-slot decode on writes: sub-slot 1 = mapper RAM. */
+            if (ssr_entry != 0U) {
+                const unsigned subslot =
+                    ((unsigned)ssr_entry
+                     >> ((bank_raw > 1U ? (bank_raw - 1U) : 0U) * 2U))
+                    & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    const unsigned ram_page =
+                        (bank_raw > 1U) ? (bank_raw - 1U) : bank_raw;
+                    Cart_WriteSlottedPSRAMByte (address, ram_page, w);
+                    return;
+                }
+                if (subslot != 0U) {
+                    return;
+                }
+            }
+            const uint32_t bank = bank_raw;
             if (address & 1U) {
                 g_state->bankOffsets[bank] =
                     (((uint32_t)w & 0x0FU) << 8) |
@@ -1246,6 +1763,285 @@ static void RunNEO16 (void) {
             }
             return;
         }
+    }
+}
+
+/*
+ * ASCII 8k mapper (ASCII8k). Four 8 KiB banks at 0x4000/0x6000/0x8000/
+ * 0xA000, switchable via writes to the 0x6000..0x7FFF range (each write
+ * to ANY address in that page selects the bank for the page whose
+ * address is the write target). Page index = (addr >> 13) - 2 (so
+ * addr 0x4000/0x6000/0x8000/0xA000 maps to slot 0..3).
+ *
+ *   bankOffsets[slot] = (data << 13) - (slot*0x2000 + 0x4000)
+ *                     = (data - 2 - slot) << 13
+ *
+ * Cycle gate: the cart is a memory-mapped device and must NOT respond
+ * on /IORQ / INTA / other non-memory cycles that may slip through.
+ * ~MREQ low is the canonical "memory access" qualifier.
+ */
+static void RunASCII8k (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl    = GPIOE->INDR;
+
+    /* SSR readback - same rationale as the other handlers. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U
+        && (ctrl & CART_RD_MASK) == 0U) {
+        GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
+
+    /* Cycle gate. */
+    if ((ctrl & CART_MREQ_MASK) == 0U) {
+        if ((ctrl & CART_RD_MASK) == 0U) {
+            /* READ. */
+            const unsigned page = (unsigned)(address >> 13);
+            const unsigned slot_8k = (page >= 2U && page <= 5U) ? (page - 2U) : 0U;
+            const unsigned subslot =
+                ((unsigned)ssr_entry >> ((slot_8k > 0U ? (slot_8k - 1U) : 0U) * 2U))
+                & 0x3U;
+            if (ssr_entry != 0U) {
+                if (subslot == 0U) {
+                    if (page >= 2U && page <= 5U) {
+                        const uint32_t bias = g_state->bankOffsets[slot_8k];
+                        Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                        {
+                            const uint32_t dt = Cart_RdMcycle () - t_entry;
+                            g_cart_game_reads++;
+                            if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                                g_cart_game_late++;
+                            }
+                            if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                            if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                        }
+#endif
+                    } else {
+                        GPIOB->CFGHR = CART_BUS_OFF;
+                    }
+                } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    /* ASCII8k slots are 0..3, but the 16K RAM pages are
+                     * 0..3 too: page 0 of the 16K RAM window (0x4000)
+                     * corresponds to slot 0 (0x4000), etc. So the
+                     * ram_page = slot_8k directly for slots 1..3; for
+                     * slot 0 the cart uses the same window. */
+                    Cart_DriveSlottedPSRAMByte (address, slot_8k, t_entry);
+                } else {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else {
+                /* Fast path: SSR still at the power-on default. */
+                if (page >= 2U && page <= 5U) {
+                    const uint32_t bias = g_state->bankOffsets[slot_8k];
+                    Cart_DriveByteFromPSRAM (address, bias);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            }
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            if (s_msx_wait_held == 0U) {
+                Cart_SpinUntilSltSLHigh ();
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+            return;
+        }
+        /* WRITE. */
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
+            return;
+        }
+        if (address > 0xB000U) return;
+        uint32_t spin = CART_ENDCYCLE_SPIN;
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+            if (--spin == 0U) {
+                g_cart_cycle_timeout++;
+                break;
+            }
+            if (s_msx_wait_held != 0U) return;
+            if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
+                const uint8_t w = Cart_ReadWriteData();
+                const unsigned page = (unsigned)(address >> 13);
+                if (page < 2U || page > 5U) return;
+                const unsigned slot_8k = page - 2U;
+                if (ssr_entry != 0U) {
+                    const unsigned subslot =
+                        ((unsigned)ssr_entry
+                         >> ((slot_8k > 0U ? (slot_8k - 1U) : 0U) * 2U))
+                        & 0x3U;
+                    if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                        Cart_WriteSlottedPSRAMByte (address, slot_8k, w);
+                        return;
+                    }
+                    if (subslot != 0U) return;
+                }
+                /* Same formula as the asm: bias = (w - 2 - slot) << 13. */
+                g_state->bankOffsets[slot_8k] =
+                    ((uint32_t)((int32_t)w - 2 - (int32_t)slot_8k)) << 13;
+                return;
+            }
+        }
+        return;
+    }
+
+    /* Non-memory cycle: not for us. */
+    GPIOB->CFGHR = CART_BUS_OFF;
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    if (s_msx_wait_held == 0U) {
+        Cart_SpinUntilSltSLHigh ();
+    }
+}
+
+/*
+ * ASCII 16k mapper. Two 16 KiB banks at 0x4000/0x8000, switchable via
+ * writes to 0x6000 (bank for page 0x4000) and 0x7000/0x77FF (bank for
+ * page 0x8000). Page index = (addr >> 14), valid 1..2.
+ */
+static void RunASCII16k (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
+    const uint16_t address = (uint16_t)GPIOD->INDR;
+    uint32_t ctrl    = GPIOE->INDR;
+
+    /* SSR readback. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U
+        && (ctrl & CART_RD_MASK) == 0U) {
+        GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
+
+    if ((ctrl & CART_MREQ_MASK) == 0U) {
+        if ((ctrl & CART_RD_MASK) == 0U) {
+            /* READ. */
+            const unsigned page = (unsigned)(address >> 14);
+            const unsigned subslot =
+                ((unsigned)ssr_entry >> ((page > 1U ? (page - 1U) : 0U) * 2U))
+                & 0x3U;
+            if (ssr_entry != 0U) {
+                if (subslot == 0U) {
+                    if (page == 1U || page == 2U) {
+                        const uint32_t bias = g_state->bankOffsets[page];
+                        Cart_DriveByteFromPSRAM (address & 0x3FFFU, bias);
+#if CART_TIMING_STATS
+                        {
+                            const uint32_t dt = Cart_RdMcycle () - t_entry;
+                            g_cart_game_reads++;
+                            if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                                g_cart_game_late++;
+                            }
+                            if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                            if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                        }
+#endif
+                    } else {
+                        GPIOB->CFGHR = CART_BUS_OFF;
+                    }
+                } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    const unsigned ram_page = (page > 1U) ? (page - 1U) : page;
+                    Cart_DriveSlottedPSRAMByte (address, ram_page, t_entry);
+                } else {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else {
+                /* Fast path: SSR still at the power-on default. */
+                if (page == 1U || page == 2U) {
+                    const uint32_t bias = g_state->bankOffsets[page];
+                    Cart_DriveByteFromPSRAM (address & 0x3FFFU, bias);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            }
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            if (s_msx_wait_held == 0U) {
+                Cart_SpinUntilSltSLHigh ();
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+            return;
+        }
+        /* WRITE. */
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
+            return;
+        }
+        if (address > 0xB000U) return;
+        uint32_t spin = CART_ENDCYCLE_SPIN;
+        while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) {
+            if (--spin == 0U) {
+                g_cart_cycle_timeout++;
+                break;
+            }
+            if (s_msx_wait_held != 0U) return;
+            if ((GPIOE->INDR & CART_WR_MASK) == 0U) {
+                const uint8_t w = Cart_ReadWriteData();
+                const unsigned page = (unsigned)(address >> 14);
+                /* Sub-slot decode: sub-slot 1 = mapper RAM. */
+                if (ssr_entry != 0U) {
+                    const unsigned subslot =
+                        ((unsigned)ssr_entry
+                         >> ((page > 1U ? (page - 1U) : 0U) * 2U))
+                        & 0x3U;
+                    if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                        const unsigned ram_page = (page > 1U) ? (page - 1U) : page;
+                        Cart_WriteSlottedPSRAMByte (address, ram_page, w);
+                        return;
+                    }
+                    if (subslot != 0U) return;
+                }
+                /* Bank switch. ASCII16K uses 0x6000/0x7000 (and 0x77FF)
+                 * - this matches the Nextor handler. */
+                if (address == 0x6000U) {
+                    g_state->bankOffsets[1] = ((uint32_t)w << 14) - 0x4000U;
+                } else if (address == 0x7000U || address == 0x77FFU) {
+                    g_state->bankOffsets[2] = ((uint32_t)w << 14) - 0x8000U;
+                }
+                return;
+            }
+        }
+        return;
+    }
+
+    /* Non-memory cycle. */
+    GPIOB->CFGHR = CART_BUS_OFF;
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    if (s_msx_wait_held == 0U) {
+        Cart_SpinUntilSltSLHigh ();
     }
 }
 
@@ -1269,6 +2065,8 @@ static void Cart_Banked_Dispatch (void) {
     case CART_MAP_KONAMINOSCC:  RunKonamiNOSCC();  break;
     case CART_MAP_NEO8:         RunNEO8();         break;
     case CART_MAP_NEO16:        RunNEO16();        break;
+    case CART_MAP_ASCII8k:      RunASCII8k();      break;
+    case CART_MAP_ASCII16k:     RunASCII16k();     break;
     default:                 /* NONE or ROM mappers (shouldn't reach here) */
         GPIOB->CFGHR = CART_BUS_OFF;
         EXTI->INTFR  = EXTI_INTENR_MR0;
@@ -1727,9 +2525,25 @@ void Cart_EXTI0_ASCII16k_Handler (void) {
               "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "memory");
 }
 
-/* ROM16k: 16 KiB image mirrored at 0x4000 and 0x8000. Bias = img_base -
- * 0x4000, so addr + bias gives the right byte for both halves. */
+/* ROM16k: 16 KiB game image at SUB-SLOT 0 (mirrored at 0x4000 and
+ * 0x8000; bias = img_base - 0x4000 so addr + bias gives the right byte
+ * for both halves), plus the expanded-slot protocol - 0xFFFF SSR
+ * read/latch and sub-slot 1 = the 4 MiB PSRAM mapper RAM, identical
+ * decode to the TERMINAL/NEXTOR handlers.
+ *
+ * Why the game mappers must be sub-slot capable: the MSX BIOS maps
+ * main RAM into sub-slot 1 (largest RAM wins), so the machine runs
+ * its work area, stack and the RAM-resident terminal body out of the
+ * cart's mapper RAM. A launch that swaps to a mapper WITHOUT this
+ * decode pulls that RAM out from under the running Z80 - it dies at
+ * the swap and never reaches the reset (game-image reads +0 in the
+ * post-launch counters). With the decode, the RAM layout survives the
+ * swap; after the MSX-side rst 0 the BIOS re-detects the same layout
+ * and auto-boots sub-slot 0 - the same mechanism the terminal itself
+ * uses to auto-boot at power-on. */
 void Cart_EXTI0_ROM16k_Handler (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
 
@@ -1762,16 +2576,139 @@ void Cart_EXTI0_ROM16k_Handler (void) {
         }
     }
 
-    if ((ctrl & CART_RD_MASK) == 0U && address >= 0x4000U && address < 0xC000U) {
-        /* Serve from PSRAM with the bus still tri-stated - hides the
-         * ~30-cycle PSRAM read latency before the data-bus drivers
-         * come up. The mirror at 0x8000..0xBFFF is served the same
-         * way (address - 0x4000 wraps identically for both halves). */
-        Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        /* READ cycle. */
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            /* Secondary-slot register, read INVERTED - same as the
+             * TERMINAL/NEXTOR handlers. The MSX BIOS stores bit 7 of
+             * ~ssr into EXPTBL[slot] as its "slot is expanded" flag;
+             * decoding the SSR is what makes the BIOS CHKRAM scan
+             * walk this slot's sub-slots and find the mapper RAM in
+             * sub-slot 1. M1 low means opcode fetch, so an ordinary
+             * FFFF instruction fetch must not be reinterpreted as an
+             * SSR read. */
+            GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+            GPIOB->CFGHR = CART_BUS_ON;
+        } else if (ssr_entry == 0U) {
+            /* Fast path: SSR still at power-on default (all pages =
+             * sub-slot 0 = the game image). Serve from PSRAM with the
+             * bus still tri-stated - hides the ~30-cycle PSRAM read
+             * latency before the data-bus drivers come up. The mirror
+             * at 0x8000..0xBFFF is served the same way (address -
+             * 0x4000 wraps identically for both halves). */
+            if (address >= 0x4000U && address < 0xC000U) {
+                Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+#if CART_TIMING_STATS
+                {
+                    /* Game-image read stats - AFTER the drive, so it
+                     * cannot delay the byte the Z80 samples. See the
+                     * counter block near the top of this file. */
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                /* Read outside the cart window: release the bus so
+                 * the MSX's own devices can respond. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        } else {
+            /* Expanded-slot decode: two bits per 16 KiB CPU page
+             * select the sub-slot - identical dispatch to the
+             * TERMINAL/NEXTOR handlers. Sub-slot 0 = the game image;
+             * sub-slot 1 = the 4 MiB PSRAM mapper RAM (bank selected
+             * by the FC..FF register latched for this page by the
+             * EXTI9_5 handler); 2/3 float. */
+            const unsigned page = (unsigned)(address >> 14);
+            const unsigned subslot =
+                ((unsigned)ssr_entry >> (page * 2U)) & 0x3U;
+            if (subslot == 0U) {
+                if (address >= 0x4000U && address < 0xC000U) {
+                    Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    /* Page 0/3 under sub-slot 0: not selected by real
+                     * slot layouts - float. */
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                /* Mapper RAM: keeps the Z80's main RAM alive across
+                 * the mapper swap. Identical call to the TERMINAL /
+                 * NEXTOR handlers. */
+                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
+            } else {
+                /* Empty sub-slot: leave the data bus floating. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        }
     } else {
-        /* Write cycle, or read outside the cart window: release the
-         * bus so the MSX's own devices can respond. */
+        /* WRITE cycle: WR is low now; data valid on PB8..15. Same
+         * shape as the TERMINAL handler: spin until /WR rises or
+         * SLTSL rises, then decode once. */
+        {
+            uint32_t spin = CART_ENDCYCLE_SPIN;
+            while (ctrl & CART_WR_MASK) {
+                ctrl = GPIOE->INDR;
+                if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+                if (--spin == 0U) {
+                    /* Bounded (d9d6e38): ~WR never fell and ~SLTSL
+                     * never rose - count it, release, move on. */
+                    g_cart_cycle_timeout++;
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+            }
+        }
+        {
+            const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+                /* Secondary-slot register latch - identical to the
+                 * TERMINAL/NEXTOR handlers. The BIOS writes its
+                 * EXPTBL-derived sub-slot table here during the
+                 * power-on / post-reset scan; latching it verbatim
+                 * means the layout persists across the mapper swap.
+                 * M1 must be high - a low byte at FFFF is an opcode
+                 * fetch, not a register write. */
+                g_subslot_reg = w;
+            } else if (ssr_entry != 0U) {
+                const unsigned page = (unsigned)(address >> 14);
+                const unsigned subslot =
+                    ((unsigned)ssr_entry >> (page * 2U)) & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    /* Mapper RAM write - the RAM needs writes too.
+                     * Identical call to the TERMINAL/NEXTOR
+                     * handlers. */
+                    Cart_WriteSlottedPSRAMByte (address, page, w);
+                }
+                /* Sub-slot 0 (the game ROM) and empty sub-slots:
+                 * ignore the write, same as the TERMINAL handler
+                 * ignores writes into its ROM banks. */
+            }
+        }
+        /* The Z80 owns the data bus during writes. */
         GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
@@ -1810,6 +2747,8 @@ void Cart_EXTI0_ROM16k_Handler (void) {
  * under ROM32k is now obsolete - the FLASH handler serves both the
  * loader menu AND any future mailbox-based diagnostics. */
 void Cart_EXTI0_ROM32k_Handler (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
 
@@ -1839,18 +2778,117 @@ void Cart_EXTI0_ROM32k_Handler (void) {
         }
     }
 
-    if ((ctrl & CART_RD_MASK) == 0U && address >= 0x4000U && address < 0xC000U) {
-        /* Serve from PSRAM with the bus still tri-stated - hides the
-         * ~30-cycle PSRAM read latency before the data-bus drivers
-         * come up. CART_GAME_BASE shifts the image within the window
-         * (the same constant every other read path adds). */
-        Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        /* READ cycle. */
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            /* Secondary-slot register, read INVERTED - same as the
+             * ROM16k / TERMINAL / NEXTOR handlers. Identical rationale:
+             * decoding the SSR is what makes the BIOS CHKRAM scan walk
+             * this slot's sub-slots and find the mapper RAM in
+             * sub-slot 1. M1 low means opcode fetch, not an SSR read. */
+            GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+            GPIOB->CFGHR = CART_BUS_ON;
+        } else if (ssr_entry == 0U) {
+            /* Fast path: SSR still at power-on default. The ROM32k
+             * game occupies 0x4000..0xBFFF; the BIOS leaves page 3
+             * (0xC000..0xFFFF) as RAM in the non-expanded layout, and
+             * the same is true after a swap because the SSR is still
+             * the power-on default. Serve from PSRAM with the bus
+             * still tri-stated - hides the ~30-cycle PSRAM read
+             * latency before the data-bus drivers come up. */
+            if (address >= 0x4000U && address < 0xC000U) {
+                Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+#if CART_TIMING_STATS
+                {
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                /* Read outside the cart window (e.g. page 3 when
+                 * nothing else is selected): release the bus so the
+                 * MSX's own devices can respond. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        } else {
+            /* Expanded-slot decode - identical dispatch to the
+             * ROM16k / TERMINAL / NEXTOR handlers. Sub-slot 0 = the
+             * 32 KiB game image mirrored across 0x4000..0xBFFF; sub-slot
+             * 1 = the 4 MiB PSRAM mapper RAM (bank selected by the
+             * FC..FF register latched for this page); 2/3 float. */
+            const unsigned page = (unsigned)(address >> 14);
+            const unsigned subslot =
+                ((unsigned)ssr_entry >> (page * 2U)) & 0x3U;
+            if (subslot == 0U) {
+                if (address >= 0x4000U && address < 0xC000U) {
+                    Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    /* Page 0/3 under sub-slot 0: not selected by
+                     * real slot layouts for a 32K image - float. */
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                /* Mapper RAM - keeps the Z80's main RAM alive across
+                 * the swap. Identical call to the other handlers. */
+                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
+            } else {
+                /* Empty sub-slot: float. */
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        }
     } else {
-        /* Write cycle, or read outside the cart window: release the
-         * bus so the MSX's own devices can respond. Writes to the
-         * cart image window go nowhere (the Z80 is reading-only here,
-         * but harmless to ignore). */
+        /* WRITE cycle. */
+        {
+            uint32_t spin = CART_ENDCYCLE_SPIN;
+            while (ctrl & CART_WR_MASK) {
+                ctrl = GPIOE->INDR;
+                if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+                if (--spin == 0U) {
+                    g_cart_cycle_timeout++;
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+            }
+        }
+        {
+            const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+                /* SSR latch - same rationale as the other handlers. */
+                g_subslot_reg = w;
+            } else if (ssr_entry != 0U) {
+                const unsigned page = (unsigned)(address >> 14);
+                const unsigned subslot =
+                    ((unsigned)ssr_entry >> (page * 2U)) & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    /* Mapper RAM write. */
+                    Cart_WriteSlottedPSRAMByte (address, page, w);
+                }
+            }
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
@@ -1860,16 +2898,14 @@ void Cart_EXTI0_ROM32k_Handler (void) {
     }
 }
 
-/* ROM48k: 48 KiB image at 0x4000..0xFFFF. Bias = img_base - 0x4000 (same
- * as ROM32k). The Z80 reads at 0xC000..0xFFFF overlap the BIOS slot
- * but the BIOS still owns page 3 from its own perspective; the cart
- * mirroring is transparent if the slot is configured for it. The MSX
- * BIOS leaves the cart slot unslotted and page 3 stays RAM. */
+/* ROM48k: 48 KiB image at 0x4000..0xFFFF. Same shape as ROM32k but
+ * the image fills three 16K pages, so the sub-slot-0 read window
+ * spans 0x4000..0xFFFF (0x8000..0xBFFF still mirrors 0x4000..0x7FFF
+ * via the bias; 0xC000..0xFFFF is the third page of the image). The
+ * sub-slot-1 RAM decode is unchanged. */
 void Cart_EXTI0_ROM48k_Handler (void) {
-    /* Same shape as ROM32k - the address space 0x4000..0xFFFF simply
-     * spans a 48 KiB image instead of a 32 KiB one. The bias stays
-     * img_base - 0x4000; image[48K] returns 0xFF (or whatever the
-     * upper 16 KiB of the image holds) for addr >= 0xC000. */
+    const uint32_t t_entry = CART_T_ENTRY ();
+    const uint8_t ssr_entry = g_subslot_reg;
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
 
@@ -1899,10 +2935,99 @@ void Cart_EXTI0_ROM48k_Handler (void) {
         }
     }
 
-    if ((ctrl & CART_RD_MASK) == 0U && address >= 0x4000U) {
-        Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        /* READ cycle. */
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            /* SSR readback - same rationale as the other handlers. */
+            GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+            GPIOB->CFGHR = CART_BUS_ON;
+        } else if (ssr_entry == 0U) {
+            /* Fast path: SSR still at power-on default. The 48 KiB
+             * image fills 0x4000..0xFFFF, so reads in the entire
+             * cart window are served. */
+            if (address >= 0x4000U) {
+                Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+#if CART_TIMING_STATS
+                {
+                    const uint32_t dt = Cart_RdMcycle () - t_entry;
+                    g_cart_game_reads++;
+                    if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                        g_cart_game_late++;
+                    }
+                    if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                    if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                }
+#endif
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        } else {
+            /* Expanded-slot decode. The 48 KiB image maps sub-slot 0
+             * into 0x4000..0xFFFF across all four pages; only page 0
+             * (0x0000..0x3FFF) stays as the BIOS's own RAM page. */
+            const unsigned page = (unsigned)(address >> 14);
+            const unsigned subslot =
+                ((unsigned)ssr_entry >> (page * 2U)) & 0x3U;
+            if (subslot == 0U) {
+                if (page >= 1U) {
+                    Cart_DriveByteFromPSRAM (address - 0x4000U, 0U);
+#if CART_TIMING_STATS
+                    {
+                        const uint32_t dt = Cart_RdMcycle () - t_entry;
+                        g_cart_game_reads++;
+                        if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                            g_cart_game_late++;
+                        }
+                        if (dt < g_cart_game_cyc_min) g_cart_game_cyc_min = dt;
+                        if (dt > g_cart_game_cyc_max) g_cart_game_cyc_max = dt;
+                    }
+#endif
+                } else {
+                    /* Page 0 under sub-slot 0: a 48K image doesn't
+                     * fill it; float. */
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                }
+            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
+            } else {
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+        }
     } else {
+        /* WRITE cycle. */
+        {
+            uint32_t spin = CART_ENDCYCLE_SPIN;
+            while (ctrl & CART_WR_MASK) {
+                ctrl = GPIOE->INDR;
+                if ((ctrl & CART_SLTSL_MASK) != 0U) {
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+                if (--spin == 0U) {
+                    g_cart_cycle_timeout++;
+                    GPIOB->CFGHR = CART_BUS_OFF;
+                    EXTI->INTFR = EXTI_INTENR_MR0;
+                    return;
+                }
+            }
+        }
+        {
+            const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+                g_subslot_reg = w;
+            } else if (ssr_entry != 0U) {
+                const unsigned page = (unsigned)(address >> 14);
+                const unsigned subslot =
+                    ((unsigned)ssr_entry >> (page * 2U)) & 0x3U;
+                if (subslot == 1U && s_slotted_psram_ready != 0U) {
+                    Cart_WriteSlottedPSRAMByte (address, page, w);
+                }
+            }
+        }
         GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
@@ -1956,6 +3081,7 @@ void Cart_EXTI0_ROM48k_Handler (void) {
 extern TerminalMailbox g_term_mbox;
 
 void Cart_EXTI0_Terminal_Handler (void) {
+    const uint32_t t_entry = CART_T_ENTRY ();
     const uint16_t address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
     const uint8_t ssr_entry = g_subslot_reg;
@@ -2140,7 +3266,7 @@ void Cart_EXTI0_Terminal_Handler (void) {
                  * bank register latched from the OUT (FC..FF),A cycle
                  * for this page (EXTI9_5 handler). Identical call to
                  * the Nextor handler. */
-                Cart_DriveSlottedPSRAMByte (address, page);
+                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
             } else {
                 /* Empty sub-slot: leave the data bus floating. */
                 GPIOB->CFGHR = CART_BUS_OFF;
@@ -2279,6 +3405,7 @@ void Cart_EXTI0_Terminal_Handler (void) {
 
 void Cart_EXTI0_Nextor_Handler (void) {
 
+    const uint32_t t_entry = CART_T_ENTRY ();
     uint32_t ctrl = GPIOE->INDR;
     uint16_t address = (uint16_t)GPIOD->INDR;
     const uint8_t ssr_entry = g_subslot_reg;
@@ -2333,7 +3460,7 @@ void Cart_EXTI0_Nextor_Handler (void) {
                         }
                     } else if (subslot == 1U
                                && s_slotted_psram_ready != 0U) {
-                        Cart_DriveSlottedPSRAMByte (address, page);
+                        Cart_DriveSlottedPSRAMByte (address, page, t_entry);
                     } else {
                         /* Empty sub-slot: leave the data bus floating. */
                         GPIOB->CFGHR = CART_BUS_OFF;

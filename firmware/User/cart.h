@@ -24,6 +24,7 @@
 #define CART_RD_MASK      0x0002U  /* PE1  ~RD */
 #define CART_WR_MASK      0x0004U  /* PE2  ~WR */
 #define CART_WAIT_MASK    0x0008U  /* PE3  ~WAIT (active-low cart output) */
+#define CART_RESET_MASK   0x0010U  /* PE4  ~RESET (TFMSX dev hardware only) */
 #define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
 #define CART_M1_MASK      0x0040U  /* PE6  M1 (low during opcode fetch) */
 #define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)
@@ -43,6 +44,12 @@
  * 0x3 nibble = 50MHz push-pull output, 0x4 nibble = floating input. */
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
+
+/* TFMSX exposes the cart reset line as a safely-drivable open-drain input.
+ * Keep this disabled for production cartridges whose ~RESET is read-only. */
+#ifndef CART_TFMSX_HARD_RESET
+#define CART_TFMSX_HARD_RESET 0
+#endif
 
 /* PSRAM mapper window used by the Nextor expanded-slot path: 256 x 16 KiB
  * banks = 4 MiB.
@@ -246,6 +253,34 @@ uint32_t Cart_GetWrCycles (void);
  * stopped mid-line. Reported from the main loop, never from the ISR. */
 extern volatile uint32_t g_cart_cycle_timeout;
 
+/* Mapper-RAM (sub-slot 1) read-path timing, measured in the EXTI0
+ * handlers' hot path (see the block above Cart_DriveSlottedPSRAMByte()
+ * in cart.c). Reported on change from the main loop, so a boot that
+ * exercises the mapper RAM leaves a trace here:
+ *
+ *   g_cart_slotted_late > 0          a mapper-RAM read answered the bus
+ *                                    after ~SLTSL had already returned
+ *                                    high - a hard Z80 deadline miss
+ *                                    (the MSX saw open bus on that byte)
+ *   g_cart_slotted_cyc_max           worst MCU cycles from ISR entry to
+ *                                    the data-bus drive; compare against
+ *                                    the Z80 budget (~73-98 HCLK cycles
+ *                                    at 3.58 MHz / 175 MHz HCLK)
+ */
+extern volatile uint32_t g_cart_slotted_reads;
+extern volatile uint32_t g_cart_slotted_late;
+extern volatile uint32_t g_cart_slotted_cyc_min;
+extern volatile uint32_t g_cart_slotted_cyc_max;
+
+/* Game-image ROM-mapper read-path timing (ROM16k first - see the
+ * counter block in cart.c). Same semantics as the slotted set above,
+ * but for reads served from the PSRAM game image by the plain ROM
+ * mappers: the BIOS slot probe, the game's INIT and its code fetches. */
+extern volatile uint32_t g_cart_game_reads;
+extern volatile uint32_t g_cart_game_late;
+extern volatile uint32_t g_cart_game_cyc_min;
+extern volatile uint32_t g_cart_game_cyc_max;
+
 /* Hardened mapper-swap primitive (see Cart_SetMapper_Safe() body in
  * cart.c for the full list of hazards it closes).
  *
@@ -310,6 +345,11 @@ void Init_Cart (void);
  * main() calls End after the slotted/flash handler is installed. */
 void Cart_HoldMSXWait_Begin (void);
 void Cart_HoldMSXWait_End (void);
+
+/* Development-board-only MSX reset control.  Assert drives PE4 low using
+ * open-drain; release returns PE4 to a floating input. */
+void Cart_HardReset_Assert (void);
+void Cart_HardReset_Release (void);
 
 /* Mark the PSRAM-backed slotted mapper available after PSRAM_Init(). The
  * mapper remains inactive until Cart_SetMapper(CART_MAP_NEXTOR) is called. */

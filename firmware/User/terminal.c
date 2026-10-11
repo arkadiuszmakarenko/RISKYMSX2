@@ -1426,6 +1426,25 @@ static void soft_reset_into_cart (Cart_Mapper m) {
     /* Once this starts, the terminal is being torn down for good:
      * block any further key handling / menu servicing this session. */
     s_launching = 1U;
+#if CART_TFMSX_HARD_RESET
+    /* TFMSX validation path: use the physical MSX reset instead of the
+     * terminal FIFO slingshot.  This removes the timing dependency between
+     * the MSX-side rom_start and the firmware mapper swap.  The target
+     * mapper is installed while the Z80 is held in reset, then the BIOS
+     * cold-boots and probes the already-live ROM. */
+    printf ("TERM: hard_reset assert\r\n");
+    Cart_HardReset_Assert ();
+    Delay_Ms (50U);
+    printf ("TERM: hard_reset set mapper=%d\r\n", (int)m);
+    (void)Cart_SetMapper_Safe (m);
+    Delay_Ms (5U);
+    printf ("TERM: hard_reset release\r\n");
+    Cart_HardReset_Release ();
+    /* Give the BIOS and ROM INIT time to complete before returning to the
+     * normal firmware service loop.  IRQs remain enabled for cart reads. */
+    Delay_Ms (1000U);
+    return;
+#else
     printf ("TERM: soft_reset push 0x03 to FIFO\r\n");
     /* Two MSX-side reboot paths exist, both must end up with the
      * NEW mapper live so the slot probe finds the user ROM's 'AB':
@@ -1455,7 +1474,8 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * them within one jiffy frame (<= ~18 ms). */
     out_push (0x03);
     {
-        /* FIXED 30 ms delay via the timer-calibrated Delay_Ms (the
+        /* Known-good NextorOnly timing: 20 ms via the timer-calibrated
+         * Delay_Ms (the
          * old 4,000,000-iteration spin measured anywhere from ~20 to
          * ~110 ms depending on codegen - too imprecise to land the
          * swap inside the launch window). Timing contract with the
@@ -1485,6 +1505,12 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * unknown) reach the BIOS slot probe within ~20 ms and find the
      * new ROM's 'AB' header. */
     (void)Cart_SetMapper_Safe (m);
+    /* Baseline for the post-settle report below: the counters BEFORE
+     * the MSX reboots. */
+    const uint32_t reads0 = g_cart_slotted_reads;
+    const uint32_t gr0    = g_cart_game_reads;
+    const uint32_t gl0    = g_cart_game_late;
+    const uint32_t cycto0 = g_cart_cycle_timeout;
     /* Post-swap settle cushion: keep the firmware quiet (no PSRAM /
      * USB churn) while the game's own INIT runs its first cart reads.
      * The legacy 55b6b88 build spun ~10,000,000 iterations here
@@ -1492,6 +1518,34 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * Konami-SCC with a large INIT) fail to boot. Tune via the
      * constant below if a title needs more. */
     Delay_Ms (800U);
+    /* Did the MSX actually cold-reboot into the new mapper? A BIOS
+     * cold boot re-runs the slot probe and the sub-slot RAM test,
+     * which drives tens of thousands of mapper-RAM reads (the
+     * power-on boot logged ~60000). For the plain ROM mappers the
+     * meaningful signal is instead the GAME-image counter: the BIOS
+     * slot probe reads 0x4000/0x4001 for the 'AB' and then the game's
+     * INIT + code fetches hammer the image, so a healthy game boot
+     * shows game reads well into the hundreds+ within this window.
+     * Interpretation:
+     *   game reads +2          -> the slot probe saw the cart at all.
+     *   game reads +100s..1000s-> probe + INIT + code fetches: the
+     *                            game is actually executing from the
+     *                            cart image.
+     *   game reads +0          -> nothing read the cart: the BIOS
+     *                            never probed it (no reboot, or the
+     *                            slot probe skipped the cart).
+     *   game late > 0 / cyc    -> a served read missed the Z80 cycle
+     *                            (deadline miss during the boot). */
+    printf ("TERM: post-launch: mapper-RAM reads +%lu, game-image reads +%lu"
+            " (late=%lu, cycles %lu..%lu), cycle-timeouts +%lu\r\n",
+            (unsigned long)(g_cart_slotted_reads - reads0),
+            (unsigned long)(g_cart_game_reads - gr0),
+            (unsigned long)(g_cart_game_late - gl0),
+            (unsigned long)((g_cart_game_cyc_min == 0xFFFFFFFFU)
+                            ? 0U : g_cart_game_cyc_min),
+            (unsigned long)g_cart_game_cyc_max,
+            (unsigned long)(g_cart_cycle_timeout - cycto0));
+#endif
 }
 
 void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {

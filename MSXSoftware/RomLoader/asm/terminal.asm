@@ -121,20 +121,6 @@ body:
         ;; render the menu or boot Nextor. Just initialise the screen +
         ;; cursor and enter the main loop.
 
-        ;; Relocate the 5-byte launch patch to a FIXED MSX RAM address
-        ;; (0xE100). The BIOS executes it later - after the firmware
-        ;; has swapped the cart mapper away from this ROM - so a
-        ;; ROM-resident patch would fetch game bytes as code. The
-        ;; v303 original solved this with PHASE #E000 (all body labels
-        ;; resolved to RAM); the sdasz80 port keeps ROM addresses, so
-        ;; the copy is explicit. Body RAM base = 0xE000 (body ROM
-        ;; base is whatever the assembler assigns, currently 0x4033),
-        ;; so 0xE100 is well clear of the copy.
-        ld      hl, #ugly_patch
-        ld      de, #0xE100
-        ld      bc, #5
-        ldir
-
         ;; Set 32-column screen, palette, sprite cursor.
         ld      a, #32
         ld      (0xF3AF), a
@@ -224,9 +210,13 @@ spr_y:
 
 rom_start:
         ;; >= ~35 ms for the firmware to settle: wait two JIFFY ticks.
-        ;; INLINED and executed from MSX RAM - no cart access from
-        ;; here on (the firmware swaps the mapper during this window;
-        ;; a `call wait` would fetch the swapped-in cart's bytes).
+        ;; FULLY INLINED and executed from MSX RAM - no cart access from
+        ;; here on. The firmware swaps the mapper ~20 ms after pushing
+        ;; the 0x03, i.e. DURING this wait; a `call wait` would fetch the
+        ;; swapped-in cart's bytes as code (wait lives at a cart-window
+        ;; address, and the swap lands mid-wait-loop - the Z80 then
+        ;; executes garbage and the MSX hangs: exactly the bug the inline
+        ;; exists to prevent).
         ei
         ld      hl, #0xFC9E             ; JIFFY
         ld      a, (hl)
@@ -237,33 +227,14 @@ rs_w1:
 rs_w2:
         cp      (hl)
         jr      z, rs_w2                ; ... and #2
-        ld      hl, (0xF6B1)
-        ld      de, #-12
-        add     hl, de
-        push    hl
-        ld      e, (hl)
-        inc     hl
-        ld      d, (hl)
-        ld      hl, #0x7DA3
-        rst     #0x20                   ; COMPARE HL, DE (BIOS helper)
-        pop     hl
-        jr      nz, unknown
-        ;; Patch the BIOS INIT-return frame to 0xE100 (little-endian
-        ;; 00 E1): the launch patch executes from MSX RAM, safe under
-        ;; the mapper swap.
-        ld      (hl), #0x00
-        inc     hl
-        ld      (hl), #0xE1
-        ret
-
-ugly_patch:
-        pop     bc
-        pop     hl
-        jp      0x7D84
-
-unknown:
-        ld      e, #'R'
-        call    0xFFB1
+        ;; Reboot: plain BIOS-standard RST 0 cold start. The target
+        ;; mapper is already installed (the swap landed during the wait
+        ;; above), so the BIOS slot probe finds the new ROM's 'AB'.
+        ;; This replaces the v303 BIOS stack-layout patch (compare the
+        ;; INIT return against 0x7DA3, patch the frame to the 0xE100
+        ;; stub, jp 0x7D84) - those are BIOS-version-specific addresses,
+        ;; and RST 0 is equivalent because the hard-reset test proved a
+        ;; plain cold boot works on this machine.
         rst     0
 
 wait:

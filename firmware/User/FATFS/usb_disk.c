@@ -43,6 +43,27 @@
 #define RISKY_DEBUG 0
 #endif
 
+/* PSRAM load path selector:
+ *   0 = PSRAM peripheral DMA burst engine (the original path)
+ *   1 = synchronous CPU word copy
+ *
+ * Why this switch exists: at HCLK 200 MHz the PSRAM device is hardwired to
+ * 2x HCLK = 400 MHz DDR (the PSRAM peripheral has NO clock divider), and the
+ * PSRAM DMA burst engine wedges there - the load hangs at a random chunk
+ * ("PSRAM DMA stuck", repeatable at 200 MHz, fine at 175 MHz). The CPU
+ * single-access path is NOT affected: the boot self-test (psram_test_at, CPU
+ * byte write+readback at three offsets) and the psram_copy_rom 4 MiB CPU fill
+ * both complete at 400 MHz, and mapper-RAM reads are served normally. A
+ * synchronous word copy therefore sidesteps the failing burst engine and uses
+ * the proven path.
+ *
+ * Cost: ~16-20 HCLK/word, i.e. ~13 us per 512 B chunk and ~210 ms for an
+ * 8 MiB image - fine for a load, and it keeps the same per-chunk ~WAIT hold
+ * structure. Set to 0 to A/B against the DMA path. */
+#ifndef USB_PSRAM_SYNC_COPY
+#define USB_PSRAM_SYNC_COPY 1
+#endif
+
 /* ------------------------------------------------------------------------ */
 /* Buffer placement (PSRAM)                                                 */
 /* ------------------------------------------------------------------------ */
@@ -895,6 +916,7 @@ static uint32_t s_dbg_count = 0U;
  * SCSI layer). */
 static uint32_t s_chunk_dbg = 0U;
 
+#if !USB_PSRAM_SYNC_COPY
 static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
                                uint32_t byte_count) {
     if ((byte_count & 3U) != 0U) return 1;        /* must be 4-byte aligned */
@@ -973,6 +995,60 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
      * and the MSX-side poll loop resumes). */
     Cart_HoldMSXWait_End ();
     return rc;
+}
+#endif /* !USB_PSRAM_SYNC_COPY */
+
+#if USB_PSRAM_SYNC_COPY
+/* Synchronous (CPU) SRAM -> PSRAM copy. See USB_PSRAM_SYNC_COPY above for
+ * why this replaces the PSRAM DMA burst engine at HCLK 200 MHz.
+ *
+ * Word (32-bit) stores keep the PSRAM controller's preferred access size.
+ * No head/tail handling is needed: the caller always hands us s_sector_buf
+ * (4-byte aligned) and a per-chunk length that is a multiple of 4, so both
+ * source and destination stay aligned for the whole loop. */
+static uint8_t psram_sync_copy (const uint8_t *sram_src, uint32_t psram_addr,
+                                uint32_t byte_count) {
+    if ((byte_count & 3U) != 0U) return 1;        /* must be 4-byte aligned */
+    if (((uint32_t)sram_src & 3U) != 0U) return 1;
+    if (byte_count == 0U) return 0;
+
+    if (s_dbg_count < USB_DMA_DBG_CHUNKS) {
+        printf ("USB:   SYNC[%lu] sram=0x%08lx psram=0x%08lx bytes=%lu\r\n",
+                (unsigned long)s_dbg_count, (unsigned long)sram_src,
+                (unsigned long)psram_addr, (unsigned long)byte_count);
+        s_dbg_count++;
+    }
+
+    /* Same ~WAIT contract as the DMA path: hold the Z80 for the duration of
+     * the copy so its FIFO poll loop cannot re-enter the cart handler and
+     * interleave PSRAM accesses with us. The handler early-returns while
+     * held (see cart.c::s_msx_wait_held). */
+    Cart_HoldMSXWait_Begin ();
+
+    volatile uint32_t *dst = (volatile uint32_t *)psram_addr;
+    const    uint32_t *src = (const uint32_t *)sram_src;
+    uint32_t words = byte_count / 4U;
+    for (uint32_t i = 0U; i < words; i++) {
+        dst[i] = src[i];
+    }
+    /* Ensure the final PSRAM store has retired before ~WAIT is released and
+     * the Z80 reads the byte back. */
+    __asm__ volatile ("fence" ::: "memory");
+
+    Cart_HoldMSXWait_End ();
+    return 0U;
+}
+#endif /* USB_PSRAM_SYNC_COPY */
+
+/* Dispatch: pick the configured SRAM -> PSRAM copy engine. */
+static inline uint8_t psram_copy_chunk (const uint8_t *sram_src,
+                                        uint32_t psram_addr,
+                                        uint32_t byte_count) {
+#if USB_PSRAM_SYNC_COPY
+    return psram_sync_copy (sram_src, psram_addr, byte_count);
+#else
+    return psram_dma_copy (sram_src, psram_addr, byte_count);
+#endif
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1258,9 +1334,10 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
                     (unsigned long)chunk);
         }
 
-        if (psram_dma_copy (s_sector_buf, psram_addr + total, (uint32_t)br) != 0U) {
-            printf ("USB: PSRAM DMA copy FAILED at offset %lu, len %u "
-                    "(alignment or DMA error)\r\n",
+        if (psram_copy_chunk (s_sector_buf, psram_addr + total,
+                              (uint32_t)br) != 0U) {
+            printf ("USB: PSRAM copy FAILED at offset %lu, len %u "
+                    "(alignment or copy error)\r\n",
                     (unsigned long)total, (unsigned)br);
             break;
         }

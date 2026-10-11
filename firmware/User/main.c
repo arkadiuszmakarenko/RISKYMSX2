@@ -96,7 +96,7 @@ int main (void) {
     RawDisk_Init ();
     Terminal_Reset ();
     Cart_SetMapper_Safe (CART_MAP_TERMINAL);
-    Delay_Ms(100);
+    Delay_Ms(500);
     /* USB and the disk backend are now ready for the first Nextor
      * mailbox request. Release WAIT and let the held BIOS cycle finish. */
     Cart_HoldMSXWait_End ();
@@ -141,6 +141,28 @@ int main (void) {
                 s_cyc_to_seen = cyc_to;
                 printf ("CART: cycle-end spin timeout x%lu (SLTSL never rose)\r\n",
                         (unsigned long)cyc_to);
+            }
+        }
+
+        /* Mapper-RAM read timing. Trigger on the error counter and on a
+         * new worst-case cycle count (both bounded), never on the raw
+         * read count, so a hammered mapper cannot flood the UART. See
+         * the block above Cart_DriveSlottedPSRAMByte() in cart.c. */
+        {
+            static uint32_t s_mar_late_seen = 0U;
+            static uint32_t s_mar_max_seen = 0U;
+            uint32_t late = g_cart_slotted_late;
+            uint32_t mx = g_cart_slotted_cyc_max;
+            if (late != s_mar_late_seen || mx != s_mar_max_seen) {
+                const uint32_t mn = (g_cart_slotted_cyc_min == 0xFFFFFFFFU)
+                                  ? 0U : g_cart_slotted_cyc_min;
+                s_mar_late_seen = late;
+                s_mar_max_seen = mx;
+                printf ("CART: mapper-RAM reads=%lu late=%lu cycles=%lu..%lu\r\n",
+                        (unsigned long)g_cart_slotted_reads,
+                        (unsigned long)late,
+                        (unsigned long)mn,
+                        (unsigned long)mx);
             }
         }
 

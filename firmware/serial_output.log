@@ -1,0 +1,2269 @@
+øwôüóÿüş~÷şÿÿÿÿğÿø
+=== boot complete (terminal`mappoò >ÿş?ÿÿ[raw] USB drive: 7821>.~ÿûÿÿøCART: mapper-RAM reads=1 late=1 cycles=78..78
+CART: mapper-RAM reads=› lcteıŸ`ãolÛç·öü¿>ÏïŸCART: mapper-RAM reads=7 latg=7 ¾şüşïûüâÿx¾ÏÿüøüCART: mapper-RAM reads=9 late=9 cycles=78..78
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:175000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=1 cycles=78..78
+CART: mapper-RAM reads=6 late=6 cycles=78..78
+CART: mapper-RAM reads=7 late=7 cycles=78..78
+CART: mapper-RAM reads=8 late=8 cycles=78..78
+CART: mapper-RAM reads=9 late=9 cycles=78..78
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:175000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=79..79
+CART: mapper-RAM reads=291 late=0 cycles=79..80
+CART: mapper-RAM reads=2675 late=0 cycles=79..81
+CART: mapper-RAM reads=5344 late=0 cycles=79..82
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=79..79
+CART: mapper-RAM reads=204 late=0 cycles=79..80
+CART: mapper-RAM reads=2157 late=0 cycles=79..81
+CART: mapper-RAM reads=29500 late=0 cycles=79..82
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=16667 late=0 cycles=79..82
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=79..79
+CART: mapper-RAM reads=1505 late=0 cycles=79..80
+CART: mapper-RAM reads=1828 late=0 cycles=79..81
+CART: mapper-RAM reads=12230 late=0 cycles=79..82
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x6E sel=20 count=38 page=1
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=79..79
+CART: mapper-RAM reads=62 late=0 cycles=79..80
+CART: mapper-RAM reads=2922 late=0 cycles=79..81
+CART: mapper-RAM reads=31433 late=0 cycles=79..82
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   DMA[0] sram=0x200009ac psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   DMA[1] sram=0x200009ac psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   DMA[2] sram=0x200009ac psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   DMA[3] sram=0x200009ac psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=79..79
+CART: mapper-RAM reads=351 late=0 cycles=79..80
+CART: mapper-RAM reads=7908 late=0 cycles=79..81
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=16670 late=0 cycles=78..80
+CART: mapper-RAM reads=37635 late=0 cycles=78..81
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=248 late=0 cycles=78..79
+CART: mapper-RAM reads=312 late=0 cycles=78..80
+CART: mapper-RAM reads=713 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TI (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009ac psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009ac psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009ac psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009ac psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=62 late=0 cycles=78..79
+CART: mapper-RAM reads=2447 late=0 cycles=78..80
+CART: mapper-RAM reads=45401 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1F sel=0 count=38 page=0
+TERM: list key=0x1F sel=1 count=38 page=0
+TERM: list key=0x1E sel=2 count=38 page=0
+TERM: list key=0x1E sel=1 count=38 page=0
+TERM: list key=0x0D sel=0 count=38 page=0
+TERM: RET on dir [GAMES] -> descend, cwd now [GAMES/]
+TERM:   dir [1] SFN=[BINS] LFN=[BINs]
+TERM:   dir [2] SFN=[DSKS] LFN=[DSKs]
+TERM:   dir [3] SFN=[ROMS] LFN=[ROMs]
+TERM: list key=0x1F sel=0 count=4 page=0
+TERM: list key=0x1F sel=1 count=4 page=0
+TERM: list key=0x1F sel=2 count=4 page=0
+TERM: list key=0x0D sel=3 count=4 page=0
+TERM: RET on dir [ROMS] -> descend, cwd now [GAMES/ROMS/]
+TERM:   dir [1] SFN=[MSX2~1] LFN=[MSX 2]
+TERM:   dir [2] SFN=[MSX1-M~1] LFN=[MSX 1 - Megaram]
+TERM:   dir [3] SFN=[MSX1-4~1] LFN=[MSX 1 - 48k]
+TERM:   file[4] SFN=[MSXROMS.ZIP] LFN=[MSXROMs.zip] sz=18952388
+TERM:   file[5] SFN=[_NEEDE~1.TXT] LFN=[_needed_updated_12june.txt] sz=1531
+TERM: list key=0x1F sel=0 count=6 page=0
+TERM: list key=0x1F sel=1 count=6 page=0
+TERM: list key=0x0D sel=2 count=6 page=0
+TERM: RET on dir [MSX1-M~1] -> descend, cwd now [GAMES/ROMS/MSX1-M~1/]
+TERM:   file[1] SFN=[HYDLID~1.ROM] LFN=[Hydlide 3 (msx1).rom] sz=524288
+TERM:   file[2] SFN=[NEMESI~1.ROM] LFN=[Nemesis 3 (set 2).rom] sz=262144
+TERM:   file[3] SFN=[DRAGON~1.ROM] LFN=[Dragon Slayer 4 (msx1).rom] sz=262144
+TERM:   file[4] SFN=[3KINGD~1.ROM] LFN=[3 Kingdoms.rom] sz=262144
+TERM:   file[5] SFN=[SUPERL~1.ROM] LFN=[Super Laydock.rom] sz=262144
+TERM:   file[6] SFN=[NEMESI~2.ROM] LFN=[Nemesis 3 (Jap).rom] sz=262144
+TERM:   file[7] SFN=[KNIGHT~1.ROM] LFN=[Knightmare 3 - Shalom.rom] sz=262144
+TERM:   file[8] SFN=[NEMESI~3.ROM] LFN=[Nemesis 3 (Korea).rom] sz=262144
+TERM:   file[9] SFN=[DAIVAS~1.ROM] LFN=[Daiva Story 4.rom] sz=262144
+TERM:   file[10] SFN=[DRAGON~2.ROM] LFN=[Dragon Slayer 2 - Xanadu.rom] sz=262144
+TERM:   file[11] SFN=[FANTAS~1.ROM] LFN=[Fantasy Zone.rom] sz=131072
+TERM:   file[12] SFN=[FINALZ~1.ROM] LFN=[FinalZone (set 1).rom] sz=131072
+TERM:   file[13] SFN=[FINALZ~2.ROM] LFN=[FinalZone (set 2).rom] sz=131072
+TERM:   file[14] SFN=[GOLVEL~1.ROM] LFN=[Golvellius.rom] sz=131072
+TERM:   file[15] SFN=[FANTAS~2.ROM] LFN=[Fantasm Soldier - Valis.rom] sz=131072
+TERM:   file[16] SFN=[1942(M~1.ROM] LFN=[1942 (msx1)(set 3).rom] sz=131072
+TERM:   file[17] SFN=[FAIRYL~1.ROM] LFN=[Fairy Land Story, The (set 2).rom] sz=131072
+TERM:   file[18] SFN=[FAIRYL~2.ROM] LFN=[Fairy Land Story, The (set 1).rom] sz=131072
+TERM:   file[19] SFN=[DARWIN~1.ROM] LFN=[Darwin 4078 (set 1).rom] sz=131072
+TERM:   file[20] SFN=[HYDLID~2.ROM] LFN=[Hydlide 2 (set 1).rom] sz=131072
+TERM:   file[21] SFN=[F1SPIR~1.ROM] LFN=[F1 Spirit.rom] sz=131072
+TERM:   file[22] SFN=[HYDLID~3.ROM] LFN=[Hydlide 2 (set 2).rom] sz=131072
+TERM:   file[23] SFN=[GODDESS.ROM] LFN=[Goddess.rom] sz=131072
+TERM:   file[24] SFN=[1942(M~2.ROM] LFN=[1942 (msx1)(set 1).rom] sz=131072
+TERM:   file[25] SFN=[JAGUR(~1.ROM] LFN=[Jagur (set 1).rom] sz=131072
+TERM:   file[26] SFN=[ELSLID.ROM] LFN=[Elslid.rom] sz=131072
+TERM:   file[27] SFN=[CRAZE.ROM] LFN=[Craze.rom] sz=131072
+TERM:   file[28] SFN=[DARWIN~2.ROM] LFN=[Darwin 4078 (set 2).rom] sz=131072
+TERM:   file[29] SFN=[EGGERL~1.ROM] LFN=[Eggerland Mystery 2 (set 3).rom] sz=131072
+TERM:   file[30] SFN=[EGGERL~2.ROM] LFN=[Eggerland Mystery 2 (set 2).rom] sz=131072
+TERM:   file[31] SFN=[EGGERL~3.ROM] LFN=[Eggerland Mystery 2 (set 1).rom] sz=131072
+TERM:   file[32] SFN=[JAGUR(~2.ROM] LFN=[Jagur (set 2).rom] sz=131072
+TERM:   file[33] SFN=[GALLFO~1.ROM] LFN=[Gall Force.rom] sz=131072
+TERM:   file[34] SFN=[GALLFO~2.ROM] LFN=[Gall Force - Defence of Chaos.rom] sz=131072
+TERM:   file[35] SFN=[1942(M~3.ROM] LFN=[1942 (msx1)(set 2).rom] sz=131072
+TERM:   file[36] SFN=[ALIENS.ROM] LFN=[Aliens.rom] sz=131072
+TERM:   file[37] SFN=[NEMESI~4.ROM] LFN=[Nemesis 2 (set 2).rom] sz=131072
+TERM:   file[38] SFN=[PARODI~1.ROM] LFN=[Parodius (set 1).rom] sz=131072
+TERM:   file[39] SFN=[SALAMA~1.ROM] LFN=[Salamander.rom] sz=131072
+TERM:   file[40] SFN=[THREEE~1.ROM] LFN=[Three Eyed One, The (set 1).rom] sz=131072
+TERM:   file[41] SFN=[A1SPIR~1.ROM] LFN=[A1 Spirit (F1 Spirit hack).rom] sz=131072
+TERM:   file[42] SFN=[KARUIZ~1.ROM] LFN=[Karuizawa.rom] sz=131072
+TERM:   file[43] SFN=[KING'S~1.ROM] LFN=[King's Valley 2 (msx1).rom] sz=131072
+TERM:   file[44] SFN=[KNIGHT~2.ROM] LFN=[Knightmare 2 - The Maze of Galious.rom] sz=131072
+TERM:   file[45] SFN=[NEMESI~5.ROM] LFN=[Nemesis 2 (set 1).rom] sz=131072
+TERM:   file[46] SFN=[MAGNUM~1.ROM] LFN=[Magnum (J).rom] sz=131072
+TERM:   file[47] SFN=[KINDKN~1.ROM] LFN=[Kind Knight.rom] sz=131072
+TERM:   file[48] SFN=[NEMESIS.ROM] LFN=[Nemesis.rom] sz=131072
+TERM:   file[49] SFN=[ZZZ_UN~1.ROM] LFN=[ZZZ_UNK_Animal.rom] sz=131072
+TERM:   file[50] SFN=[PARODI~2.ROM] LFN=[Parodius (set 2).rom] sz=131072
+TERM:   file[51] SFN=[PENGUI~1.ROM] LFN=[Penguin Adventure.rom] sz=131072
+TERM:   file[52] SFN=[THREEE~2.ROM] LFN=[Three Eyed One, The (set 2).rom] sz=131072
+TERM:   file[53] SFN=[KONAMI~1.ROM] LFN=[Konami's Game Master 2.rom] sz=131072
+TERM:   file[54] SFN=[VAXOL-~1.ROM] LFN=[Vaxol - Heavy Armed Storming Vehicle.rom] sz=131072
+TERM:   file[55] SFN=[LEGEND~1.ROM] LFN=[Legendly Knight.rom] sz=131072
+TERM:   file[56] SFN=[NEMESI~6.ROM] LFN=[Nemesis 2 (Beta).rom] sz=131072
+TERM:   file[57] SFN=[CROSSB~1.ROM] LFN=[Cross Blaim.rom] sz=65536
+TERM:   file[58] SFN=[ZELDA.ZIP] LFN=[Zelda.zip] sz=37300
+TERM:   file[59] SFN=[KONAMI~2.ROM] LFN=[Konami's Game Master.rom] sz=16384
+TERM: list key=0x1F sel=0 count=60 page=0
+TERM: list key=0x1F sel=1 count=60 page=0
+TERM: list key=0x1F sel=2 count=60 page=0
+TERM: list key=0x1F sel=3 count=60 page=0
+TERM: list key=0x1F sel=4 count=60 page=0
+TERM: list key=0x1F sel=5 count=60 page=0
+TERM: list key=0x1E sel=6 count=60 page=0
+TERM: list key=0x0D sel=5 count=60 page=0
+TERM: picked file [A1SPIR~1.ROM] (cwd=[GAMES/ROMS/MSX1-M~1/]) -> mapper menu
+TERM: mapper key=0x1F sel=0
+TERM: mapper key=0x1F sel=1
+TERM: mapper key=0x1F sel=2
+TERM: mapper key=0x1F sel=3
+TERM: mapper key=0x0D sel=4
+TERM: mapper RET -> boot[4] A1SPIR~1.ROM
+TERM: BootCart start mapper=4 (Konami + SCC) file=[A1SPIR~1.ROM] cwd=[GAMES/ROMS/MSX1-M~1/]
+TERM: BootCart assembled path [0:/GAMES/ROMS/MSX1-M~1/A1SPIR~1.ROM]
+USB: FileToPSRAM path='0:/GAMES/ROMS/MSX1-M~1/A1SPIR~1.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=131072)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 131072
+USB: copy plan: 131072 bytes in 256 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009ac psram=0x80000000 bytes=512
+TERM: bar 0%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009ac psram=0x80000200 bytes=512
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009ac psram=0x80000400 bytes=512
+TERM: bar 1%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009ac psram=0x80000600 bytes=512
+USB: chunk 4 at offset 2048
+USB: chunk 5 at offset 2560
+TERM: bar 2%
+USB: chunk 6 at offset 3072
+USB: chunk 7 at offset 3584
+TERM: bar 3%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+TERM: bar 4%
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+TERM: bar 5%
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+TERM: bar 6%
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+TERM: bar 7%
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: chunk 32 at offset 16384
+USB: chunk 33 at offset 16896
+USB: chunk 34 at offset 17408
+USB: chunk 35 at offset 17920
+USB: chunk 36 at offset 18432
+USB: chunk 37 at offset 18944
+USB: chunk 38 at offset 19456
+USB: chunk 39 at offset 19968
+USB: chunk 40 at offset 20480
+USB: chunk 41 at offset 20992
+USB: chunk 42 at offset 21504
+USB: chunk 43 at offset 22016
+USB: chunk 44 at offset 22528
+USB: chunk 45 at offset 23040
+USB: chunk 46 at offset 23552
+USB: chunk 47 at offset 24064
+USB: chunk 48 at offset 24576
+USB: chunk 49 at offset 25088
+USB: chunk 50 at offset 25600
+USB: chunk 51 at offset 26112
+USB: chunk 52 at offset 26624
+USB: chunk 53 at offset 27136
+USB: chunk 54 at offset 27648
+USB: chunk 55 at offset 28160
+USB: chunk 56 at offset 28672
+USB: chunk 57 at offset 29184
+USB: chunk 58 at offset 29696
+USB: chunk 59 at offset 30208
+USB: chunk 60 at offset 30720
+USB: chunk 61 at offset 31232
+USB: chunk 62 at offset 31744
+USB: chunk 63 at offset 32256
+USB: chunk 64 at offset 32768
+USB: chunk 65 at offset 33280
+USB: chunk 66 at offset 33792
+USB: chunk 67 at offset 34304
+USB: chunk 68 at offset 34816
+USB: chunk 69 at offset 35328
+USB: chunk 70 at offset 35840
+USB: chunk 71 at offset 36352
+USB: chunk 72 at offset 36864
+USB: chunk 73 at offset 37376
+USB: chunk 74 at offset 37888
+USB: chunk 75 at offset 38400
+USB: chunk 76 at offset 38912
+USB: chunk 77 at offset 39424
+USB: chunk 78 at offset 39936
+USB: chunk 79 at offset 40448
+USB: chunk 80 at offset 40960
+USB: chunk 81 at offset 41472
+USB: chunk 82 at offset 41984
+USB: chunk 83 at offset 42496
+USB: chunk 84 at offset 43008
+USB: chunk 85 at offset 43520
+USB: chunk 86 at offset 44032
+USB: chunk 87 at offset 44544
+USB: chunk 88 at offset 45056
+USB: chunk 89 at offset 45568
+USB: chunk 90 at offset 46080
+USB: chunk 91 at offset 46592
+USB: chunk 92 at offset 47104
+USB: chunk 93 at offset 47616
+USB: chunk 94 at offset 48128
+USB: chunk 95 at offset 48640
+USB: chunk 96 at offset 49152
+USB: chunk 97 at offset 49664
+USB: chunk 98 at offset 50176
+USB: chunk 99 at offset 50688
+USB: chunk 100 at offset 51200
+USB: chunk 101 at offset 51712
+USB: chunk 102 at offset 52224
+USB: chunk 103 at offset 52736
+USB: chunk 104 at offset 53248
+USB: chunk 105 at offset 53760
+USB: chunk 106 at offset 54272
+USB: chunk 107 at offset 54784
+USB: chunk 108 at offset 55296
+USB: chunk 109 at offset 55808
+USB: chunk 110 at offset 56320
+USB: chunk 111 at offset 56832
+USB: chunk 112 at offset 57344
+USB: chunk 113 at offset 57856
+USB: chunk 114 at offset 58368
+USB: chunk 115 at offset 58880
+USB: chunk 116 at offset 59392
+USB: chunk 117 at offset 59904
+USB: chunk 118 at offset 60416
+USB: chunk 119 at offset 60928
+USB: chunk 120 at offset 61440
+USB: chunk 121 at offset 61952
+USB: chunk 122 at offset 62464
+USB: chunk 123 at offset 62976
+USB: chunk 124 at offset 63488
+USB: chunk 125 at offset 64000
+USB: chunk 126 at offset 64512
+USB: chunk 127 at offset 65024
+USB: chunk 128 at offset 65536
+USB: chunk 129 at offset 66048
+USB: chunk 130 at offset 66560
+USB: chunk 131 at offset 67072
+USB: chunk 132 at offset 67584
+USB: chunk 133 at offset 68096
+USB: chunk 134 at offset 68608
+USB: chunk 135 at offset 69120
+USB: chunk 136 at offset 69632
+USB: chunk 137 at offset 70144
+USB: chunk 138 at offset 70656
+USB: chunk 139 at offset 71168
+USB: chunk 140 at offset 71680
+USB: chunk 141 at offset 72192
+USB: chunk 142 at offset 72704
+USB: chunk 143 at offset 73216
+USB: chunk 144 at offset 73728
+USB: chunk 145 at offset 74240
+USB: chunk 146 at offset 74752
+USB: chunk 147 at offset 75264
+USB: chunk 148 at offset 75776
+USB: chunk 149 at offset 76288
+USB: chunk 150 at offset 76800
+USB: chunk 151 at offset 77312
+USB: chunk 152 at offset 77824
+USB: chunk 153 at offset 78336
+USB: chunk 154 at offset 78848
+USB: chunk 155 at offset 79360
+USB: chunk 156 at offset 79872
+USB: chunk 157 at offset 80384
+USB: chunk 158 at offset 80896
+USB: chunk 159 at offset 81408
+USB: chunk 160 at offset 81920
+USB: chunk 161 at offset 82432
+USB: chunk 162 at offset 82944
+USB: chunk 163 at offset 83456
+USB: chunk 164 at offset 83968
+USB: chunk 165 at offset 84480
+USB: chunk 166 at offset 84992
+USB: chunk 167 at offset 85504
+USB: chunk 168 at offset 86016
+USB: chunk 169 at offset 86528
+USB: chunk 170 at offset 87040
+USB: chunk 171 at offset 87552
+USB: chunk 172 at offset 88064
+USB: chunk 173 at offset 88576
+USB: chunk 174 at offset 89088
+USB: chunk 175 at offset 89600
+USB: chunk 176 at offset 90112
+USB: chunk 177 at offset 90624
+USB: chunk 178 at offset 91136
+USB: chunk 179 at offset 91648
+USB: chunk 180 at offset 92160
+USB: chunk 181 at offset 92672
+USB: chunk 182 at offset 93184
+USB: chunk 183 at offset 93696
+USB: chunk 184 at offset 94208
+USB: chunk 185 at offset 94720
+USB: chunk 186 at offset 95232
+USB: chunk 187 at offset 95744
+USB: chunk 188 at offset 96256
+USB: chunk 189 at offset 96768
+USB: chunk 190 at offset 97280
+USB: chunk 191 at offset 97792
+USB: chunk 192 at offset 98304
+USB: chunk 193 at offset 98816
+USB: chunk 194 at offset 99328
+USB: chunk 195 at offset 99840
+USB: chunk 196 at offset 100352
+USB: chunk 197 at offset 100864
+USB: chunk 198 at offset 101376
+USB: chunk 199 at offset 101888
+USB: chunk 200 at offset 102400
+USB: chunk 201 at offset 102912
+USB: chunk 202 at offset 103424
+USB: chunk 203 at offset 103936
+USB: chunk 204 at offset 104448
+USB: chunk 205 at offset 104960
+USB: chunk 206 at offset 105472
+USB: chunk 207 at offset 105984
+USB: chunk 208 at offset 106496
+USB: chunk 209 at offset 107008
+USB: chunk 210 at offset 107520
+USB: chunk 211 at offset 108032
+USB: chunk 212 at offset 108544
+USB: chunk 213 at offset 109056
+USB: chunk 214 at offset 109568
+USB: chunk 215 at offset 110080
+USB: chunk 216 at offset 110592
+USB: chunk 217 at offset 111104
+USB: chunk 218 at offset 111616
+USB: chunk 219 at offset 112128
+USB: chunk 220 at offset 112640
+USB: chunk 221 at offset 113152
+USB: chunk 222 at offset 113664
+USB: chunk 223 at offset 114176
+USB: chunk 224 at offset 114688
+USB: chunk 225 at offset 115200
+USB: chunk 226 at offset 115712
+USB: chunk 227 at offset 116224
+USB: chunk 228 at offset 116736
+USB: chunk 229 at offset 117248
+USB: chunk 230 at offset 117760
+USB: chunk 231 at offset 118272
+USB: chunk 232 at offset 118784
+USB: chunk 233 at offset 119296
+USB: chunk 234 at offset 119808
+USB: chunk 235 at offset 120320
+USB: chunk 236 at offset 120832
+USB: chunk 237 at offset 121344
+USB: chunk 238 at offset 121856
+USB: chunk 239 at offset 122368
+USB: chunk 240 at offset 122880
+USB: chunk 241 at offset 123392
+USB: chunk 242 at offset 123904
+USB: chunk 243 at offset 124416
+USB: chunk 244 at offset 124928
+USB: chunk 245 at offset 125440
+USB: chunk 246 at offset 125952
+USB: chunk 247 at offset 126464
+USB: chunk 248 at offset 126976
+USB: chunk 249 at offset 127488
+USB: chunk 250 at offset 128000
+USB: chunk 251 at offset 128512
+USB: chunk 252 at offset 129024
+USB: chunk 253 at offset 129536
+USB: chunk 254 at offset 130048
+USB: chunk 255 at offset 130560
+USB: copy done: 131072 / 131072 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=131072 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=c6 07 (want 41 42)
+TERM: WARNING MSX still draining (level=1046 after 600 ms) - launch text will queue behind it
+TERM: about to soft_reset_into_cart mapper=10 (PSRAM has 131072 bytes of '0:/GAMES/ROMS/MSX1-M~1/A1SPIR~1.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: WARNING FIFO not drained (level=1076 at swap time) - MSX has not read the 0x03 yet, it may show rubbish
+TERM: soft_reset swap mapper=10
+CART: SetMapper_Safe -> 10
+CART: SetMapper(10) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=92 late=0 cycles=78..79
+CART: mapper-RAM reads=9373 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slo°ted`ıìÿÜÿşÿ?ğøÿÿÿ=ÿ3û§?oğ¶üÇç¿ÿüüÿüüüööÿ^üøşCART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM 7ÙØ¶nÏ³VÆ£+ë?yl[¶ëw8~.Ïêüşóª?øãûşüøÿÿCART: mapper-RAM reads=4315 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: óoft_reset push 0x¸3à|ÿwO3ÿüüTERÍ: soft_reset swap mappev=1sÃøCA»şz`ÓÛ¾ßü‡¿¿îìşûïÿÿCART: SetMapper(13) -> rc=0
+ÿïşÿÇÿÿÿÿLÿøÿÿÿşPSRAM ready: slotted mapper at PSRAM+0x8psÜÏü»şığÿüşşÿèÿûü[raw] USB drive: 7821312 sectors(fÎşvæÿÍÇCART: mapper-RAM reads=1 ´Ú·{;ûü{¶ûşÃó÷Ã=CART: mapper-RAM reads=936 late=0 cycles=78..yÖCART: mapper-RAM reads=23515 late=0 gycles=78..81
+ÜõMøØ÷üşÈ¿ İøøÿäãÚ¾Üÿÿüü¿ÿ~ßüşÏüFAT:`mounteäÿÈşşşüÿÿ÷ûÿÿTERM: list key=0x1C sel=0 count=38 °agmı0€TERM: list key=0x1F sel=20 count=38 pageÏÌÇøTERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page}1TERM: list key=0x1F sel=29 count=38geÖÜTERM: list key=0x0D n6ÿ6‚ÿ}ºîÇ0|ÿ¿¿ÿ
+ü|î}íş/¾Øÿÿÿÿÿÿÿüüş¼¸ÿôÿÏûşğÿÜÿüÿïøÿßÿÿÿß?|æÿğåî°şûÿşÿÿÏïÿÿÿïÿUWB:   SYNÃkÖs»üÏ|gƒ&¶|ğørûë¸üøüØ¸¸¸¸<`ÿûşûûŞñşşÿÿÿÿÿÿÿşÿøÿÿÿşÕuß?hş}¾¾óÿ_ğ¾¿üŞUSB: chunk 10 at offset 51f
+USÂ: chunÿ nî£»»ö·6}¿s™Ìü|ïlß°™ø|ÿÿ÷÷?ÿüÿ<øş~îğüÿğş¿÷ÿïöuğğğşÿôÿüÿÿşÿÿÿÿìşÿ¾ÿè|şwØ¿ğüÿğş?|ğú·?ÿÿ³ÿæÿFÌUSB: chunk 2f£ö33ómt`îÌvnë
+USB: chunk 24 at offset 12288
+mMÓ>C«s[nÍwûgÿÿÙ°îÿÿÃ½›¿6ÿ?î¶?ôàÿó?ÿÿÿßèÿøıøüğÿÿÿÎÿÿÿÿüŸü|ğ÷øTERM: about to soft_reset_into_cart ma¸per=1 (mO-ÓG~f³fNğŞşÙÿ³`2¿/şIçùÖÿş_
+Åğÿ¿ûßğşüÿÿÿÿTERM: soft_reset swap mapper=1
+CART: SetMappeò}-7+kæóŸş¿ÿÿşøşşSystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=954 late=0 cycles=78..79
+CART: mapper-RAM reads=1310 late=0 cycles=78..80
+CART: mapper-RAM reads=4270 late=0 cycles=78..81
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=534 late=0 cycles=78..79
+CART: mapper-RAM reads=3929 late=0 cycles=78..80
+CART: mapper-RAM reads=82189 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=513 late=0 cycles=78..80
+CART: mapper-RAM reads=55614 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009ac psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009ac psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009ac psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009ac psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+CART: mapper-RAM reads=2056529 late=1 cycles=61..83
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=937 late=0 cycles=78..79
+CART: mapper-RAM reads=8409 late=0 cycles=78..80
+CART: mapper-RAM reads=27828 late=0 cycles=78..81
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=204 late=0 cycles=78..79
+CART: mapper-RAM reads=740 late=0 cycles=78..80
+CART: mapper-RAM reads=5206 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: list key=0x09 sel=0 count=0 page=0
+TERM: list key=0x09 sel=0 count=0 page=0
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x0C sel=0 count=38 page=0
+TERM: list key=0x09 sel=0 count=38 page=0
+TERM: list key=0x09 sel=0 count=38 page=0
+TERM: list key=0x0C sel=0 count=38 page=0
+TERM: list key=0x09 sel=0 count=38 page=0
+TERM: list key=0x09 sel=0 count=38 page=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=456 late=0 cycles=78..80
+CART: mapper-RAM reads=36853 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=203 late=0 cycles=78..79
+CART: mapper-RAM reads=1826 late=0 cycles=78..80
+CART: mapper-RAM reads=18219 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: list key=0x1E sel=0 count=0 page=0
+TERM: list key=0x1E sel=0 count=0 page=0
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0xFD sel=0 count=38 pa
+TERM: list key=0x1E sel=0 count=38 page=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=374 late=0 cycles=78..80
+CART: mapper-RAM reads=48936 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=62 late=0 cycles=78..79
+CART: mapper-RAM reads=3629 late=0 cycles=78..80
+CART: mapper-RAM reads=21806 late=0 cycles=78..81
+CART: mapper-RAM reads=62249 late=0 cycles=78..82
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=121 late=0 cycles=78..79
+CART: mapper-RAM reads=6585 late=0 cycles=78..80
+CART: mapper-RAM reads=28595 late=0 cycles=78..81
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=275 late=0 cycles=78..79
+CART: mapper-RAM reads=1733 late=0 cycles=78..80
+CART: mapper-RAM reads=9295 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: hard_reset assert
+TERM: hard_reset set mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: hard_reset release
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=89 late=0 cycles=78..79
+CART: mapper-RAM reads=3662 late=0 cycles=78..80
+CART: mapper-RAM reads=9839 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: hard_reset assert
+TERM: hard_reset set mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: hard_reset release
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=559 late=0 cycles=78..80
+CART: mapper-RAM reads=60002 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=484 late=0 cycles=78..79
+CART: mapper-RAM reads=664 late=0 cycles=78..80
+CART: mapper-RAM reads=35116 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009ac psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009ac psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009ac psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009ac psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=806 late=0 cycles=78..79
+CART: mapper-RAM reads=3536 late=0 cycles=78..80
+CART: mapper-RAM reads=52086 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=799 late=0 cycles=78..79
+CART: mapper-RAM reads=2079 late=0 cycles=78..80
+CART: mapper-RAM reads=7393 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x1F sel=0
+TERM: mapper key=0x1E sel=1
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009ac psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009ac psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009ac psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009ac psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=326 late=0 cycles=78..80
+CART: mapper-RAM reads=2851 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=312 late=0 cycles=78..79
+CART: mapper-RAM reads=1148 late=0 cycles=78..80
+CART: mapper-RAM reads=24591 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=471 late=0 cycles=78..80
+CART: mapper-RAM reads=12580 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009ac psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009ac psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009ac psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009ac psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, cycle-timeouts +0
+CART: mapper-RAM reads=1546656 late=0 cycles=61..85
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=795 late=0 cycles=78..79
+CART: mapper-RAM reads=5096 late=0 cycles=78..80
+CART: mapper-RAM reads=11602 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=129 late=0 cycles=78..79
+CART: mapper-RAM reads=2976 late=0 cycles=78..80
+CART: mapper-RAM reads=18196 late=0 cycles=78..81
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=520 late=0 cycles=78..79
+CART: mapper-RAM reads=1385 late=0 cycles=78..80
+CART: mapper-RAM reads=62596 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, game-image reads +0 (late=0, cycles 0..0), cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=632 late=0 cycles=78..79
+CART: mapper-RAM reads=1817 late=0 cycles=78..80
+CART: mapper-RAM reads=58069 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009c0 psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009c0 psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009c0 psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009c0 psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: WARNING MSX still draining (level=1055 after 600 ms) - launch text will queue behind it
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: WARNING FIFO not drained (level=1085 at swap time) - MSX has not read the 0x03 yet, it may show rubbish
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, game-image reads +0 (late=0, cycles 0..0), cycle-timeouts +0
+CART: cycle-end spin timeout x1 (SLTSL never rose)
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=103 late=0 cycles=78..79
+CART: mapper-RAM reads=3868 late=0 cycles=78..80
+CART: mapper-RAM reads=34469 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, game-image reads +0 (late=0, cycles 0..0), cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=1029 late=0 cycles=78..79
+CART: mapper-RAM reads=3031 late=0 cycles=78..80
+CART: mapper-RAM reads=17547 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009c0 psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009c0 psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009c0 psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009c0 psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, game-image reads +0 (late=0, cycles 0..0), cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=148 late=0 cycles=78..79
+CART: mapper-RAM reads=1557 late=0 cycles=78..80
+CART: mapper-RAM reads=10343 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, game-image reads +0 (late=0, cycles 0..0), cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=756 late=0 cycles=78..79
+CART: mapper-RAM reads=4726 late=0 cycles=78..80
+CART: mapper-RAM reads=16192 late=0 cycles=78..81
+TERM: boot gate -> GRAPH not held, booting Nextor
+TERM: N -> NEXTOR
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=13
+CART: SetMapper_Safe -> 13
+CART: SetMapper(13) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, game-image reads +0 (late=0, cycles 0..0), cycle-timeouts +0
+SystemClk:200000000
+ChipID:46730010
+PSRAM ready: slotted mapper at PSRAM+0x80400000
+CART: SetMapper_Safe -> 12
+CART: SetMapper(12) -> rc=0
+
+=== boot complete (terminal mapper active) ===
+[raw] USB drive: 7821312 sectors (3910656 KB), vendor='TDK' product=''
+CART: mapper-RAM reads=1 late=0 cycles=78..78
+CART: mapper-RAM reads=62 late=0 cycles=78..80
+CART: mapper-RAM reads=16481 late=0 cycles=78..81
+TERM: boot gate -> GRAPH held, terminal menu
+TERM: v8 (USB manager) - first service, scanning USB
+FAT: mounted on 0:
+TERM:   dir [0] SFN=[SAVES] LFN=[SAVES]
+TERM:   dir [1] SFN=[TMP] LFN=[TMP]
+TERM:   dir [2] SFN=[SETTINGS] LFN=[SETTINGS]
+TERM:   dir [3] SFN=[SOFA] LFN=[sofa]
+TERM:   dir [4] SFN=[GAMES] LFN=[GAMES]
+TERM:   dir [5] SFN=[TINY] LFN=[tiny]
+TERM:   file[6] SFN=[CHKDSK.COM] LFN=[CHKDSK.COM] sz=10142
+TERM:   file[7] SFN=[CONCLUS.COM] LFN=[CONCLUS.COM] sz=1445
+TERM:   file[8] SFN=[DELALL.COM] LFN=[DELALL.COM] sz=1383
+TERM:   file[9] SFN=[DEVINFO.COM] LFN=[DEVINFO.COM] sz=2037
+TERM:   file[10] SFN=[DISKCOPY.COM] LFN=[DISKCOPY.COM] sz=9051
+TERM:   file[11] SFN=[DRIVERS.COM] LFN=[DRIVERS.COM] sz=1319
+TERM:   file[12] SFN=[DRVINFO.COM] LFN=[DRVINFO.COM] sz=1525
+TERM:   file[13] SFN=[DRVROP.COM] LFN=[DRVROP.COM] sz=6397
+TERM:   file[14] SFN=[DRVTEST.COM] LFN=[DRVTEST.COM] sz=7441
+TERM:   file[15] SFN=[EMUFILE.COM] LFN=[EMUFILE.COM] sz=12398
+TERM:   file[16] SFN=[EPTCFT.COM] LFN=[EPTCFT.COM] sz=5616
+TERM:   file[17] SFN=[FASTOUT.COM] LFN=[FASTOUT.COM] sz=1239
+TERM:   file[18] SFN=[FIXDISK.COM] LFN=[FIXDISK.COM] sz=3334
+TERM:   file[19] SFN=[FSIZE.COM] LFN=[FSIZE.COM] sz=4168
+TERM:   file[20] SFN=[KMODE.COM] LFN=[KMODE.COM] sz=4353
+TERM:   file[21] SFN=[LOCK.COM] LFN=[LOCK.COM] sz=1690
+TERM:   file[22] SFN=[MAPDRV.COM] LFN=[MAPDRV.COM] sz=3986
+TERM:   file[23] SFN=[NEXBOOT.COM] LFN=[NEXBOOT.COM] sz=7191
+TERM:   file[24] SFN=[NSYSVER.COM] LFN=[NSYSVER.COM] sz=1652
+TERM:   file[25] SFN=[RALLOC.COM] LFN=[RALLOC.COM] sz=1659
+TERM:   file[26] SFN=[UNDEL.COM] LFN=[UNDEL.COM] sz=7019
+TERM:   file[27] SFN=[VSFT.COM] LFN=[VSFT.COM] sz=5258
+TERM:   file[28] SFN=[XCOPY.COM] LFN=[XCOPY.COM] sz=13493
+TERM:   file[29] SFN=[XDIR.COM] LFN=[XDIR.COM] sz=7905
+TERM:   file[30] SFN=[Z80MODE.COM] LFN=[Z80MODE.COM] sz=1916
+TERM:   file[31] SFN=[COMMAND3.COM] LFN=[COMMAND3.COM] sz=28469
+TERM:   file[32] SFN=[NEXTOR.SYS] LFN=[NEXTOR.SYS] sz=4533
+TERM:   file[33] SFN=[TINY.ROM] LFN=[tiny.ROM] sz=16384
+TERM:   file[34] SFN=[TST.ROM] LFN=[tst.rom] sz=16384
+TERM:   file[35] SFN=[TSTSE.ROM] LFN=[tstse.rom] sz=16384
+TERM:   file[36] SFN=[DOSSCAN.COM] LFN=[DOSSCAN.COM] sz=2140
+TERM:   file[37] SFN=[TESTRAM.COM] LFN=[TESTRAM.COM] sz=8448
+TERM: scan_usb -> count=38
+TERM: list key=0x1C sel=0 count=38 page=0
+TERM: list key=0x1F sel=20 count=38 page=1
+TERM: list key=0x1F sel=21 count=38 page=1
+TERM: list key=0x1F sel=22 count=38 page=1
+TERM: list key=0x1F sel=23 count=38 page=1
+TERM: list key=0x1F sel=24 count=38 page=1
+TERM: list key=0x1F sel=25 count=38 page=1
+TERM: list key=0x1F sel=26 count=38 page=1
+TERM: list key=0x1F sel=27 count=38 page=1
+TERM: list key=0x1F sel=28 count=38 page=1
+TERM: list key=0x1F sel=29 count=38 page=1
+TERM: list key=0x0D sel=30 count=38 page=1
+TERM: picked file [TINY.ROM] (cwd=[]) -> mapper menu
+TERM: mapper key=0x0D sel=0
+TERM: mapper RET -> boot[0] TINY.ROM
+TERM: BootCart start mapper=0 (Standard 16KB ROM) file=[TINY.ROM] cwd=[]
+TERM: BootCart assembled path [0:/TINY.ROM]
+USB: FileToPSRAM path='0:/TINY.ROM' psram=0x80000000 len=0
+USB: volume mounted OK
+USB: f_open OK (size=16384)
+USB: PSRAM addr in range (offset 0, game window 4194304 bytes)
+USB: len=0 -> using file size 16384
+USB: copy plan: 16384 bytes in 32 x 512-byte chunks
+USB: chunk 0 at offset 0
+USB:   SYNC[0] sram=0x200009c0 psram=0x80000000 bytes=512
+TERM: bar 3%
+USB: chunk 1 at offset 512
+USB:   SYNC[1] sram=0x200009c0 psram=0x80000200 bytes=512
+TERM: bar 6%
+USB: chunk 2 at offset 1024
+USB:   SYNC[2] sram=0x200009c0 psram=0x80000400 bytes=512
+TERM: bar 9%
+USB: chunk 3 at offset 1536
+USB:   SYNC[3] sram=0x200009c0 psram=0x80000600 bytes=512
+TERM: bar 12%
+USB: chunk 4 at offset 2048
+TERM: bar 15%
+USB: chunk 5 at offset 2560
+TERM: bar 18%
+USB: chunk 6 at offset 3072
+TERM: bar 21%
+USB: chunk 7 at offset 3584
+TERM: bar 25%
+USB: chunk 8 at offset 4096
+USB: chunk 9 at offset 4608
+USB: chunk 10 at offset 5120
+USB: chunk 11 at offset 5632
+USB: chunk 12 at offset 6144
+USB: chunk 13 at offset 6656
+USB: chunk 14 at offset 7168
+USB: chunk 15 at offset 7680
+USB: chunk 16 at offset 8192
+USB: chunk 17 at offset 8704
+USB: chunk 18 at offset 9216
+USB: chunk 19 at offset 9728
+USB: chunk 20 at offset 10240
+USB: chunk 21 at offset 10752
+USB: chunk 22 at offset 11264
+USB: chunk 23 at offset 11776
+USB: chunk 24 at offset 12288
+USB: chunk 25 at offset 12800
+USB: chunk 26 at offset 13312
+USB: chunk 27 at offset 13824
+USB: chunk 28 at offset 14336
+USB: chunk 29 at offset 14848
+USB: chunk 30 at offset 15360
+USB: chunk 31 at offset 15872
+USB: copy done: 16384 / 16384 bytes (100%), last f_read FRESULT=0
+USB: closing file, final result COMPLETE
+TERM: USB_FileToPSRAM got=16384 (expected full file)
+TERM: PSRAM verify [0000]=41 42 | [4000]=ff ff (want 41 42)
+TERM: about to soft_reset_into_cart mapper=1 (PSRAM has 16384 bytes of '0:/TINY.ROM')
+TERM: soft_reset push 0x03 to FIFO
+TERM: soft_reset swap mapper=1
+CART: SetMapper_Safe -> 1
+CART: SetMapper(1) -> rc=0
+TERM: post-launch: mapper-RAM reads +0, game-image reads +0 (late=0, cycles 0..0), cycle-timeouts +0
+CART: mapper-RAM reads=1222298 late=0 cycles=61..83
