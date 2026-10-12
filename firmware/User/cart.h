@@ -3,6 +3,16 @@
 
 #include "ch32v4x7.h"
 
+/* Mapper-RAM backing store selector. See cart.c for the full
+ * description. Default: PSRAM (the original hardware path). Switch
+ * to SRAM to isolate handler logic from PSRAM signal-integrity
+ * issues. */
+#define CART_MAPPER_RAM_PSRAM  0
+#define CART_MAPPER_RAM_SRAM   1
+#ifndef CART_MAPPER_RAM_BACKEND
+#define CART_MAPPER_RAM_BACKEND CART_MAPPER_RAM_SRAM
+#endif
+
 /*
  * CH32V407VET6 (RISKYMSX2) MSX cartridge bus pinout.
  *

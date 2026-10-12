@@ -73,6 +73,21 @@ int main (void) {
      * PSRAM-backed cart images. */
     {
         const uint8_t psram_status = PSRAM_Init ();
+        /* In SRAM-backed mapper mode, the mapper RAM is a cart.c array,
+         * not the PSRAM - so the PSRAM self-test result at 0x400000 is
+         * irrelevant for mapper readiness. Always mark the mapper ready
+         * in that mode. In PSRAM mode (default), the self-test result
+         * gates mapper readiness. */
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+        Cart_SetSlottedPSRAMReady (1U);
+        if (psram_status != PSRAM_OK) {
+            printf ("PSRAM init: status 0x%02X - mapper RAM is SRAM-backed, "
+                    "PSRAM failures ignored for mapper readiness\r\n",
+                    psram_status);
+        } else {
+            printf ("PSRAM ready (mapper RAM is SRAM-backed)\r\n");
+        }
+#else
         Cart_SetSlottedPSRAMReady (psram_status == PSRAM_OK);
         if (psram_status != PSRAM_OK) {
             printf ("PSRAM init failed: status 0x%02X - sub-slot 1 stays empty\r\n",
@@ -81,6 +96,7 @@ int main (void) {
             printf ("PSRAM ready: slotted mapper at PSRAM+0x%08X\r\n",
                     (unsigned)(PSRAM_CART_BASE + CART_SLOTTED_BANK_BASE_OFFSET));
         }
+#endif
 
     }
 

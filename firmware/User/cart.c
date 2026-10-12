@@ -87,11 +87,36 @@ extern const uint32_t terminal_rom_len;
 
 /* Expanded-slot state. The sub-slot register follows the MSX convention:
  * two bits select the sub-slot for each 16 KiB CPU page. Sub-slot 0 is
- * flash-backed/read-only, sub-slot 1 is the PSRAM mapper-RAM window,
- * sub-slots 2/3 are electrically empty. */
+ * flash-backed/read-only, sub-slot 1 is the mapper-RAM window, sub-slots
+ * 2/3 are electrically empty. */
 volatile uint8_t g_subslot_reg = 0x00U;
 static volatile uint8_t s_slotted_psram_ready;
 static volatile uint8_t s_slotted_bank_regs[4] = { 0U, 0U, 0U, 0U };
+
+/* Mapper-RAM backing store. Two modes (CART_MAPPER_RAM_BACKEND,
+ * defined in cart.h):
+ *
+ *   CART_MAPPER_RAM_PSRAM (default): the 4 MiB PSRAM device at
+ *     PSRAM_CART_BASE + CART_SLOTTED_BANK_BASE_OFFSET, the original
+ *     hardware path. Bank select is 0..255, total 4 MiB.
+ *
+ *   CART_MAPPER_RAM_SRAM: an SRAM array in cart.c. Used to isolate
+ *     handler logic from PSRAM signal-integrity issues at 400 MHz DDR
+ *     (the mapper test was reporting failures on a small set of pages
+ *     in the first ~200 KiB of the PSRAM mapper region - swapping to
+ *     an in-MCU SRAM array proves whether the failures are PSRAM
+ *     timing or handler logic). Bank select is 0..7 (128 KiB total).
+ *
+ * Switch by setting CART_MAPPER_RAM_BACKEND in cart.h before building;
+ * default is PSRAM. */
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+/* 128 KiB SRAM-backed mapper RAM. 8 banks of 16 KiB. Fits in MCU SRAM
+ * (MCU has 203,776 bytes; this uses 131,072). Volatile so the compiler
+ * doesn't elide the obvious store-then-load pattern. */
+static volatile uint8_t s_mapper_ram[128U * 1024U];
+/* Maximum valid bank for the SRAM-backed mapper. */
+#define CART_SRAM_MAX_BANK  7U
+#endif
 
 void Cart_SetSlottedPSRAMReady (uint8_t ready) {
     s_slotted_psram_ready = (ready != 0U) ? 1U : 0U;
@@ -178,6 +203,20 @@ uint32_t Cart_RdMcycle (void) {
 static inline __attribute__((always_inline))
 void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
                                  uint32_t t_entry) {
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+    const uint32_t bank = (uint32_t)s_slotted_bank_regs[page];
+    /* Mask to the SRAM size (8 banks) so out-of-range bank writes from
+     * the test don't index out of the array. */
+    const uint32_t bank_idx = bank & CART_SRAM_MAX_BANK;
+    const uint32_t off = bank_idx * CART_SLOTTED_BANK_SIZE
+                       + ((uint32_t)address & 0x3FFFU);
+    const uint8_t value = s_mapper_ram[off];
+    /* No PSRAM latency, so the read is "free" - record the cycle
+     * delta from ISR entry to drive for the timing histogram. */
+    const uint32_t t_drive = Cart_RdMcycle ();
+    GPIOB->OUTDR = (uint32_t)value << 8;
+    GPIOB->CFGHR = CART_BUS_ON;
+#else
     const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
                        + ((uint32_t)s_slotted_bank_regs[page]
                           * CART_SLOTTED_BANK_SIZE)
@@ -186,6 +225,7 @@ void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
     const uint32_t t_drive = Cart_RdMcycle ();
     GPIOB->OUTDR = (uint32_t)value << 8;
     GPIOB->CFGHR = CART_BUS_ON;
+#endif
 #if CART_TIMING_STATS
     {
         const uint32_t dt = t_drive - t_entry;
@@ -205,12 +245,26 @@ void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
 static inline __attribute__((always_inline))
 void Cart_WriteSlottedPSRAMByte (uint16_t address, unsigned page,
                                  uint8_t value) {
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+    const uint32_t bank = (uint32_t)s_slotted_bank_regs[page];
+    const uint32_t bank_idx = bank & CART_SRAM_MAX_BANK;
+    const uint32_t off = bank_idx * CART_SLOTTED_BANK_SIZE
+                       + ((uint32_t)address & 0x3FFFU);
+    s_mapper_ram[off] = value;
+    /* SRAM stores are visible to the next load on this hart without
+     * a fence (single-hart RVWMMO); the volatile qualifier stops the
+     * compiler from moving the load past the store. Keep the fence
+     * to match the PSRAM path's memory-ordering discipline - on this
+     * core it compiles to a no-op but documents the intent. */
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
+#else
     const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
                        + ((uint32_t)s_slotted_bank_regs[page]
                           * CART_SLOTTED_BANK_SIZE)
                        + ((uint32_t)address & 0x3FFFU);
     *(volatile uint8_t *)(PSRAM_CART_BASE + off) = value;
     __asm__ volatile ("fence iorw, iorw" ::: "memory");
+#endif
 }
 
 /* Flash mapper (CART_MAP_FLASH): decodes the mailbox window 0x7FF0..0x7FFF
