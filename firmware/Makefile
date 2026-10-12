@@ -159,6 +159,22 @@ CFLAGS_COMMON += -DCART_GAME_BASE_MB=$(GAME_BASE_MB)
 KONAMISCC_SCC_QUEUE ?= 1
 CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
 
+# Mapper-RAM (sub-slot 1) backing-store selector - see the block above
+# s_mapper_ram in User/cart.c and the CART_MAPPER_RAM_* values in
+# User/cart.h. Default 1 = the in-MCU SRAM array (128 KiB, 8 banks, no
+# external bus latency - the isolation build that proves handler
+# logic). Set to 0 = the PSRAM mapper RAM at PSRAM+CART_SLOTTED_BANK_
+# BASE_OFFSET (4 MiB, 256 banks, the original hardware path with the
+# memory-controller store latency on the sub-slot 1 write path).
+#
+#     make rebuild                         # default: SRAM backend
+#     make rebuild MAPPER_RAM_BACKEND=0    # PSRAM backend (hardware path)
+#
+# NOTE: changing this only affects User/cart.c, but the .o does not
+# track the flag - use `make rebuild`, not `make`.
+MAPPER_RAM_BACKEND ?= 1
+CFLAGS_COMMON += -DCART_MAPPER_RAM_BACKEND=$(MAPPER_RAM_BACKEND)
+
 # Nextor engine diagnostics (mailbox command names, trace ring, gap
 # timings). nextor.c silences every printf when RISKY_DEBUG=0 (the
 # release default) - a quiet log after a mapper swap is therefore

@@ -177,6 +177,25 @@ volatile uint32_t g_cart_slotted_late    = 0U;
 volatile uint32_t g_cart_slotted_cyc_min = 0xFFFFFFFFU;
 volatile uint32_t g_cart_slotted_cyc_max = 0U;
 
+/* WRITE-path twin of the read set above, filled by
+ * Cart_EXTI0_Nextor_Handler's sub-slot 1 store (measured AFTER the
+ * store lands, so the counters cannot delay the byte the PSRAM gets):
+ *
+ *   g_cart_slotted_writes   sub-slot 1 writes stored
+ *   g_cart_slotted_wlate     stores issued after ~SLTSL had already
+ *                           risen - the write itself still landed
+ *                           (the Z80 finished its cycle at ~WR rise),
+ *                           but the handler exited into the NEXT
+ *                           cycle: a cascade risk for any read that
+ *                           follows, counted here instead of guessing
+ *   g_cart_slotted_wcyc_     mcycle from handler entry to the store
+ *   min/max                  issue; compare against the ~74-cycle
+ *                           post-/WR window at 175 MHz HCLK */
+volatile uint32_t g_cart_slotted_writes  = 0U;
+volatile uint32_t g_cart_slotted_wlate   = 0U;
+volatile uint32_t g_cart_slotted_wcyc_min = 0xFFFFFFFFU;
+volatile uint32_t g_cart_slotted_wcyc_max = 0U;
+
 /* Same instrumentation for the game-image ROM mappers (ROM16k first -
  * the current failing boot path). The ROM16k handler serves the BIOS
  * slot probe and the game's INIT/code fetches from the PSRAM game
@@ -200,28 +219,40 @@ uint32_t Cart_RdMcycle (void) {
 #define CART_T_ENTRY()  0U
 #endif
 
+/* Mapper-RAM (sub-slot 1) destination address, split out of the
+ * read/write helpers so a handler can compute it BEFORE the /WR edge:
+ * the Nextor write path does all of its address math while the Z80 is
+ * still in the address phase and leaves only the data sample and the
+ * store for after the edge (see Cart_EXTI0_Nextor_Handler). */
+static inline __attribute__((always_inline))
+volatile uint8_t *Cart_SlottedPSRAMPtr (uint16_t address, unsigned page) {
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+    /* Mask to the SRAM size (8 banks) so out-of-range bank writes from
+     * the test don't index out of the array. */
+    const uint32_t bank_idx =
+        (uint32_t)s_slotted_bank_regs[page] & CART_SRAM_MAX_BANK;
+    return &s_mapper_ram[bank_idx * CART_SLOTTED_BANK_SIZE
+                          + ((uint32_t)address & 0x3FFFU)];
+#else
+    return (volatile uint8_t *)(PSRAM_CART_BASE
+                                + CART_SLOTTED_BANK_BASE_OFFSET)
+         + (uint32_t)s_slotted_bank_regs[page] * CART_SLOTTED_BANK_SIZE
+         + ((uint32_t)address & 0x3FFFU);
+#endif
+}
+
 static inline __attribute__((always_inline))
 void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
                                  uint32_t t_entry) {
 #if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
-    const uint32_t bank = (uint32_t)s_slotted_bank_regs[page];
-    /* Mask to the SRAM size (8 banks) so out-of-range bank writes from
-     * the test don't index out of the array. */
-    const uint32_t bank_idx = bank & CART_SRAM_MAX_BANK;
-    const uint32_t off = bank_idx * CART_SLOTTED_BANK_SIZE
-                       + ((uint32_t)address & 0x3FFFU);
-    const uint8_t value = s_mapper_ram[off];
     /* No PSRAM latency, so the read is "free" - record the cycle
      * delta from ISR entry to drive for the timing histogram. */
+    const uint8_t value = *Cart_SlottedPSRAMPtr (address, page);
     const uint32_t t_drive = Cart_RdMcycle ();
     GPIOB->OUTDR = (uint32_t)value << 8;
     GPIOB->CFGHR = CART_BUS_ON;
 #else
-    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
-                       + ((uint32_t)s_slotted_bank_regs[page]
-                          * CART_SLOTTED_BANK_SIZE)
-                       + ((uint32_t)address & 0x3FFFU);
-    const uint8_t value = *(const volatile uint8_t *)(PSRAM_CART_BASE + off);
+    const uint8_t value = *Cart_SlottedPSRAMPtr (address, page);
     const uint32_t t_drive = Cart_RdMcycle ();
     GPIOB->OUTDR = (uint32_t)value << 8;
     GPIOB->CFGHR = CART_BUS_ON;
@@ -245,26 +276,13 @@ void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
 static inline __attribute__((always_inline))
 void Cart_WriteSlottedPSRAMByte (uint16_t address, unsigned page,
                                  uint8_t value) {
-#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
-    const uint32_t bank = (uint32_t)s_slotted_bank_regs[page];
-    const uint32_t bank_idx = bank & CART_SRAM_MAX_BANK;
-    const uint32_t off = bank_idx * CART_SLOTTED_BANK_SIZE
-                       + ((uint32_t)address & 0x3FFFU);
-    s_mapper_ram[off] = value;
+    *Cart_SlottedPSRAMPtr (address, page) = value;
     /* SRAM stores are visible to the next load on this hart without
      * a fence (single-hart RVWMMO); the volatile qualifier stops the
      * compiler from moving the load past the store. Keep the fence
      * to match the PSRAM path's memory-ordering discipline - on this
      * core it compiles to a no-op but documents the intent. */
     __asm__ volatile ("fence iorw, iorw" ::: "memory");
-#else
-    const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
-                       + ((uint32_t)s_slotted_bank_regs[page]
-                          * CART_SLOTTED_BANK_SIZE)
-                       + ((uint32_t)address & 0x3FFFU);
-    *(volatile uint8_t *)(PSRAM_CART_BASE + off) = value;
-    __asm__ volatile ("fence iorw, iorw" ::: "memory");
-#endif
 }
 
 /* Flash mapper (CART_MAP_FLASH): decodes the mailbox window 0x7FF0..0x7FFF
@@ -937,6 +955,24 @@ void Cart_WaitForCycleEnd (void) {
 static inline __attribute__((always_inline))
 uint8_t Cart_ReadWriteData (void) {
     return (uint8_t)((GPIOB->INDR >> 8) & 0xFFU);
+}
+
+/* Catch the /WR falling edge. Returns 0 once /WR is low (the Z80's
+ * write data is valid on PB8..15), nonzero if /SLTSL rose first (the
+ * cycle ended with no write - the "assume write" guess was wrong).
+ *
+ * The exit test is a single AND of both masks: /WR low exits as the
+ * write, /SLTSL high exits as the bail, so the /SLTSL escape costs
+ * nothing over a bare /WR poll (one load + one AND + one branch per
+ * iteration) while keeping the wait bounded by the Z80 cycle itself
+ * instead of by a spin counter. */
+static inline __attribute__((always_inline))
+uint32_t Cart_WaitWrEdge (void) {
+    uint32_t c;
+    do {
+        c = GPIOE->INDR & (CART_WR_MASK | CART_SLTSL_MASK);
+    } while (c == CART_WR_MASK);
+    return c & CART_WR_MASK;
 }
 
 /* MSX memory-mapper bank-register capture. OUT (0xFC..0xFF),A is an
@@ -3450,6 +3486,26 @@ void Cart_EXTI0_Terminal_Handler (void) {
 /*      while the protocol only uses 0x7FF0..0x7FF5 - decoding the    */
 /*      extra 10 bytes is free and keeps the test to a single branch.   */
 /*                                                                     */
+/*   3. The WRITE path is scheduled around the Z80's own edge order:    */
+/*      /RD falls together with /SLTSL (inside the window the EXTI0    */
+/*      IRQ latency already covers) while /WR only falls in the second  */
+/*      half of T2. One ctrl load at entry therefore settles the       */
+/*      READ/WRITE question with no settle wait, and a cycle that has  */
+/*      not asserted /RD is a write whose edge has not arrived yet:    */
+/*      ALL of the decode (sub-slot shift, mailbox / bank-register     */
+/*      compares, the full PSRAM address math) runs while the Z80 is   */
+/*      still in its address phase. Only then does the handler catch   */
+/*      the /WR edge (one load + one AND + one branch per iteration,   */
+/*      with the /SLTSL escape folded into the same AND so a cycle     */
+/*      mis-assumed as a write can bail but never wedge the ISR), and  */
+/*      the edge is followed by exactly three things: the data-bus    */
+/*      sample, the one store and the fence. Writes the mapper        */
+/*      ignores return without waiting for the edge at all. That       */
+/*      pre-edge decode is what keeps the sub-slot 1 PSRAM store       */
+/*      inside the /SLTSL window - the old structure ran the same      */
+/*      decode only after /WR had already fallen, so the cycle ended   */
+/*      before the store completed.                                    */
+/*                                                                     */
 /* Why not hand-scheduled asm like Cart_EXTI0_ASCII16k_Handler: the     */
 /* mailbox needs a call into nextor.c, and mixing a C call into that    */
 /* asm means spilling t0/t1/ra on a path that is already the rare one.  */
@@ -3464,133 +3520,183 @@ void Cart_EXTI0_Nextor_Handler (void) {
     uint16_t address = (uint16_t)GPIOD->INDR;
     const uint8_t ssr_entry = g_subslot_reg;
 
-        if ((ctrl & CART_RD_MASK) == 0U) {
-            /* READ cycle. */
-            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
-                /* Secondary-slot register, read INVERTED: the MSX BIOS
-                 * stores bit 7 of ~ssr into EXPTBL[slot] as its
-                 * "slot is expanded" flag. M1 low means opcode fetch, so
-                 * an ordinary FFFF instruction fetch must not be
-                 * reinterpreted as an SSR read. */
-                GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
-                GPIOB->CFGHR = CART_BUS_ON;
-            } else {
-                /* The normal Nextor configuration has all four pages in
-                 * sub-slot 0. Keep this branch deliberately small: it is
-                 * the overwhelmingly common path (kernel fetches and data
-                 * reads), and avoids the page/sub-slot shift, load and mask
-                 * sequence below. The mailbox must stay on the full decoder;
-                 * FFFF has already been handled above when M1 identifies an
-                 * SSR access. */
-                if (ssr_entry == 0U
-                        && !NEXTOR_IN_MBOX_WINDOW (address)) {
+    if ((ctrl & CART_RD_MASK) == 0U) {
+        /* READ cycle. /RD falls together with /SLTSL, inside the window
+         * the EXTI0 latency already covers, so the single ctrl load at
+         * entry has settled the READ/WRITE question - there is no
+         * RD/WR settle wait anywhere on this path. */
+        if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+            /* Secondary slot register, read INVERTED: the MSX BIOS
+             * stores bit 7 of ~ssr into EXPTBL[slot] as its
+             * "slot is expanded" flag. M1 low means opcode fetch, so
+             * an ordinary FFFF instruction fetch must not be
+             * reinterpreted as an SSR read. */
+            GPIOB->OUTDR = ((uint32_t)(uint8_t)~ssr_entry) << 8;
+            GPIOB->CFGHR = CART_BUS_ON;
+        } else if (ssr_entry == 0U
+                   && !NEXTOR_IN_MBOX_WINDOW (address)) {
+            /* The normal Nextor configuration has all four pages in
+             * sub-slot 0. Keep this branch deliberately small: it is
+             * the overwhelmingly common path (kernel fetches and data
+             * reads), and avoids the page/sub-slot shift, load and mask
+             * sequence below. The mailbox must stay on the full decoder;
+             * FFFF has already been handled above when M1 identifies an
+             * SSR access. */
+            const uint32_t bias = (address < 0x8000U)
+                                ? g_state->bankOffsets[0]
+                                : g_state->bankOffsets[8];
+            Cart_DriveByteFromFlash (nextor_rom,
+                                     bias + (uint32_t)address);
+        } else {
+            /* Expanded-slot protocol: two bits per 16 KiB CPU page
+             * select the sub-slot. Sub-slot 0 keeps the ASCII16K
+             * ROM plus mailbox; sub-slot 1 is mapper RAM; 2/3 float. */
+            const unsigned ssr = (unsigned)ssr_entry;
+            const unsigned page = (unsigned)(address >> 14);
+            const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
+
+            if (subslot == 0U) {
+                if (NEXTOR_IN_MBOX_WINDOW (address)) {
+                    /* Mailbox register. nextor.c owns the FIFO and
+                     * the status bits; route the cycle only. */
+                    const uint8_t v = Nextor_ReadByte (address);
+                    GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
+                                 | ((uint32_t)v << 8);
+                    GPIOB->CFGHR = CART_BUS_ON;
+                } else {
                     const uint32_t bias = (address < 0x8000U)
                                         ? g_state->bankOffsets[0]
                                         : g_state->bankOffsets[8];
                     Cart_DriveByteFromFlash (nextor_rom,
-                                            bias + (uint32_t)address);
-                } else {
-                    /* Expanded-slot protocol: two bits per 16 KiB CPU page
-                     * select the sub-slot. Sub-slot 0 keeps the ASCII16K
-                     * ROM plus mailbox; sub-slot 1 is mapper RAM; 2/3 float. */
-                    const unsigned ssr = (unsigned)ssr_entry;
-                    const unsigned page = (unsigned)(address >> 14);
-                    const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
-
-                    if (subslot == 0U) {
-                        if (NEXTOR_IN_MBOX_WINDOW (address)) {
-                            /* Mailbox register. nextor.c owns the FIFO and
-                             * the status bits; route the cycle only. */
-                            const uint8_t v = Nextor_ReadByte (address);
-                            GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
-                                         | ((uint32_t)v << 8);
-                            GPIOB->CFGHR = CART_BUS_ON;
-                        } else {
-                            const uint32_t bias = (address < 0x8000U)
-                                                ? g_state->bankOffsets[0]
-                                                : g_state->bankOffsets[8];
-                            Cart_DriveByteFromFlash (nextor_rom,
-                                                    bias + (uint32_t)address);
-                        }
-                    } else if (subslot == 1U
-                               && s_slotted_psram_ready != 0U) {
-                        Cart_DriveSlottedPSRAMByte (address, page, t_entry);
-                    } else {
-                        /* Empty sub-slot: leave the data bus floating. */
-                        GPIOB->CFGHR = CART_BUS_OFF;
-                    }
+                                             bias + (uint32_t)address);
                 }
-            }
-        } 
-
-        {
-            /* Bounded (d9d6e38): this loop doubles as the read-cycle
-             * data-hold (spins until ~SLTSL rises) and the write
-             * settle (~WR falling). An unbounded wait here wedges the
-             * firmware mid-ISR with no further UART output. */
-            uint32_t spin = CART_ENDCYCLE_SPIN;
-            while (ctrl &  CART_WR_MASK) {
-                ctrl = GPIOE->INDR;
-                if ((ctrl & CART_SLTSL_MASK) != 0U) {
-                    GPIOB->CFGHR = CART_BUS_OFF;
-                    EXTI->INTFR = EXTI_INTENR_MR0;
-                    return;
-                }
-                if (--spin == 0U) {
-                    g_cart_cycle_timeout++;
-                    break;
-                }
+            } else if (subslot == 1U
+                       && s_slotted_psram_ready != 0U) {
+                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
+            } else {
+                /* Empty sub-slot: leave the data bus floating. */
+                GPIOB->CFGHR = CART_BUS_OFF;
             }
         }
-        
-        
-        if ((ctrl & CART_WR_MASK) == 0U) {
-            /* WRITE cycle: WR is low now; data valid on PB8..15. */
-            const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
-            /* Avoid the page shift on the normal (all-subslot-0) path.
-             * Mailbox argument bursts are writes, so this matters nearly as
-             * much as the ROM-read fast path above. */
-            unsigned page = 0U;
-            unsigned subslot = 0U;
-            if (ssr_entry != 0U) {
-                const unsigned ssr = (unsigned)ssr_entry;
-                page = (unsigned)(address >> 14);
-                subslot = (ssr >> (page * 2U)) & 0x3U;
-            }
-            if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
-                /* Secondary-slot register latch. The BIOS writes its
-                 * EXPTBL-derived sub-slot table here during the power-on
-                 * scan; latching it verbatim means the mapper starts from
-                 * the BIOS's own selection instead of the power-on
-                 * default. M1 must be high - a low byte at FFFF is an
-                 * opcode fetch, not a register write. */
-                g_subslot_reg = w;
-            } else if (subslot == 0U) {
-                if (NEXTOR_IN_MBOX_WINDOW (address)) {
-                    /* Mailbox: command byte / argument push. */
-                    Nextor_WriteByte (address, w);
-                } else if (address == NEXTOR_BANK_REG_PAGE1) {
-                    g_state->bankOffsets[0] = ((uint32_t)w << NEXTOR_BANK_SHIFT)
-                                            - 0x4000U;
-                } else if (address == NEXTOR_BANK_REG_PAGE2 ||
-                           address == NEXTOR_BANK_REG_PAGE2_ALT) {
-                    g_state->bankOffsets[8] = ((uint32_t)w << NEXTOR_BANK_SHIFT)
-                                            - 0x8000U;
-                }
-                /* Other writes: ignored. A bank number past the end of
-                 * the ROM (w >= 8 for the 128 KiB image) is latched like
-                 * any other; the read path's off < nextor_rom_len test
-                 * then floats those addresses to 0xFF instead of
-                 * indexing out of bounds. */
-            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                Cart_WriteSlottedPSRAMByte (address, page, w);
-            }
-            /* The Z80 owns the data bus during writes. */
+        /* Data hold: keep the byte on the bus until the Z80 has sampled
+         * it and the cycle ends. INTFR is cleared BEFORE the hold (the
+         * RunKonami idiom) so the clear cannot wipe the edge of a cycle
+         * that starts right as this one ends. The hold spin is skipped
+         * while the startup ~WAIT hold is active - see the contract at
+         * s_msx_wait_held. */
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        if (s_msx_wait_held == 0U) {
+            Cart_SpinUntilSltSLHigh ();
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        return;
+    }
 
-        } 
-    GPIOB->CFGHR = CART_BUS_OFF;
+    /* WRITE cycle. /RD never fell, so /WR will: the Z80 asserts /RD
+     * immediately while /WR only falls in the second half of T2, and
+     * that gap is free compute time. Everything the write decode needs
+     * except the data byte runs NOW - sub-slot decode, mailbox /
+     * bank-register compares and the full PSRAM address math - so the
+     * only work left after the /WR edge is the data sample, the one
+     * store and the fence. That is what buys the sub-slot 1 PSRAM write
+     * its margin: the store starts at the edge with nothing in front of
+     * it instead of the whole decode chain plus the controller latency
+     * behind it, which is what overran the /SLTSL window. */
+    if (s_msx_wait_held != 0U) {
+        /* Held cycle: /WR can never fall while ~WAIT is asserted -
+         * Cart_HoldMSXWait_End() owns the rest of this cycle. */
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+
+    unsigned page = 0U;
+    unsigned subslot = 0U;
+    if (ssr_entry != 0U) {
+        const unsigned ssr = (unsigned)ssr_entry;
+        page = (unsigned)(address >> 14);
+        subslot = (ssr >> (page * 2U)) & 0x3U;
+    }
+
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        /* Secondary slot register latch. The BIOS writes its
+         * EXPTBL-derived sub-slot table here during the power-on scan;
+         * latching it verbatim means the mapper starts from the BIOS's
+         * own selection instead of the power-on default. M1 must be
+         * high - a low byte at FFFF is an opcode fetch, not a register
+         * write. Rare (boot scan only), so its edge wait is paid only
+         * when it is actually reached. */
+        if (Cart_WaitWrEdge () == 0U) {
+            g_subslot_reg = (uint8_t)(GPIOB->INDR >> 8);
+        }
+    } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
+        /* Mapper-RAM write - the hot write target (sub-slot 1 IS the
+         * machine's main RAM, so every Z80 RAM store lands here).
+         * Destination computed before the edge; after the edge there is
+         * only the data sample and the PSRAM store.
+         *
+         * NO fence after the store (deliberately, unlike
+         * Cart_WriteSlottedPSRAMByte): `fence iorw, iorw` drains the
+         * store buffer synchronously through the PSRAM bridge (the
+         * 400M-band LATENCY=0x10 wait states), stalling the handler
+         * exit for tens of HCLK on EVERY RAM write - the one remaining
+         * fixed cost that swamped the pre-edge restructure. Ordering
+         * is still guaranteed twice without it: a later load of the
+         * same address on this hart cannot bypass the store (RVWMO
+         * preserved program order), and the PSRAM controller's read
+         * FIFO serves reads of recent writes (see the PTEST note in
+         * psram.c) - and a read of the same address is always a LATER
+         * EXTI handler invocation on this same hart. The store drains
+         * in the background while INTFR is cleared and the handler
+         * returns. */
+        volatile uint8_t *const dst = Cart_SlottedPSRAMPtr (address, page);
+        if (Cart_WaitWrEdge () == 0U) {
+            *dst = (uint8_t)(GPIOB->INDR >> 8);
+#if CART_TIMING_STATS
+            {
+                /* After the store, so it cannot delay the byte; see
+                 * the counter block at the top of this file. */
+                const uint32_t t_store = Cart_RdMcycle ();
+                const uint32_t dtw = t_store - t_entry;
+                g_cart_slotted_writes++;
+                if ((GPIOE->INDR & CART_SLTSL_MASK) != 0U) {
+                    g_cart_slotted_wlate++;
+                }
+                if (dtw < g_cart_slotted_wcyc_min) g_cart_slotted_wcyc_min = dtw;
+                if (dtw > g_cart_slotted_wcyc_max) g_cart_slotted_wcyc_max = dtw;
+            }
+#endif
+        }
+    } else if (subslot == 0U) {
+        if (NEXTOR_IN_MBOX_WINDOW (address)) {
+            /* Mailbox: command byte / argument push. */
+            if (Cart_WaitWrEdge () == 0U) {
+                Nextor_WriteByte (address, (uint8_t)(GPIOB->INDR >> 8));
+            }
+        } else if (address == NEXTOR_BANK_REG_PAGE1) {
+            if (Cart_WaitWrEdge () == 0U) {
+                g_state->bankOffsets[0] =
+                    (((uint32_t)(uint8_t)(GPIOB->INDR >> 8))
+                     << NEXTOR_BANK_SHIFT) - 0x4000U;
+            }
+        } else if (address == NEXTOR_BANK_REG_PAGE2
+                   || address == NEXTOR_BANK_REG_PAGE2_ALT) {
+            if (Cart_WaitWrEdge () == 0U) {
+                g_state->bankOffsets[8] =
+                    (((uint32_t)(uint8_t)(GPIOB->INDR >> 8))
+                     << NEXTOR_BANK_SHIFT) - 0x8000U;
+            }
+        }
+        /* Every other sub-slot-0 write hits a ROM bank the mapper
+         * ignores. A bank number past the end of the ROM (w >= 8 for
+         * the 128 KiB image) is latched like any other; the read path's
+         * off < nextor_rom_len test then floats those addresses to
+         * 0xFF instead of indexing out of bounds. Nothing to store, so
+         * the cycle needs nothing from us: no edge wait, no bus
+         * release - the drivers were never on for a write cycle. */
+    }
+    /* Sub-slots 2/3 and PSRAM-not-ready: ignored writes, same immediate
+     * return. */
     EXTI->INTFR = EXTI_INTENR_MR0;
-    
 }
 
 /* ------------------------------------------------------------------ */

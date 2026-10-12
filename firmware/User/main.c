@@ -182,6 +182,29 @@ int main (void) {
             }
         }
 
+        /* Mapper-RAM WRITE timing, the write twin of the block above:
+         * the PSRAM store latency of the sub-slot 1 path. wlate>0 means
+         * stores were issued after ~SLTSL had already risen - the byte
+         * still landed, but the handler exited into the next cycle, so
+         * the next read may have been served from a late entry. */
+        {
+            static uint32_t s_mar_wlate_seen = 0U;
+            static uint32_t s_mar_wmax_seen = 0U;
+            uint32_t wlate = g_cart_slotted_wlate;
+            uint32_t wmx = g_cart_slotted_wcyc_max;
+            if (wlate != s_mar_wlate_seen || wmx != s_mar_wmax_seen) {
+                const uint32_t wmn = (g_cart_slotted_wcyc_min == 0xFFFFFFFFU)
+                                   ? 0U : g_cart_slotted_wcyc_min;
+                s_mar_wlate_seen = wlate;
+                s_mar_wmax_seen = wmx;
+                printf ("CART: mapper-RAM writes=%lu wlate=%lu wcycles=%lu..%lu\r\n",
+                        (unsigned long)g_cart_slotted_writes,
+                        (unsigned long)wlate,
+                        (unsigned long)wmn,
+                        (unsigned long)wmx);
+            }
+        }
+
         /* No WFI — while the Nextor kernel's driver is polling a
          * register in a tight loop, each cart read generates an EXTI0
          * interrupt. WFI wakes on the interrupt but the ISR overhead +

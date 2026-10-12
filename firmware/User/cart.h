@@ -4,9 +4,12 @@
 #include "ch32v4x7.h"
 
 /* Mapper-RAM backing store selector. See cart.c for the full
- * description. Default: PSRAM (the original hardware path). Switch
- * to SRAM to isolate handler logic from PSRAM signal-integrity
- * issues. */
+ * description. Selected from the build via the Makefile's
+ * MAPPER_RAM_BACKEND knob (make rebuild MAPPER_RAM_BACKEND=0);
+ * fallback default here is the in-MCU SRAM array (the isolation
+ * build that proves handler logic without PSRAM signal-integrity
+ * or memory-controller latency in the way). Set 0 for the PSRAM
+ * mapper RAM - the original hardware path. */
 #define CART_MAPPER_RAM_PSRAM  0
 #define CART_MAPPER_RAM_SRAM   1
 #ifndef CART_MAPPER_RAM_BACKEND
@@ -281,6 +284,24 @@ extern volatile uint32_t g_cart_slotted_reads;
 extern volatile uint32_t g_cart_slotted_late;
 extern volatile uint32_t g_cart_slotted_cyc_min;
 extern volatile uint32_t g_cart_slotted_cyc_max;
+
+/* Mapper-RAM (sub-slot 1) WRITE-path timing, measured by
+ * Cart_EXTI0_Nextor_Handler around the PSRAM store (see the counter
+ * block in cart.c). Same reporting rules as the read set above:
+ *
+ *   g_cart_slotted_wlate > 0        a store was issued after ~SLTSL
+ *                                  had already risen - the byte still
+ *                                  landed, but the handler exited
+ *                                  into the next Z80 cycle, so any
+ *                                  read that follows is at risk
+ *   g_cart_slotted_wcyc_max         worst MCU cycles from ISR entry to
+ *                                  the store issue; compare against
+ *                                  the ~74-cycle post-/WR window
+ *                                  (175 MHz HCLK, 3.58 MHz Z80) */
+extern volatile uint32_t g_cart_slotted_writes;
+extern volatile uint32_t g_cart_slotted_wlate;
+extern volatile uint32_t g_cart_slotted_wcyc_min;
+extern volatile uint32_t g_cart_slotted_wcyc_max;
 
 /* Game-image ROM-mapper read-path timing (ROM16k first - see the
  * counter block in cart.c). Same semantics as the slotted set above,
