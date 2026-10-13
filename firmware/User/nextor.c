@@ -376,7 +376,15 @@ static uint32_t s_cyc_per_ms;
  * which are main-loop-only state, this touches nothing shared. */
 static volatile uint32_t s_last_cmd_cyc;
 
-static void cyc_calibrate (void) {
+/* Calibrate the cycle counter per millisecond. Required before
+ * ms_now() is consumed - with s_cyc_per_ms == 0 the accumulator
+ * never advances and the raw_probe() rate limit permanently locks
+ * out retries after the first probe, which is why the terminal
+ * mapper needs this even when the Nextor mapper is never installed
+ * (Terminal_Reset calls it; Nextor_Init still calls it for safety).
+ *
+ * Cheap (4 ms delay), idempotent. */
+void Nextor_CycCalibrate (void) {
     const uint32_t t0 = rdcycle();
 
     Delay_Ms (4U);
@@ -656,7 +664,7 @@ void Nextor_Init (void) {
      * reaches its own banks by writing the bank registers, not by asking
      * for a mapper swap. */
     s_cyc_per_ms = 0U;
-    cyc_calibrate ();
+    Nextor_CycCalibrate ();
     s_boot_start_ms = ms_now ();
     /* Start the probe-idle window CLOSED. The Z80 starts talking the
      * instant the mapper swap completes, and the window has to already be

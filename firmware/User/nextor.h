@@ -258,6 +258,16 @@ extern "C" {
  * and from Cart_SetMapper() on every swap to CART_MAP_NEXTOR. */
 void Nextor_Init (void);
 
+/* Calibrate the core-cycles-per-millisecond counter that drives
+ * ms_now() and the raw_probe() rate limit. Cheap (~4 ms), safe to
+ * call repeatedly. Required before any ms_now() consumer runs -
+ * Nextor_Init calls this for the Nextor mapper; the terminal mapper
+ * needs it too (called from Terminal_Reset) because the main loop
+ * runs Nextor_Service concurrently with the terminal, and
+ * Nextor_Service's raw_probe() is rate-limited by a wall clock that
+ * is stuck at 0 until this runs. */
+void Nextor_CycCalibrate (void);
+
 /* Main-loop service hook: drains the command in flight into the result
  * FIFO. Must be called from main(), never from IRQ context - it is the
  * only place blocking disk work is allowed. */
