@@ -234,9 +234,17 @@ volatile uint8_t *Cart_SlottedPSRAMPtr (uint16_t address, unsigned page) {
     return &s_mapper_ram[bank_idx * CART_SLOTTED_BANK_SIZE
                           + ((uint32_t)address & 0x3FFFU)];
 #else
+    /* Mask the bank register into the presented range (see
+     * CART_SLOTTED_BANKS_PRESENT in cart.h): banks past the limit
+     * alias back onto bank 0, so the BIOS's aliasing-based size
+     * detection reports the presented size and its memory test only
+     * walks that much instead of the full 4 MiB region. Reads and
+     * writes both route through this pointer, so the aliasing stays
+     * consistent in both directions. */
     return (volatile uint8_t *)(PSRAM_CART_BASE
                                 + CART_SLOTTED_BANK_BASE_OFFSET)
-         + (uint32_t)s_slotted_bank_regs[page] * CART_SLOTTED_BANK_SIZE
+         + (uint32_t)(s_slotted_bank_regs[page] & CART_SLOTTED_BANK_MASK)
+           * CART_SLOTTED_BANK_SIZE
          + ((uint32_t)address & 0x3FFFU);
 #endif
 }
@@ -244,19 +252,23 @@ volatile uint8_t *Cart_SlottedPSRAMPtr (uint16_t address, unsigned page) {
 static inline __attribute__((always_inline))
 void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
                                  uint32_t t_entry) {
-#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
-    /* No PSRAM latency, so the read is "free" - record the cycle
-     * delta from ISR entry to drive for the timing histogram. */
     const uint8_t value = *Cart_SlottedPSRAMPtr (address, page);
+#if CART_TIMING_STATS
+    /* The drive timestamp sits between the mapper load and the OUTDR
+     * write, so it is hot-path time - gated with the rest of the
+     * instrumentation. The old layout read the CSR unconditionally,
+     * which left one mcycle read in the critical path even with
+     * CART_TIMING_STATS=0. */
     const uint32_t t_drive = Cart_RdMcycle ();
-    GPIOB->OUTDR = (uint32_t)value << 8;
-    GPIOB->CFGHR = CART_BUS_ON;
-#else
-    const uint8_t value = *Cart_SlottedPSRAMPtr (address, page);
-    const uint32_t t_drive = Cart_RdMcycle ();
-    GPIOB->OUTDR = (uint32_t)value << 8;
-    GPIOB->CFGHR = CART_BUS_ON;
 #endif
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+    /* SRAM backend: no external-bus latency on the load. */
+#else
+    /* PSRAM backend: the load crosses the memory-controller bridge
+     * (LATENCY wait states) before the drive below. */
+#endif
+    GPIOB->OUTDR = (uint32_t)value << 8;
+    GPIOB->CFGHR = CART_BUS_ON;
 #if CART_TIMING_STATS
     {
         const uint32_t dt = t_drive - t_entry;
@@ -269,7 +281,6 @@ void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page,
     }
 #else
     (void)t_entry;
-    (void)t_drive;
 #endif
 }
 
@@ -3322,7 +3333,26 @@ void Cart_EXTI0_Terminal_Handler (void) {
             const unsigned page = (unsigned)(address >> 14);
             const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
 
-            if (subslot == 0U) {
+            /* Slot-1 mapper RAM is decoded FIRST - the machine's main
+             * RAM lives in sub-slot 1, and THIS handler is the boot
+             * mapper, so the power-on BIOS CHKRAM / memory test hammers
+             * this branch before anything else runs. Same reordering as
+             * the Nextor handler's read decoder and both write paths:
+             * slot 1 gets the first compare, and from "subslot known"
+             * to the PSRAM load stands only the ready load and the
+             * address math - reads have no free pre-edge window to
+             * hoist into, so the branch order is the hoist. The
+             * terminal-ROM branch pays one extra compare instead,
+             * which its flash-resident drive easily absorbs. */
+            if (subslot == 1U
+                && s_slotted_psram_ready != 0U) {
+                /* Sub-slot 1 = mapper RAM: read the selected 16 KiB
+                 * bank of the PSRAM mapper window, selected by the
+                 * bank register latched from the OUT (FC..FF),A cycle
+                 * for this page (EXTI9_5 handler). Identical call to
+                 * the Nextor handler. */
+                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
+            } else if (subslot == 0U) {
                 /* Sub-slot 0: terminal ROM for anything in the cart
                  * window. Same generous 0x4000..0xBFFF serving as the
                  * fast path: the window is only reachably selected by
@@ -3349,16 +3379,9 @@ void Cart_EXTI0_Terminal_Handler (void) {
                 GPIOB->OUTDR = (GPIOB->OUTDR & ~(0xFFU << 8))
                              | ((uint32_t)v << 8);
                 GPIOB->CFGHR = CART_BUS_ON;
-            } else if (subslot == 1U
-                       && s_slotted_psram_ready != 0U) {
-                /* Sub-slot 1 = mapper RAM: read the selected 16 KiB
-                 * bank of the PSRAM mapper window, selected by the
-                 * bank register latched from the OUT (FC..FF),A cycle
-                 * for this page (EXTI9_5 handler). Identical call to
-                 * the Nextor handler. */
-                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
             } else {
-                /* Empty sub-slot: leave the data bus floating. */
+                /* Empty sub-slot (2/3, or slot 1 while PSRAM is not
+                 * ready): leave the data bus floating. */
                 GPIOB->CFGHR = CART_BUS_OFF;
             }
         }
@@ -3555,7 +3578,23 @@ void Cart_EXTI0_Nextor_Handler (void) {
             const unsigned page = (unsigned)(address >> 14);
             const unsigned subslot = (ssr >> (page * 2U)) & 0x3U;
 
-            if (subslot == 0U) {
+            /* Slot-1 mapper RAM is decoded FIRST - the machine's main
+             * RAM lives in sub-slot 1, so RAM-heavy phases (the BIOS
+             * CHKRAM / memory test that re-runs after every reset into
+             * this mapper) make slot 1 the overwhelming read majority.
+             * The write path below already gives slot 1 the first
+             * compare (subslot==1 is tested before subslot==0 there);
+             * this read decoder now mirrors it. Reads have no free
+             * pre-edge window like the write path's /WR lag, so the
+             * ordering itself is the hoist: from "subslot known" to
+             * the PSRAM load stands only one compare, the ready load
+             * and the address math - nothing else in front of the
+             * load. The ROM/mailbox branch pays one extra compare
+             * instead, which it has the flash-fast drive to spare. */
+            if (subslot == 1U
+                && s_slotted_psram_ready != 0U) {
+                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
+            } else if (subslot == 0U) {
                 if (NEXTOR_IN_MBOX_WINDOW (address)) {
                     /* Mailbox register. nextor.c owns the FIFO and
                      * the status bits; route the cycle only. */
@@ -3570,11 +3609,9 @@ void Cart_EXTI0_Nextor_Handler (void) {
                     Cart_DriveByteFromFlash (nextor_rom,
                                              bias + (uint32_t)address);
                 }
-            } else if (subslot == 1U
-                       && s_slotted_psram_ready != 0U) {
-                Cart_DriveSlottedPSRAMByte (address, page, t_entry);
             } else {
-                /* Empty sub-slot: leave the data bus floating. */
+                /* Empty sub-slot (2/3, or slot 1 while PSRAM is not
+                 * ready): leave the data bus floating. */
                 GPIOB->CFGHR = CART_BUS_OFF;
             }
         }

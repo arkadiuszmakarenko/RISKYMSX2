@@ -72,6 +72,30 @@
 #define CART_SLOTTED_BANK_SIZE        (16U * 1024U)
 #define CART_SLOTTED_BANK_BASE_OFFSET (4U * 1024U * 1024U)
 
+/* Mapper-RAM size PRESENTED to the machine: how many of the physical
+ * banks are actually selectable. The FC..FF bank registers latch the
+ * full 0..255 byte (see the EXTI9_5 handler), but Cart_SlottedPSRAMPtr
+ * masks it into this range, so a bank number past the limit aliases
+ * back onto bank 0.
+ *
+ * EMPIRICAL: 16 (256 KiB) HUNG the boot on real hardware even with
+ * the timing instrumentation fully off - the aliasing presentation
+ * is NOT tolerated by this BIOS/Nextor combination despite matching
+ * how real small mappers ignore the high bank bits. 256 = full 4 MiB
+ * = the last empirically working configuration. The memory test then
+ * walks all 256 banks (slow). If a shorter test is needed, bisect
+ * from here: try 128 / 64 / 32 (powers of two only) one build at a
+ * time and verify the boot before keeping it. */
+#define CART_SLOTTED_BANKS_PRESENT    256U
+#define CART_SLOTTED_BANK_MASK        (CART_SLOTTED_BANKS_PRESENT - 1U)
+
+_Static_assert ((CART_SLOTTED_BANKS_PRESENT
+                 & (CART_SLOTTED_BANKS_PRESENT - 1U)) == 0U,
+                "CART_SLOTTED_BANKS_PRESENT must be a power of two "
+                "(mask-based aliasing)");
+_Static_assert (CART_SLOTTED_BANKS_PRESENT <= CART_SLOTTED_BANK_COUNT,
+                "CART_SLOTTED_BANKS_PRESENT exceeds the physical region");
+
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
  * image window. Konami/ASCII mappers can map up to 1 MiB; NEO up to 256

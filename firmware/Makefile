@@ -175,6 +175,23 @@ CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
 MAPPER_RAM_BACKEND ?= 1
 CFLAGS_COMMON += -DCART_MAPPER_RAM_BACKEND=$(MAPPER_RAM_BACKEND)
 
+# Cart timing instrumentation switch. Default 1 = the extended-stats
+# build: mcycle reads + counter updates inside the EXTI0 handlers, and
+# the combined mapper-RAM logger in main.c reporting them. Set 0 to
+# compile the measuring OUT of the handlers entirely - every mcycle
+# read (entry, drive and store timestamps) and every counter update is
+# gated on this, and the main.c logger goes silent because the
+# counters stop moving:
+#
+#     make rebuild                         # default: stats ON
+#     make rebuild CART_TIMING_STATS=0     # measuring fully OFF
+#
+# NOTE: use `make rebuild` - the .o files do not track this flag.
+# The measuring extends each served cart cycle's IRQ tail, so use the
+# OFF build for real timing-sensitive work (BIOS memory test etc.).
+CART_TIMING_STATS ?= 1
+CFLAGS_COMMON += -DCART_TIMING_STATS=$(CART_TIMING_STATS)
+
 # Nextor engine diagnostics (mailbox command names, trace ring, gap
 # timings). nextor.c silences every printf when RISKY_DEBUG=0 (the
 # release default) - a quiet log after a mapper swap is therefore

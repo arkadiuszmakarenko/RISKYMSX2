@@ -160,48 +160,56 @@ int main (void) {
             }
         }
 
-        /* Mapper-RAM read timing. Trigger on the error counter and on a
-         * new worst-case cycle count (both bounded), never on the raw
-         * read count, so a hammered mapper cannot flood the UART. See
-         * the block above Cart_DriveSlottedPSRAMByte() in cart.c. */
+        /* Combined mapper-RAM timing report. Print both READ and WRITE
+         * totals every 1000 slot-1 operations, and immediately when a
+         * late cycle or a new timing maximum appears. This keeps the
+         * existing IRQ instrumentation unchanged while making the
+         * memory-test traffic visible after timing has stabilised. */
         {
-            static uint32_t s_mar_late_seen = 0U;
-            static uint32_t s_mar_max_seen = 0U;
-            uint32_t late = g_cart_slotted_late;
-            uint32_t mx = g_cart_slotted_cyc_max;
-            if (late != s_mar_late_seen || mx != s_mar_max_seen) {
-                const uint32_t mn = (g_cart_slotted_cyc_min == 0xFFFFFFFFU)
-                                  ? 0U : g_cart_slotted_cyc_min;
-                s_mar_late_seen = late;
-                s_mar_max_seen = mx;
-                printf ("CART: mapper-RAM reads=%lu late=%lu cycles=%lu..%lu\r\n",
-                        (unsigned long)g_cart_slotted_reads,
-                        (unsigned long)late,
-                        (unsigned long)mn,
-                        (unsigned long)mx);
-            }
-        }
+            enum { CART_MAPPER_LOG_INTERVAL = 1000U };
+            static uint32_t s_mar_reads_seen  = 0U;
+            static uint32_t s_mar_writes_seen = 0U;
+            static uint32_t s_mar_late_seen   = 0U;
+            static uint32_t s_mar_wlate_seen  = 0U;
+            static uint32_t s_mar_max_seen    = 0U;
+            static uint32_t s_mar_wmax_seen   = 0U;
 
-        /* Mapper-RAM WRITE timing, the write twin of the block above:
-         * the PSRAM store latency of the sub-slot 1 path. wlate>0 means
-         * stores were issued after ~SLTSL had already risen - the byte
-         * still landed, but the handler exited into the next cycle, so
-         * the next read may have been served from a late entry. */
-        {
-            static uint32_t s_mar_wlate_seen = 0U;
-            static uint32_t s_mar_wmax_seen = 0U;
-            uint32_t wlate = g_cart_slotted_wlate;
-            uint32_t wmx = g_cart_slotted_wcyc_max;
-            if (wlate != s_mar_wlate_seen || wmx != s_mar_wmax_seen) {
-                const uint32_t wmn = (g_cart_slotted_wcyc_min == 0xFFFFFFFFU)
-                                   ? 0U : g_cart_slotted_wcyc_min;
-                s_mar_wlate_seen = wlate;
-                s_mar_wmax_seen = wmx;
-                printf ("CART: mapper-RAM writes=%lu wlate=%lu wcycles=%lu..%lu\r\n",
-                        (unsigned long)g_cart_slotted_writes,
+            const uint32_t reads  = g_cart_slotted_reads;
+            const uint32_t writes = g_cart_slotted_writes;
+            const uint32_t late   = g_cart_slotted_late;
+            const uint32_t wlate  = g_cart_slotted_wlate;
+            const uint32_t rmax   = g_cart_slotted_cyc_max;
+            const uint32_t wmax   = g_cart_slotted_wcyc_max;
+            const uint32_t rmin = (g_cart_slotted_cyc_min == 0xFFFFFFFFU)
+                                ? 0U : g_cart_slotted_cyc_min;
+            const uint32_t wmin = (g_cart_slotted_wcyc_min == 0xFFFFFFFFU)
+                                ? 0U : g_cart_slotted_wcyc_min;
+
+            const uint8_t count_due =
+                ((reads - s_mar_reads_seen) >= CART_MAPPER_LOG_INTERVAL)
+                || ((writes - s_mar_writes_seen) >= CART_MAPPER_LOG_INTERVAL);
+            const uint8_t timing_changed =
+                (late != s_mar_late_seen) || (wlate != s_mar_wlate_seen)
+                || (rmax != s_mar_max_seen) || (wmax != s_mar_wmax_seen);
+
+            if (count_due || timing_changed) {
+                printf ("CART: mapper-RAM reads=%lu late=%lu "
+                        "rcycles=%lu..%lu; writes=%lu wlate=%lu "
+                        "wcycles=%lu..%lu\r\n",
+                        (unsigned long)reads,
+                        (unsigned long)late,
+                        (unsigned long)rmin,
+                        (unsigned long)rmax,
+                        (unsigned long)writes,
                         (unsigned long)wlate,
-                        (unsigned long)wmn,
-                        (unsigned long)wmx);
+                        (unsigned long)wmin,
+                        (unsigned long)wmax);
+                s_mar_reads_seen  = reads;
+                s_mar_writes_seen = writes;
+                s_mar_late_seen   = late;
+                s_mar_wlate_seen  = wlate;
+                s_mar_max_seen    = rmax;
+                s_mar_wmax_seen   = wmax;
             }
         }
 
