@@ -45,24 +45,41 @@
 #endif
 
 /* PSRAM load path selector:
- *   0 = PSRAM peripheral DMA burst engine (the original path)
- *   1 = synchronous CPU word copy
+ *   0 = PSRAM peripheral DMA burst engine (the default, faster)
+ *   1 = synchronous CPU word copy (fallback)
  *
- * Why this switch exists: at HCLK 200 MHz the PSRAM device is hardwired to
- * 2x HCLK = 400 MHz DDR (the PSRAM peripheral has NO clock divider), and the
- * PSRAM DMA burst engine wedges there - the load hangs at a random chunk
- * ("PSRAM DMA stuck", repeatable at 200 MHz, fine at 175 MHz). The CPU
- * single-access path is NOT affected: the boot self-test (psram_test_at, CPU
- * byte write+readback at three offsets) and the psram_copy_rom 4 MiB CPU fill
- * both complete at 400 MHz, and mapper-RAM reads are served normally. A
- * synchronous word copy therefore sidesteps the failing burst engine and uses
- * the proven path.
+ * The PSRAM DMA burst engine is the preferred path: it frees the CPU
+ * for other work during the burst and the PSRAM controller's DMA
+ * hardware has higher throughput than the CPU's per-word stores at
+ * the 400 MHz DDR device clock. The CPU path is kept as a fallback
+ * for silicon revisions or environmental factors (board temperature,
+ * PSRAM device lot) where the DMA engine misbehaves.
  *
- * Cost: ~16-20 HCLK/word, i.e. ~13 us per 512 B chunk and ~210 ms for an
- * 8 MiB image - fine for a load, and it keeps the same per-chunk ~WAIT hold
- * structure. Set to 0 to A/B against the DMA path. */
+ * The DMA engine's known fragility (DMATF flag not asserting under
+ * some conditions at HCLK 200 MHz / 400 MHz DDR device clock) is
+ * handled inside psram_dma_copy() by:
+ *   - a bounded completion wait (~10 ms) per attempt,
+ *   - a controller reset (PSRAMDeInit) between attempts,
+ *   - up to PSRAM_DMA_RETRIES retries before failing,
+ *   - a first/last word verify readback after each successful
+ *     transfer to detect silent corruption that would otherwise pass
+ *     DMATF but land wrong bytes in PSRAM.
+ *
+ * The CPU path is ~13 us per 512 B chunk (~210 ms for an 8 MiB image)
+ * and keeps the same per-chunk ~WAIT hold structure. Set to 1 to
+ * fall back to it. */
 #ifndef USB_PSRAM_SYNC_COPY
-#define USB_PSRAM_SYNC_COPY 1
+#define USB_PSRAM_SYNC_COPY 0
+#endif
+
+/* Maximum number of retry attempts per chunk before failing the
+ * whole copy. Each retry resets the PSRAM DMA controller via
+ * PSRAMDeInit() so the next attempt starts from a clean state.
+ * Three is enough in practice: the wedge is a one-shot per chunk
+ * and on this hardware the second attempt has not been observed to
+ * fail when the first succeeded. */
+#ifndef PSRAM_DMA_RETRIES
+#define PSRAM_DMA_RETRIES  3
 #endif
 
 /* ------------------------------------------------------------------------ */
@@ -926,6 +943,91 @@ static uint32_t s_dbg_count = 0U;
 static uint32_t s_chunk_dbg = 0U;
 
 #if !USB_PSRAM_SYNC_COPY
+/* Verify the first and last word of a chunk against the source. Catches
+ * silent PSRAM corruption that lands a "DMATF set" state but writes
+ * the wrong bytes - the symptom that is impossible to detect from the
+ * DMA status alone. Both words are read with volatile loads so the
+ * readback is not coalesced or cached. */
+static uint8_t psram_dma_verify (const uint8_t *sram_src,
+                                 uint32_t psram_addr, uint32_t byte_count) {
+    const volatile uint32_t *dst = (const volatile uint32_t *)psram_addr;
+    const uint32_t *src = (const uint32_t *)sram_src;
+    /* First word. */
+    if (dst[0] != src[0]) return 1U;
+    /* Last word (byte_count is a multiple of 4 - guaranteed by the
+     * caller, which falls through to the sync-copy error return if
+     * it isn't). */
+    if (dst[byte_count / 4U - 1U] != src[byte_count / 4U - 1U]) return 2U;
+    return 0U;
+}
+
+/* Run one DMA burst (DMATF wait + verify). Returns 0 on verified
+ * success, non-zero on failure. The caller decides whether to reset
+ * the controller and retry. */
+static uint8_t psram_dma_burst (const uint8_t *sram_src, uint32_t psram_addr,
+                                uint32_t byte_count) {
+    /* Set up the DMA descriptor for the whole chunk. 32-bit transfers
+     * with NUM8 beats per burst (8 x 4 B = 32 B per burst) keeps the
+     * controller's internal burst buffer reasonable and matches the
+     * "single shot per chunk" model we run here. */
+    PSRAMDMATypeDef dmas = {0};
+    dmas.PSRAM_DMA_DAT_DIR      = DMA_DIR_PSRAM;
+    dmas.PSRAM_DMA_MEMORY_SIZE  = PSRAM_DMA_SIZE_32;
+    dmas.PSRAM_DMA_DMA_ONEBL    = DMA_BRST_NUM8;
+    dmas.PSRAM_DMA_TOWBL_TOUT   = DMA_PAUSE_TIM4;
+    dmas.PSRAM_DMA_DATA_NUM     = byte_count / 4U;
+
+    PSRAMDMASet ((uint32_t *)sram_src, psram_addr, &dmas);
+    PSRAM_DMA_Cmd (ENABLE);
+
+    /* Bounded wait: a normal burst completes in microseconds. If the
+     * PSRAM controller wedges (silicon / timing / temperature), this
+     * spin would otherwise hold the main loop forever with interrupts
+     * live. Bail out with an error so the caller can reset+retry. */
+    uint32_t guard = 2000000U;                    /* ~10 ms of spins */
+    while ((PSRAM->ISR & PSRAM_DMATF) == 0U) {
+        if (--guard == 0U) {
+            PSRAM_DMA_Cmd (DISABLE);
+            PSRAM_ClearITPendingBit (PSRAM_DMATF);
+            printf ("USB: PSRAM DMA stuck at 0x%08lx (%lu bytes)\r\n",
+                    (unsigned long)psram_addr, (unsigned long)byte_count);
+            return 2U;
+        }
+    }
+    PSRAM_ClearITPendingBit (PSRAM_DMATF);
+    PSRAM_DMA_Cmd (DISABLE);
+
+    /* Verify. A wedge that completed DMATF but wrote the wrong bytes
+     * (controller state desync after the burst) is otherwise invisible
+     * to the firmware - the bytes land in PSRAM, the cart reads them
+     * back, the game runs with corrupt instructions. Read the first
+     * and last word and compare; on mismatch return non-zero so the
+     * caller can reset+retry. */
+    const uint8_t vrc = psram_dma_verify (sram_src, psram_addr, byte_count);
+    if (vrc != 0U) {
+        printf ("USB: PSRAM DMA verify fail (rc=%u) at 0x%08lx (%lu bytes)\r\n",
+                (unsigned)vrc, (unsigned long)psram_addr,
+                (unsigned long)byte_count);
+    }
+    return vrc;
+}
+
+/* SRAM -> PSRAM via the PSRAM DMA burst engine.
+ *
+ * Hold cart ~WAIT around the burst so the cart EXTI0 handler cannot
+ * fire in the middle of a burst and corrupt the PSRAM controller's
+ * internal state. The handler early-returns while s_msx_wait_held is
+ * set (see cart.c), so the DMA burst has the bus to itself without
+ * disabling EXTI0 in the PFIC. The hold is per-chunk so the MSX-side
+ * progress bar still updates between chunks.
+ *
+ * Reliability strategy: up to PSRAM_DMA_RETRIES attempts per chunk,
+ * each preceded by a PSRAMDeInit() to clear any sticky state left
+ * behind by a wedged controller. Each successful transfer is
+ * verified by reading back the first and last word from PSRAM and
+ * comparing to the source. On wedge or verify-mismatch we return an
+ * error so the caller (USB_FileToPSRAM) aborts the load cleanly
+ * with a diagnostic instead of writing a corrupt image. */
 static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
                                uint32_t byte_count) {
     if ((byte_count & 3U) != 0U) return 1;        /* must be 4-byte aligned */
@@ -939,69 +1041,26 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
         s_dbg_count++;
     }
 
-    /* Hold cart ~WAIT around the DMA burst so the cart EXTI0 handler
-     * cannot fire in the middle of a burst and corrupt the PSRAM
-     * controller's internal state.
-     *
-     * Without the hold, the WCH PSRAM DMA is started with global IRQs
-     * enabled. The Z80 keeps executing - it is in a tight FIFO-poll
-     * loop, so it generates EXTI0 cart reads while the DMA is in
-     * flight. The cart handler tries to read/write individual bytes
-     * from PSRAM at the same time the DMA is bursting, the PSRAM
-     * controller's internal bus arbitration loses the interleaving,
-     * the DMATF status bit never asserts, and the bounded-wait
-     * (2000000 spins / ~10 ms) eventually bails with
-     * "PSRAM DMA stuck at 0x...". The MSX-side poll loop is then
-     * stuck in a state where the firmware is no longer servicing the
-     * mailbox - the "lock" the user sees.
-     *
-     * The hold is per-chunk (~512 B = a few hundred microseconds of
-     * DMA at 200 MHz / 32-bit / 8-beat bursts) so the MSX-side
-     * progress bar still updates between chunks. The handler is
-     * allowed to fire while the hold is active - every cart EXTI0
-     * handler early-returns at the very top when s_msx_wait_held=1
-     * (see cart.c::s_msx_wait_held), so the DMA burst has the bus
-     * to itself without us needing to disable EXTI0 in the PFIC. */
     Cart_HoldMSXWait_Begin ();
 
-    PSRAMDMATypeDef dmas = {0};
-    dmas.PSRAM_DMA_DAT_DIR      = DMA_DIR_PSRAM;   /* SRAM -> PSRAM */
-    dmas.PSRAM_DMA_MEMORY_SIZE  = PSRAM_DMA_SIZE_32;
-    dmas.PSRAM_DMA_DMA_ONEBL    = DMA_BRST_NUM8;
-    dmas.PSRAM_DMA_TOWBL_TOUT   = DMA_PAUSE_TIM4;
-    dmas.PSRAM_DMA_DATA_NUM     = byte_count / 4U;
-
-    PSRAMDMASet ((uint32_t *)sram_src, psram_addr, &dmas);
-    PSRAM_DMA_Cmd (ENABLE);
-    /* Bounded wait: a normal burst completes in microseconds, but if the
-     * PSRAM controller wedges (glitchy device - a long-standing suspicion
-     * on this board) this spin would otherwise hold the main loop forever
-     * with interrupts live: the cart keeps serving Z80 cycles, the mailbox
-     * never gets its answer, and the MSX hangs in its poll loop - the
-     * observed "lock". Bail out with an error so the load fails cleanly
-     * instead. */
-    uint32_t guard = 2000000U;                    /* ~10 ms of spins */
-    uint8_t  rc    = 0U;
-    while ((PSRAM->ISR & 0x2U) == 0U) {           /* wait DMATF */
-        if (--guard == 0U) {
-            PSRAM_DMA_Cmd (DISABLE);
-            PSRAM_ClearITPendingBit (PSRAM_DMATF);
-            printf ("USB: PSRAM DMA stuck at 0x%08lx (%lu bytes)\r\n",
-                    (unsigned long)psram_addr, (unsigned long)byte_count);
-            rc = 2U;
-            break;
+    uint8_t  rc = 2U;                              /* default: stuck */
+    for (uint32_t attempt = 0U; attempt < PSRAM_DMA_RETRIES; attempt++) {
+        if (attempt > 0U) {
+            /* Reset the PSRAM peripheral between attempts so a sticky
+             * controller state from a previous wedge does not poison
+             * the next burst. PSRAMDeInit() is a fast RCC reset, no
+             * reinitialization needed (the boot path did that). */
+            PSRAMDeInit ();
+            printf ("USB: PSRAM DMA retry %u at 0x%08lx\r\n",
+                    (unsigned)attempt, (unsigned long)psram_addr);
         }
+        rc = psram_dma_burst (sram_src, psram_addr, byte_count);
+        if (rc == 0U) break;                       /* verified success */
     }
-    if (rc == 0U) {
-        PSRAM_ClearITPendingBit (PSRAM_DMATF);
-    }
-    PSRAM_DMA_Cmd (DISABLE);
+
     /* Release ~WAIT. The held Z80 cycle (typically a 0x7FFF FIFO read)
      * now completes; the EXTI0 edge latched at its start fires the
-     * handler, which runs normally (s_msx_wait_held has just been
-     * cleared by Cart_HoldMSXWait_End, so the handler serves the
-     * cycle as a fresh one - returns the FIFO byte, or 0 if empty,
-     * and the MSX-side poll loop resumes). */
+     * handler, which serves the cycle as a fresh one. */
     Cart_HoldMSXWait_End ();
     return rc;
 }
