@@ -176,7 +176,6 @@ const char *const Cart_MapperNames[CART_MAP_MAX] = {
     "FLASH",
     "TERMINAL",
     "NEXTOR",
-    "SLOTTED",
 };
 
 Cart_Mapper Cart_GetMapper (void) { return g_mapper; }
@@ -310,7 +309,6 @@ int Cart_SetMapper (Cart_Mapper m) {
         && m != CART_MAP_FLASH
         && m != CART_MAP_TERMINAL
         && m != CART_MAP_NEXTOR
-        && m != CART_MAP_SLOTTED
         && PSRAM_GetRomMirrorBase() == 0U) return -1;
 
     /* Reset bank state so a switch from one mapper to another does not
@@ -322,6 +320,7 @@ int Cart_SetMapper (Cart_Mapper m) {
 
     g_mapper = m;
 
+#if 0 /* CART_MAP_SLOTTED removed in V3 - re-enable when ported */
     if (m == CART_MAP_SLOTTED) {
         /* Never carry page or sub-slot selections across mapper swaps. */
         g_subslot_reg = 0x00U;
@@ -329,6 +328,7 @@ int Cart_SetMapper (Cart_Mapper m) {
             s_slotted_bank_regs[page] = 0U;
         }
     }
+#endif
 
     /* Install the matching handler in VTF slot 0. SetVTFIRQ writes
      * VTFADDR[0] and VTFIDR[0] - the VTF dispatcher uses VTFADDR[0]
@@ -347,7 +347,9 @@ int Cart_SetMapper (Cart_Mapper m) {
     case CART_MAP_ASCII8k:     h = (uint32_t)Cart_EXTI0_ASCII8k_Handler; break;
     case CART_MAP_ASCII16k:    h = (uint32_t)Cart_EXTI0_ASCII16k_Handler; break;
 
+#if 0 /* CART_MAP_SLOTTED removed in V3 - re-enable when ported */
     case CART_MAP_SLOTTED:    h = (uint32_t)Cart_EXTI0_Slotted_Handler; break;
+#endif
     case CART_MAP_FLASH:      h = (uint32_t)Cart_EXTI0_Flash_Handler; break;
     case CART_MAP_TERMINAL:   h = (uint32_t)Cart_EXTI0_Terminal_Handler; break;
     case CART_MAP_NEXTOR:    h = (uint32_t)Cart_EXTI0_Nextor_Handler; break;
@@ -355,6 +357,7 @@ int Cart_SetMapper (Cart_Mapper m) {
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
 
+#if 0 /* CART_MAP_SLOTTED removed in V3 - re-enable when ported */
     /* Only the slotted mapper owns the PE8/~IORQ bank-register decoder.
      * Keep EXTI9_5 disabled for Terminal/Nextor and all legacy mappers. */
     EXTI->INTFR = EXTI_INTENR_MR8;
@@ -366,6 +369,7 @@ int Cart_SetMapper (Cart_Mapper m) {
         EXTI->INTENR &= ~EXTI_INTENR_MR8;
         NVIC_DisableIRQ (EXTI9_5_IRQn);
     }
+#endif
 
     /* Flash selector mappers: reset the mailbox so the loader starts clean. */
     if (m == CART_MAP_ROM32k || m == CART_MAP_FLASH) {
@@ -690,12 +694,16 @@ uint8_t Cart_ReadWriteData (void) {
 /* MSX memory-mapper bank-register capture. OUT (0xFC..0xFF),A is an
  * I/O cycle and therefore never asserts ~SLTSL; PE8/~IORQ is its EXTI
  * trigger. Each port selects one 16 KiB bank for a CPU page. The handler
- * only samples the write and never drives the data bus. */
+ * only samples the write and never drives the data bus.
+ *
+ * V3 cart.c removed CART_MAP_SLOTTED entirely; this handler is kept
+ * as a stub that clears the EXTI edge but never reads a bank port,
+ * so a stray IORQ-edge during Terminal/Nextor does nothing harmful. */
 void EXTI9_5_IRQHandler (void) {
     if ((EXTI->INTFR & EXTI_INTENR_MR8) == 0U) return;
     EXTI->INTFR = EXTI_INTENR_MR8;
 
-    if (g_mapper != CART_MAP_SLOTTED) return;
+    return; /* CART_MAP_SLOTTED removed in V3 cart.c - no bank-register decoder */
 
     uint32_t ctrl = GPIOE->INDR;
     if ((ctrl & CART_IORQ_MASK) != 0U) return;
@@ -1934,13 +1942,20 @@ void Cart_EXTI0_Terminal_Handler (void) {
             /* Output FIFO pop. Paired with Terminal_Service::out_push:
              * the producer does `fence w,w` between byte-write and
              * tail-increment, so reading tail and then the byte is safe
-             * in the IRQ context. */
-                        if (g_term_mbox.out_n > 0U) {
+             * in the IRQ context.
+             *
+             * Migration note: V3 terminal.h removed the redundant kbd_n /
+             * out_n byte counters - the SPSC indices are the source of
+             * truth and Terminal_OutLevel() derives occupancy from them.
+             * cart.c mirrors the producer side here: pop when the head
+             * is not at the tail, advance head, leave the indices alone
+             * otherwise. */
+            const uint16_t tail = g_term_mbox.out_tail;
+            if (g_term_mbox.out_head != tail) {
                 v = g_term_mbox.out_buf[g_term_mbox.out_head];
                 __asm__ volatile ("fence r, r" ::: "memory");
                 g_term_mbox.out_head = (uint16_t)(
-                    (g_term_mbox.out_head + 1U) % 2048U);
-                g_term_mbox.out_n--;
+                    (g_term_mbox.out_head + 1U) % TERM_OUT_FIFO_DEPTH);
             } else {
                 v = 0x00U;  /* empty: MSX loops and waits */
             }
@@ -1985,12 +2000,17 @@ void Cart_EXTI0_Terminal_Handler (void) {
         if (address == 0x7FFDU) {
             /* Keyboard FIFO push. Drop on overflow - the terminal
              * never sends faster than human typing, so overflow is a
-             * firmware-side bug worth noticing. */
-            uint8_t next = (uint8_t)((g_term_mbox.kbd_tail + 1U) % 16U);
+             * firmware-side bug worth noticing.
+             *
+             * Migration note: V3 terminal.h removed the redundant kbd_n
+             * byte counter; the SPSC head/tail indices alone encode the
+             * ring state. Mirror the producer side from the consumer:
+             * advance tail only when it does not catch head. */
+            uint8_t next = (uint8_t)((g_term_mbox.kbd_tail + 1U)
+                                     % TERM_KBD_FIFO_DEPTH);
             if (next != g_term_mbox.kbd_head) {
                 g_term_mbox.kbd_buf[g_term_mbox.kbd_tail] = w;
                 g_term_mbox.kbd_tail = next;
-                g_term_mbox.kbd_n++;
             }
         } else if (address == 0x7FFEU) {
             /* Control byte. Latched verbatim - terminal.c reads and

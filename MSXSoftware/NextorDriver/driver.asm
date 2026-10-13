@@ -149,9 +149,12 @@ MB_ABORT	equ	05h
 MB_STAPEEK	equ	06h
 MB_IDENT	equ	07h
 
-; Breadcrumbs. A marker is a single store to the mailbox command
-; register followed by ONE byte in B - the register value the step is
-; about - and no answer. The firmware prints the name and the value.
+INIT_STATUS_RETRIES	equ	0Ah
+
+; Breadcrumbs use a reserved mailbox command followed by ONE byte in B -
+; the register value the step is about - with no result data. MB_MARK is
+; intentionally silent in normal builds; diagnostic MB_MARK_WAIT waits for
+; DONE so the firmware can log each marker without racing the next request.
 ;
 ; They exist because a driver that dies half way through a routine
 ; produces NO mailbox traffic at all, and "no traffic" cannot be told
@@ -165,9 +168,9 @@ MB_IDENT	equ	07h
 ; comment what B carries, and the two tables - these and s_mark_name[] in
 ; firmware/User/nextor.c - have to stay in step.
 ;
-; Numbered from 0x20 so they sit clear of the eight real commands and of
-; the 0x08..0x1F range a corrupted stack is likelier to produce. Keep
-; these and s_mark_name[] in firmware/User/nextor.c in step.
+; Their wire command bytes occupy 0x20..0x5F, clear of the eight real
+; commands and the 0x08..0x1F range a corrupted stack is likelier to
+; produce. Keep these and s_mark_name[] in firmware/User/nextor.c in step.
 MB_MK_RW_ENTER		equ	00h	; B = device number the kernel passed
 MB_MK_RW_FRAME		equ	01h	; B = sector count requested
 MB_MK_RW_DIR		equ	02h	; B = direction read from C bit 0
@@ -201,6 +204,14 @@ MB_MK_RW_BUFPG		equ	1Dh	; B = high byte of the caller's HL buffer.
 				;     81h = the page-2 view of a direct
 				;     to-DTA transfer (RW_MANY), anything
 				;     else is a kernel buffer (SECBUF) -
+
+; Initialization diagnostics (enabled with PROBES=1).
+MB_MK_DQ_INIT_DEVICE equ 1Eh ; B = device number on device query 2
+MB_MK_DQ_INIT_BUFFER equ 1Fh ; B = 0 validate-only / 1 buffer supplied
+MB_MK_DQ3_DRIVES     equ 20h ; B = available drive count at driver query 3
+MB_MK_DQ3_FLAGS      equ 21h ; B = input flags at driver query 3
+MB_MK_DQ4_FLAGS      equ 22h ; B = input flags at driver query 4
+MB_MK_DQ5_MAXDEV     equ 23h ; B = maximum device count returned
 
 ;answer sizes. CAPACITY is the Nextor device parameter block verbatim;
 ; IDENT is INQUIRY vendor + product, both space-padded by the firmware so
@@ -421,12 +432,262 @@ DO_DRVQ_GET_STRING:
 
 DO_DRVQ_GET_INIT_PARAMS:
 	push	de
+	IFDEF RW_PROBES
+	push	bc		;preserve the kernel's inputs across the handshake
+	ENDIF
 	call	MB_HANDSHAKE_CHK
-	jr	c,DO_DRVQ_INIT_FAIL
+	jr	nc,DO_DRVQ_GET_INIT_PARAMS_HS_OK
+	IFDEF RW_PROBES
+	pop	hl		;discard saved inputs without losing failure B/C
+	ENDIF
+	jp	DO_DRVQ_INIT_FAIL
+DO_DRVQ_GET_INIT_PARAMS_HS_OK:
+	IFDEF RW_PROBES
+	pop	bc
+	ENDIF
 	pop	de
+IFDEF RW_PROBES
+	; Record the kernel's allocation inputs only after confirming that the
+	; mailbox answers. C bit 5 is the reduced-drive-count boot option.
+	push	bc
+	push	de
+	ld	a,MB_MK_DQ3_DRIVES
+	call	MB_MARK_WAIT
+	pop	de
+	pop	bc
+	push	bc
+	push	de
+	ld	b,c
+	ld	a,MB_MK_DQ3_FLAGS
+	call	MB_MARK_WAIT
+	pop	de
+	pop	bc
+ENDIF
+	; The mailbox is alive, so query the cached USB-medium state once
+	; during boot. A zero means no usable USB drive was discovered.
+	; Keep the driver installed so later STATUS polling can detect insertion.
+	ld	b,INIT_STATUS_RETRIES
+DO_DRVQ_INIT_STATUS:
+	push	bc
+	push	de
+	ld	a,MB_STATUS
+	call	MB_CMD0_1BYTE
+	pop	de
+	pop	bc
+	jr	c,DO_DRVQ_INIT_STATUS_NEXT
+	or	a
+	jr	nz,DO_DRVQ_INIT_OK
+DO_DRVQ_INIT_STATUS_NEXT:
+	dec	b
+	jr	z,DO_DRVQ_INIT_STATUS_FAIL
+	push	bc
+	push	de
+	ld	hl,MSG_MEDIA_RETRY
+	call	PRINT_WITH_DE
+	pop	de
+	pop	bc
+	jr	DO_DRVQ_INIT_STATUS_WAIT
+DO_DRVQ_INIT_STATUS_FAIL:
+	ld	hl,MSG_NO_MEDIA
+	call	PRINT_WITH_DE
+	jr	DO_DRVQ_INIT_OK
+DO_DRVQ_INIT_STATUS_WAIT:
+	; Give the firmware main loop time to complete USB discovery.
+	; Roughly 1 second at 3.58 MHz between status attempts.
+	push	bc
+	push	de
+	ld	d,4
+DO_DRVQ_INIT_STATUS_WAIT_OUTER:
+	ld	c,0FFh
+	; C counts the inner delay batches; do not reinitialise it while
+	; counting down, or this loop never completes.
+DO_DRVQ_INIT_STATUS_WAIT_MIDDLE:
+	ld	b,0
+DO_DRVQ_INIT_STATUS_WAIT_INNER:
+	djnz	DO_DRVQ_INIT_STATUS_WAIT_INNER
+	dec	c
+	jr	nz,DO_DRVQ_INIT_STATUS_WAIT_MIDDLE
+	dec	d
+	jr	nz,DO_DRVQ_INIT_STATUS_WAIT_OUTER
+	pop	de
+	pop	bc
+	jr	DO_DRVQ_INIT_STATUS
+DO_DRVQ_INIT_OK:
+	call	INIT_PARTITION_REPORT
 	xor	a		;RESULT_OK
 	ld	b,0		;no TIMER_INT / EXTBIO hooks
 	ld	hl,0		;no page-3 work area
+	ret
+
+
+;--- Report raw primary-partition candidates during driver query 3.
+;    This driver can read the MBR before Nextor's automapper runs, but the
+;    driver API provides no callback with the final drive-letter mapping.
+;    Therefore each line means only that an active FAT12/16 primary MBR
+;    entry was found; the kernel validates the filesystem and MAP shows the
+;    actual letters.
+;
+;    The MBR is read twice because this ROM driver has no writable sector
+;    buffer: the first pass validates 55AA, and the second streams the four
+;    status/type pairs directly from the mailbox without storing the sector.
+
+INIT_PARTITION_REPORT:
+	ld	a,MB_STAPEEK
+	call	MB_CMD0_1BYTE
+	jr	c,IPR_DONE
+	or	a
+	jr	z,IPR_DONE
+	call	INIT_MBR_READ
+	jr	c,IPR_DONE
+	ld	c,0FFh		;skip 510 bytes, leaving the MBR signature
+	call	MB_DROP
+	ld	c,0FFh
+	call	MB_DROP
+	ld	a,(MBOX_DATA)
+	cp	55h
+	jr	nz,IPR_DONE
+	ld	a,(MBOX_DATA)
+	cp	0AAh
+	jr	nz,IPR_DONE
+
+	call	INIT_MBR_READ
+	jr	c,IPR_DONE
+	ld	c,0FFh		;446 bytes to the first partition entry
+	call	MB_DROP
+	ld	c,0BFh
+	call	MB_DROP
+	ld	hl,MSG_MBR_P1
+	call	INIT_REPORT_MBR_ENTRY
+	ld	hl,MSG_MBR_P2
+	call	INIT_REPORT_MBR_ENTRY
+	ld	hl,MSG_MBR_P3
+	call	INIT_REPORT_MBR_ENTRY
+	ld	hl,MSG_MBR_P4
+	call	INIT_REPORT_MBR_ENTRY
+	ret
+IPR_DONE:
+	ret
+
+;--- Issue a raw one-sector read of LBA 0. Cy=1 means timeout or I/O error.
+INIT_MBR_READ:
+	ld	hl,MB_ZERO_LBA
+	ld	a,MB_READ
+	ld	b,4
+	call	MB_SEND
+	call	MB_POLL
+	ret	c
+	ld	a,(MBOX_STAT)
+	and	MBST_ERR
+	jr	nz,IMR_ERROR
+	or	a
+	ret
+IMR_ERROR:
+	scf
+	ret
+
+;--- Stream one 16-byte primary MBR entry. Print its size and a Pn
+;    initialized line only for an active FAT12/16 type. HL points at the
+;    line prefix on entry.
+INIT_REPORT_MBR_ENTRY:
+	push	iy		;preserve caller IY; IY holds the MiB result below
+	push	hl		;line prefix survives while the entry is streamed
+	ld	a,(MBOX_DATA)	;partition status byte
+	push	af
+	ld	c,3
+	call	MB_DROP		;skip starting CHS
+	ld	a,(MBOX_DATA)	;partition type
+	push	af
+	ld	c,7
+	call	MB_DROP		;skip end CHS and starting LBA
+	ld	a,(MBOX_DATA)	;partition size, little-endian sectors
+	ld	l,a
+	ld	a,(MBOX_DATA)
+	ld	h,a
+	ld	a,(MBOX_DATA)
+	ld	c,a
+	ld	a,(MBOX_DATA)
+	ld	b,a
+	ld	a,b
+	and	0F8h		;MiB above 65535 cannot fit the decimal helper
+	jr	nz,IRME_LARGE
+	ld	a,h		;MiB low byte = sector-count bits 11..18
+	srl	a
+	srl	a
+	srl	a
+	ld	l,a
+	ld	a,c
+	and	07h
+	rlca
+	rlca
+	rlca
+	rlca
+	rlca
+	or	l
+	ld	l,a
+	ld	a,c		;MiB high byte = sector-count bits 19..26
+	srl	a
+	srl	a
+	srl	a
+	ld	h,a
+	ld	a,b
+	and	07h
+	rlca
+	rlca
+	rlca
+	rlca
+	rlca
+	or	h
+	ld	h,a
+	push	hl
+	pop	iy
+	jr	IRME_SIZE_READY
+IRME_LARGE:
+	ld	iy,0FFFFh	;print the explicit lower-bound marker below
+IRME_SIZE_READY:
+	pop	af		;type byte
+	cp	01h		;FAT12
+	jr	z,IRME_TYPE_OK
+	cp	04h		;FAT16 small
+	jr	z,IRME_TYPE_OK
+	cp	06h		;FAT16
+	jr	z,IRME_TYPE_OK
+	cp	0Eh		;FAT16 LBA
+	jr	z,IRME_TYPE_OK
+	pop	af		;unsupported type: discard saved status
+	pop	hl		;discard line prefix
+	pop	iy		;restore caller IY
+	xor	a
+	ret
+IRME_TYPE_OK:
+	pop	af		;status byte: bit 7 is active
+	and	80h
+	jr	z,IRME_NOT_ACTIVE
+	pop	hl		;line prefix
+	call	PRINT_WITH_DE
+	push	iy
+	pop	hl
+	ld	a,h
+	cp	0FFh
+	jr	nz,IRME_PRINT_SIZE
+	ld	a,l
+	cp	0FFh
+	jr	z,IRME_PRINT_LARGE
+IRME_PRINT_SIZE:
+	call	PRINT_MIB16_DE
+	ld	hl,MSG_MIB_SUFFIX
+	call	PRINT_WITH_DE
+	jr	IRME_PRINTED
+IRME_PRINT_LARGE:
+	ld	hl,MSG_MIB_TOO_LARGE
+	call	PRINT_WITH_DE
+IRME_PRINTED:
+	pop	iy		;restore caller IY
+	ld	a,1
+	ret
+IRME_NOT_ACTIVE:
+	pop	hl		;discard line prefix
+	pop	iy		;restore caller IY
+	xor	a
 	ret
 
 
@@ -523,12 +784,33 @@ DO_DRVQ_INIT_RETURN:
 ;                                  itself is broken
 
 DO_DRVQ_INIT:
+IFDEF RW_PROBES
+	push	bc		;preserve query 4's flags across the handshake
+ENDIF
 	ld	hl,INIT_MSG
 	call	PRINT_WITH_DE		;unconditional
 	push	de			;same reason as in query 3 above
 	call	MB_HANDSHAKE_CHK	;re-verify (queries 3 and 4 run back to back)
-	jr	c,DO_DRVQ_INIT_FAIL
+	jr	nc,DO_DRVQ_INIT_HS_OK
+	IFDEF RW_PROBES
+	pop	de		;save the callback for DO_DRVQ_INIT_FAIL
+	pop	hl		;discard saved flags without losing failure B/C
+	push	de
+	ENDIF
+	jp	DO_DRVQ_INIT_FAIL
+DO_DRVQ_INIT_HS_OK:
 	pop	de
+	IFDEF RW_PROBES
+	pop	bc
+	; Query 4 receives the same boot-option flags as query 3.
+	push	bc
+	push	de
+	ld	b,c
+	ld	a,MB_MK_DQ4_FLAGS
+	call	MB_MARK_WAIT
+	pop	de
+	pop	bc
+	ENDIF
 	xor	a		;RESULT_OK
 	ret
 
@@ -544,6 +826,16 @@ DO_DRVQ_INIT:
 DO_DRVQ_GET_MAX_DEVICE:
 	ld	a,RESULT_OK
 	ld	b,MB_DEVICE_COUNT
+IFDEF RW_PROBES
+	push	af
+	push	bc
+	push	de
+	ld	a,MB_MK_DQ5_MAXDEV
+	call	MB_MARK_WAIT
+	pop	de
+	pop	bc
+	pop	af
+ENDIF
 	ret
 
 
@@ -777,6 +1069,37 @@ DQS_EOF:
 ;     a sector count of 0 in the parameter block, not as an error.
 
 DO_DEVQ_GET_PARAMS:
+IFDEF RW_PROBES
+	; Log the device Nextor is enumerating and whether this is the
+	; validate-only call (HL=0) or the real 12-byte parameter request.
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	b,c
+	ld	a,MB_MK_DQ_INIT_DEVICE
+	call	MB_MARK_WAIT
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	b,1
+	ld	a,h
+	or	l
+	jr	nz,DQP_TRACE_BUFFER
+	ld	b,0
+DQP_TRACE_BUFFER:
+	ld	a,MB_MK_DQ_INIT_BUFFER
+	call	MB_MARK_WAIT
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+ENDIF
 	ld	a,h
 	or	l
 	ld	b,a			;HL=0 means validate only; any nonzero
@@ -1491,14 +1814,17 @@ MB_MARK:
 ;    old breadcrumb storm cannot return), this one performs the whole
 ;    command/argument/poll transaction itself, so the value probes can
 ;    never overwrite a pending real request and every diagnostic byte is
-;    captured. Only the per-read buffer probes and nothing else uses it.
+;    captured. DI protects the two-byte command/argument burst from a Z80
+;    ISR clobbering B between the two writes. Only diagnostic probes use it.
 ;    In: A = marker index, B = payload. Trashes AF, BC, HL.
 
 MB_MARK_WAIT:
+	di
 	add	a,20h
 	ld	(MBOX_CMD),a
 	ld	a,b
 	ld	(MBOX_DATA),a
+	ei
 	call	MB_POLL
 	ret
 
@@ -1509,10 +1835,12 @@ MB_MARK_WAIT:
 ;    can follow, so it cannot overwrite a pending command. In: B=count.
 
 MB_FRAME_TRACE:
+	di
 	add	a,20h
 	ld	(MBOX_CMD),a
 	ld	a,b
 	ld	(MBOX_DATA),a
+	ei
 	call	MB_POLL
 	ret
 
@@ -1875,11 +2203,111 @@ PRINT_HEX_EMIT_DE:
 	call	PRINT_WITH_DE
 	ret
 
+
+;--- PRINT_MIB16_DE: print IY as a five-character decimal MiB field.
+;    Leading zeroes are spaces; PRINT_MIB_CHAR_DE preserves the digit
+;    counter and IY while printing each digit through PRINT_WITH_DE.
+PRINT_MIB16_DE:
+	ld	b,0		;leading-zero suppression flag
+	ld	c,0
+	push	bc
+	ld	bc,10000
+	call	PRINT_MIB_PLACE
+	pop	bc
+	call	PRINT_MIB_DIGIT
+	push	bc
+	ld	bc,1000
+	call	PRINT_MIB_PLACE
+	pop	bc
+	call	PRINT_MIB_DIGIT
+	push	bc
+	ld	bc,100
+	call	PRINT_MIB_PLACE
+	pop	bc
+	call	PRINT_MIB_DIGIT
+	push	bc
+	ld	bc,10
+	call	PRINT_MIB_PLACE
+	pop	bc
+	call	PRINT_MIB_DIGIT
+	push	bc
+	ld	bc,1
+	call	PRINT_MIB_PLACE
+	pop	bc
+	add	a,'0'		;always print the units digit
+	call	PRINT_MIB_CHAR_DE
+	ret
+
+PRINT_MIB_PLACE:
+	xor	a		;digit count
+PRINT_MIB_PLACE_LOOP:
+	push	af
+	push	iy
+	pop	hl
+	or	a		;clear carry for the subtraction
+	sbc	hl,bc
+	jr	c,PRINT_MIB_PLACE_DONE
+	push	hl
+	pop	iy
+	pop	af
+	inc	a
+	jr	PRINT_MIB_PLACE_LOOP
+PRINT_MIB_PLACE_DONE:
+	pop	af
+	ret
+
+PRINT_MIB_DIGIT:
+	or	a
+	jr	nz,PRINT_MIB_NONZERO
+	ld	a,b
+	or	a
+	jr	nz,PRINT_MIB_ZERO
+	ld	a,' '
+	call	PRINT_MIB_CHAR_DE
+	ret
+PRINT_MIB_ZERO:
+	xor	a
+	jr	PRINT_MIB_EMIT
+PRINT_MIB_NONZERO:
+	ld	b,1
+PRINT_MIB_EMIT:
+	add	a,'0'
+	call	PRINT_MIB_CHAR_DE
+	ret
+
+;--- Emit decimal digit/space A through the string callback.
+PRINT_MIB_CHAR_DE:
+	push	bc
+	push	iy
+	cp	' '
+	jr	z,PRINT_MIB_SPACE
+	sub	'0'
+	ld	c,a
+	sla	c
+	ld	b,0
+	ld	hl,MIB_DIGITS
+	add	hl,bc
+	call	PRINT_WITH_DE
+	jr	PRINT_MIB_CHAR_DONE
+PRINT_MIB_SPACE:
+	ld	hl,MSG_SPACE
+	call	PRINT_WITH_DE
+PRINT_MIB_CHAR_DONE:
+	pop	iy
+	pop	bc
+	ret
+
 ; One byte, indexed by nibble value 0..15. The arithmetic version above
 ; (add '0', then +7 past '9') is the same table in fewer bytes, but a
 ; table is the easier thing to read here and the ROM has room to spare.
 HEXDIGITS:
 	db	"0123456789ABCDEF"
+
+MIB_DIGITS:
+	db	"0",0,"1",0,"2",0,"3",0,"4",0
+	db	"5",0,"6",0,"7",0,"8",0,"9",0
+MSG_SPACE:
+	db	" ",0
 
 
 ;-----------------------------------------------------------------------------
@@ -1889,6 +2317,9 @@ HEXDIGITS:
 MB_NOARGS:			;MB_SEND with B=0 never reads (HL); this is
 	db	0			;a real ROM address for it to be, and it
 					;keeps that routine usable in place.
+
+MB_ZERO_LBA:
+	db	0,0,0,0
 
 ;What the firmware must answer the handshake with. A label and not an
 ;equ so MB_EXPECT[B] can read a single byte back out of it later - the
@@ -1903,6 +2334,19 @@ INIT_MSG:
 	db	13,10
 	db	"  RISKYMSX2 USB drive driver 1.0.1"
 	db	13,10,13,10,0
+
+MSG_MBR_P1:
+	db	"P1 ",0
+MSG_MBR_P2:
+	db	"P2 ",0
+MSG_MBR_P3:
+	db	"P3 ",0
+MSG_MBR_P4:
+	db	"P4 ",0
+MSG_MIB_SUFFIX:
+	db	" MB initialized",13,10,0
+MSG_MIB_TOO_LARGE:
+	db	">65535 MB initialized",13,10,0
 
 MSG_DRIVER_NAME:
 	db	"RISKYMSX2 USB drive",0
@@ -1924,6 +2368,12 @@ MSG_DEVICE_NAME:
 
 MSG_NO_ANSWER:
 	db	" - no answer from the cartridge mailbox",0
+
+MSG_NO_MEDIA:
+	db	" - USB drive not discovered; connect a USB drive",13,10,0
+
+MSG_MEDIA_RETRY:
+	db	" - USB drive not discovered; retrying...",13,10,0
 
 MSG_BAD_MAGIC:
 	db	" - mailbox answered with the wrong bytes at index ",0

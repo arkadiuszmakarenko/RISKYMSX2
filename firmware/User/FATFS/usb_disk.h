@@ -152,6 +152,11 @@ void USB_ListDir (const char *path, uint16_t max);
  * up as a disk. */
 uint8_t USB_TryEnsureMounted (void);
 
+/* Unmount the FatFs volume and clear its cached mounted state. Call before
+ * raw partition-table changes or a format operation, then use
+ * USB_TryEnsureMounted() to mount the resulting volume again. */
+void USB_InvalidateMount (void);
+
 /* Enumeration only: poll the root hub, enumerate a newly attached device,
  * unmount + invalidate on disconnect.  No f_mount, no filesystem required.
  * Idempotent and cheap to call repeatedly.  Returns DEF_SUCCESS when the

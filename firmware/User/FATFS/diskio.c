@@ -35,16 +35,38 @@ DSTATUS disk_status (BYTE pdrv) {
 /* Initialize a Drive                                                    */
 /*-----------------------------------------------------------------------*/
 DSTATUS disk_initialize (BYTE pdrv) {
-    ClearUSB();
-    uint8_t res = USBH_PreDeal();
-    if (res == 0 || res == 0xFF) {
-        if (usb_scsi_read_capacity (&block_count, &block_size) != 0
-            || block_size != 512) {
+    /* DEFINITIVE-FIX: do NOT ClearUSB() here. Clearing HostCtl[] wipes
+     * the bulk endpoint descriptors + data toggles that the SCSI CBW
+     * layer needs, and USBH_PreDeal() afterwards cannot rebuild them
+     * (the PORT_STATUS_CHG edge was consumed long ago, so PreDeal
+     * returns DEF_DEFAULT without re-enumerating). The old sequence
+     * therefore destroyed live enumeration, READ CAPACITY ran with
+     * wiped endpoints and failed, f_mount returned FR_NOT_READY and
+     * the terminal never mounted - while Nextor's probe path (which
+     * never calls disk_initialize) worked fine with the same stick. */
+    if (RootHubDev[DEF_USB_PORT].bStatus != ROOT_DEV_SUCCESS) {
+        /* Port not in a healthy enumerated state: (re-)enumerate. This
+         * also covers bStatus == ROOT_DEV_DISCONNECT == 0 (initial
+         * power-up state) and FAILED. USBH_EnumRootDevice is the same
+         * routine PreDeal calls for a fresh connect edge.
+         * NOTE: the check is on the driver's STORED status, not on
+         * USBHSH_CheckRootHubPortStatus() - that one is edge-driven
+         * (PORT_STATUS_CHG) and answers ROOT_DEV_FAILED on every call
+         * without a fresh edge, even with a perfectly enumerated stick
+         * on the port. */
+        RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_CONNECTED;
+        RootHubDev[DEF_USB_PORT].bDeviceIndex =
+            DEF_USB_PORT * DEF_ONE_USB_SUP_DEV_TOTAL;
+        if (USBH_EnumRootDevice (DEF_USB_PORT) != ERR_SUCCESS) {
             return STA_NOINIT;
         }
-        return 0;  /* Disk OK */
+        RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_SUCCESS;
     }
-    return STA_NOINIT;
+    if (usb_scsi_read_capacity (&block_count, &block_size) != 0
+        || block_size != 512) {
+        return STA_NOINIT;
+    }
+    return 0;  /* Disk OK */
 }
 
 /*-----------------------------------------------------------------------*/

@@ -3,6 +3,20 @@
 
 #include "ch32v4x7.h"
 
+/* V3 cart.c internals not migrated: the CART_MAPPER_RAM_PSRAM /
+ * CART_MAPPER_RAM_SRAM / CART_MAPPER_RAM_BACKEND trio selects between
+ * an SRAM-backed mapper RAM array (the isolation build) and the
+ * PSRAM-backed hardware path. The matching cart.c code that consumes
+ * these macros is intentionally absent from the merged build because
+ * cart.c is not migrated. main.c guards its CART_MAPPER_RAM_BACKEND
+ * branches with #if 0. */
+
+/* Migration note: the CART_SLOTTED_BANKS_PRESENT / CART_SLOTTED_BANK_MASK
+ * pair is also V3-only; it is kept here because (a) the layout tripwire
+ * _Static_assert on the sub-slot 1 region size is genuinely useful and
+ * (b) usb_disk.c computes its game-window bounds from
+ * CART_GAME_MAX_BYTES which itself depends on the sub-slot 1 offset. */
+
 /*
  * CH32V407VET6 (RISKYMSX2) MSX cartridge bus pinout.
  *
@@ -24,6 +38,7 @@
 #define CART_RD_MASK      0x0002U  /* PE1  ~RD */
 #define CART_WR_MASK      0x0004U  /* PE2  ~WR */
 #define CART_WAIT_MASK    0x0008U  /* PE3  ~WAIT (active-low cart output) */
+#define CART_RESET_MASK   0x0010U  /* PE4  ~RESET (TFMSX dev hardware only) */
 #define CART_MREQ_MASK    0x0020U  /* PE5  ~MREQ  (memory-cycle qualifier)  */
 #define CART_M1_MASK      0x0040U  /* PE6  M1 (low during opcode fetch) */
 #define CART_IORQ_MASK    0x0100U  /* PE8  ~IORQ  (I/O-cycle qualifier)
@@ -44,18 +59,58 @@
 #define CART_BUS_ON       0x33333333U
 #define CART_BUS_OFF      0x44444444U
 
-/* RAM-backed MSX mapper window used by CART_MAP_SLOTTED. Four MiB is
- * exposed as 256 x 16 KiB banks selected through I/O ports FC..FF.
+/* TFMSX exposes the cart reset line as a safely-drivable open-drain input.
+ * Keep this disabled for production cartridges whose ~RESET is read-only. */
+#ifndef CART_TFMSX_HARD_RESET
+#define CART_TFMSX_HARD_RESET 0
+#endif
+
+/* PSRAM mapper window used by the Nextor expanded-slot path: 256 x 16 KiB
+ * banks = 4 MiB.
  * Keep this region separate from the normal game-image area. */
 #define CART_SLOTTED_BANK_PORT_BASE   0xFCU
 #define CART_SLOTTED_BANK_COUNT       256U
 #define CART_SLOTTED_BANK_SIZE        (16U * 1024U)
 #define CART_SLOTTED_BANK_BASE_OFFSET (4U * 1024U * 1024U)
 
+/* Mapper-RAM size PRESENTED to the machine: how many of the physical
+ * banks are actually selectable. The FC..FF bank registers latch the
+ * full 0..255 byte (see the EXTI9_5 handler), but Cart_SlottedPSRAMPtr
+ * masks it into this range, so a bank number past the limit aliases
+ * back onto bank 0.
+ *
+ * EMPIRICAL: 16 (256 KiB) HUNG the boot on real hardware even with
+ * the timing instrumentation fully off - the aliasing presentation
+ * is NOT tolerated by this BIOS/Nextor combination despite matching
+ * how real small mappers ignore the high bank bits. 256 = full 4 MiB
+ * = the last empirically working configuration. The memory test then
+ * walks all 256 banks (slow). If a shorter test is needed, bisect
+ * from here: try 128 / 64 / 32 (powers of two only) one build at a
+ * time and verify the boot before keeping it. */
+#define CART_SLOTTED_BANKS_PRESENT    256U
+#define CART_SLOTTED_BANK_MASK        (CART_SLOTTED_BANKS_PRESENT - 1U)
+
+_Static_assert ((CART_SLOTTED_BANKS_PRESENT
+                 & (CART_SLOTTED_BANKS_PRESENT - 1U)) == 0U,
+                "CART_SLOTTED_BANKS_PRESENT must be a power of two "
+                "(mask-based aliasing)");
+_Static_assert (CART_SLOTTED_BANKS_PRESENT <= CART_SLOTTED_BANK_COUNT,
+                "CART_SLOTTED_BANKS_PRESENT exceeds the physical region");
+
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
  * image window. Konami/ASCII mappers can map up to 1 MiB; NEO up to 256
- * KiB; the unused upper portion is just not mapped to a Z80 bank. */
+ * KiB; the unused upper portion is just not mapped to a Z80 bank.
+ *
+ * LAYOUT (verified by the static asserts below):
+ *   0x80000000 + 0  ............  +CART_GAME_MAX_SIZE   game image window
+ *   0x80000000 + CART_SLOTTED_BANK_BASE_OFFSET
+ *                            ......  +PSRAM_CART_SIZE    sub-slot 1
+ *                                                    mapper RAM (4 MiB)
+ *
+ * The two regions MUST NOT overlap. The game-image window is sized so a
+ * ROM up to (CART_SLOTTED_BANK_BASE_OFFSET - CART_GAME_BASE) bytes can
+ * be loaded without scribbling on the sub-slot 1 bank RAM. */
 #define PSRAM_CART_BASE   0x80000000UL
 #define PSRAM_CART_SIZE   (8U * 1024U * 1024U)   /* 8 MiB */
 
@@ -81,10 +136,13 @@
  * not a mapper/bank-switching logic bug.
  *
  * Set it from the build:
- *     make rebuild GAME_BASE_MB=4        # image at PSRAM + 4 MiB
  *     make rebuild GAME_BASE_MB=0        # default: image at PSRAM + 0
- * Valid: 0..7 (must leave room for the image, max 8 MiB window).
- * CART_GAME_BASE is the byte offset (MiB * 1048576). */
+ *     make rebuild GAME_BASE_MB=2        # image at PSRAM + 2 MiB
+ * Valid: 0 .. (CART_GAME_MAX_MB - 1). CART_GAME_BASE is the byte
+ * offset (MiB * 1048576). The CART_GAME_MAX_MB ceiling keeps the
+ * game-image window clear of the sub-slot 1 mapper RAM
+ * (CART_SLOTTED_BANK_BASE_OFFSET) and is the place to look when
+ * "GAME_BASE_MB=4 used to work" regressions appear. */
 #ifndef CART_GAME_BASE_MB
 #define CART_GAME_BASE_MB   0
 #endif
@@ -93,9 +151,34 @@
 #if (CART_GAME_BASE_MB) < 0
 #error "CART_GAME_BASE_MB must be >= 0"
 #endif
-#if (CART_GAME_BASE_MB) > 7
-#error "CART_GAME_BASE_MB must be <= 7 (8 MiB window)"
+
+/* Max PSRAM MiB that can be used for the cart image. Computed from the
+ * sub-slot 1 region base, with a 1 MiB headroom for any future
+ * scratch/relocation buffer (USB bulk-IN, etc.). Updates automatically
+ * if the sub-slot 1 base moves. */
+#define CART_GAME_MAX_BYTES  (CART_SLOTTED_BANK_BASE_OFFSET - CART_GAME_BASE)
+#define CART_GAME_MAX_MB     ((CART_GAME_MAX_BYTES) / (1024UL * 1024UL))
+
+/* Preprocessor can't cast, so we use the raw integer division
+ * (MiB count, truncated). The cast-style version is used in C
+ * expressions (see usb_disk.c). */
+#if (CART_GAME_BASE_MB) >= (CART_SLOTTED_BANK_BASE_OFFSET / (1024U * 1024U))
+#error "CART_GAME_BASE_MB must leave room for the sub-slot 1 mapper RAM at PSRAM + CART_SLOTTED_BANK_BASE_OFFSET"
 #endif
+
+/* Compile-time tripwire: catch the original layout bug at build time
+ * (a future edit that puts the game image on top of the sub-slot 1
+ * region would compile silently and silently corrupt the mapper RAM
+ * during a ROM load). */
+_Static_assert (CART_GAME_BASE + CART_GAME_MAX_BYTES
+                <= CART_SLOTTED_BANK_BASE_OFFSET,
+                "game image window overlaps sub-slot 1 PSRAM region");
+_Static_assert (CART_GAME_MAX_BYTES > 0U,
+                "game image window is empty - sub-slot 1 region too large for PSRAM");
+_Static_assert (PSRAM_CART_SIZE >= (CART_SLOTTED_BANK_BASE_OFFSET
+                                    + (CART_SLOTTED_BANK_COUNT
+                                       * CART_SLOTTED_BANK_SIZE)),
+                "sub-slot 1 region must fit inside PSRAM_CART_SIZE");
 
 /* Mapper selection.
  *
@@ -144,17 +227,27 @@ typedef enum {
                                   * active across SET_MAPPER + RESET so the
                                   * user can pick a new mapper from the menu. */
     CART_MAP_TERMINAL   = 12,  /* Terminal cart: serves the embedded
-                                  * terminal ROM (terminal_rom[]) at
-                                  * 0x4000..0xBFFF for ordinary reads, and
-                                  * decodes the v303-style 0x7FFD/0x7FFE/
-                                  * 0x7FFF mailbox. The MSX-side terminal
-                                  * program drives the screen + keyboard;
-                                  * the firmware hosts the menu logic
-                                  * (file list, ROM load, mapper select).
-                                  * The boot mapper for the terminal
-                                  * workflow - swap away via the menu to
-                                  * the FLASH mapper if the user prefers
-                                  * the existing mailbox-driven loader. */
+                                  * terminal ROM (terminal_rom[]) in the
+                                  * 0x4000..0x7FFF window for ordinary
+                                  * reads, and decodes the v303-style
+                                  * 0x7FFD/0x7FFE/0x7FFF mailbox. The
+                                  * MSX-side terminal program drives the
+                                  * screen + keyboard; the firmware hosts
+                                  * the menu logic. Expanded-slot mapper,
+                                  * same protocol as CART_MAP_NEXTOR:
+                                  * secondary-slot register at FFFF
+                                  * (inverted read, M1-qualified latches),
+                                  * 0xFC..0xFF I/O bank registers latched
+                                  * by the EXTI9_5 handler, sub-slot 0 =
+                                  * terminal ROM, sub-slot 1 = the
+                                  * 256 x 16 KiB (4 MiB) PSRAM mapper-RAM
+                                  * window, sub-slots 2/3 empty. This is
+                                  * what makes MSX-DOS see the mapper RAM
+                                  * while the terminal is the boot cart.
+                                  * Reached from the menu to boot game
+                                  * ROMs; N swaps to the Nextor kernel,
+                                  * T re-arms this mapper, F swaps to the
+                                  * FLASH loader. */
     CART_MAP_NEXTOR     = 13,  /* Nextor kernel mapper: ASCII16K over the
  * embedded Nextor 3.0 kernel ROM (nextor_rom[],
  * flash-resident). The 16 KiB bank visible at 0x4000..0x7FFF
@@ -169,8 +262,7 @@ typedef enum {
  * image. Reached via the terminal menu's N key
  * (handle_list_key -> soft_reset_into_cart
  * (CART_MAP_NEXTOR)). */
-    CART_MAP_SLOTTED    = 14,  /* expanded slot + 4 MiB mapper RAM */
-    CART_MAP_MAX        = 15,
+    CART_MAP_MAX        = 14,
 } Cart_Mapper;
 
 /* Mapper names used by `MAP ?` and CLI error messages. */
@@ -191,6 +283,13 @@ extern volatile uint32_t g_cart_rd_cycles;
 extern volatile uint32_t g_cart_wr_cycles;
 uint32_t Cart_GetRdCycles (void);
 uint32_t Cart_GetWrCycles (void);
+
+/* V3 cart.c internals not migrated: the g_cart_* mapper-RAM and
+ * game-image timing counters (cycle_timeout, slotted_*, game_*) live
+ * in V3's cart.c and are referenced from the V3 main.c service-loop
+ * report blocks. They are intentionally absent from the merged build
+ * because cart.c is not migrated. main.c guards its report blocks
+ * with #if 0; re-enable by porting the V3 cart.c instrumentation. */
 
 /* Hardened mapper-swap primitive (see Cart_SetMapper_Safe() body in
  * cart.c for the full list of hazards it closes).
@@ -252,13 +351,20 @@ void Init_Cart (void);
  * input and waits for the held bus cycle to finish. Must be called
  * with global IRQs disabled around the End sequence so the held cycle
  * is served exactly once. The startup assembler in startup_ch32v4x7.S
- * asserts ~WAIT before any clock/peripheral setup runs; main() calls
- * End after the slotted/flash handler is installed. */
+ * synchronizes to SLOTCLK and asserts ~WAIT before peripheral setup runs;
+ * main() calls End after the slotted/flash handler is installed. */
 void Cart_HoldMSXWait_Begin (void);
 void Cart_HoldMSXWait_End (void);
 
+/* Development-board-only MSX reset control (TFMSX): the V3 cart.c
+ * declares Cart_HardReset_Assert/Release here. They are intentionally
+ * absent from the merged build because cart.c is not migrated.
+ * terminal.c references them inside a #if CART_TFMSX_HARD_RESET guard
+ * that defaults to 0, so the merged build does not link against
+ * them. */
+
 /* Mark the PSRAM-backed slotted mapper available after PSRAM_Init(). The
- * mapper remains inactive until Cart_SetMapper(CART_MAP_SLOTTED) is called. */
+ * mapper remains inactive until Cart_SetMapper(CART_MAP_NEXTOR) is called. */
 void Cart_SetSlottedPSRAMReady (uint8_t ready);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
