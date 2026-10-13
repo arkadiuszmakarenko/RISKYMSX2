@@ -381,7 +381,7 @@ int Cart_SetMapper (Cart_Mapper m) {
      * (no stale LBA / sector buffer / IDENTIFY data from a previous
      * run, no stale state from a half-completed READ/WRITE).
      * Safe to call repeatedly. */
-    if (m == CART_MAP_NEXTOR) {
+    if (m == CART_MAP_NEXTOR || m == CART_MAP_TERMINAL) {
         Nextor_Init ();
     }
 

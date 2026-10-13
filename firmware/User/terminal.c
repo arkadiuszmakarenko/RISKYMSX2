@@ -358,15 +358,6 @@ void Terminal_Reset (void) {
     s_bootgate_t0   = 0U;
     s_reported_out_dropped = 0U;
     s_launching = 0U;
-    /* Calibrate the cycle counter that drives the Nextor probe
-     * state machine's rate limit. Nextor_Init() does this on every
-     * swap to CART_MAP_NEXTOR, but the terminal mapper is the boot
-     * mapper and is installed before any Nextor_Init has run. Without
-     * this, ms_now() stays at 0 forever and the raw_probe() rate
-     * limit permanently locks out retries after the first probe -
-     * which is the "USB doesn't work in terminal" bug. Cheap (4 ms),
-     * idempotent; safe to call on every Terminal_Reset. */
-    Nextor_CycCalibrate ();
 }
 
 /* ------------------------------------------------------------------ */
