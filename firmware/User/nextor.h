@@ -138,6 +138,25 @@ extern "C" {
 #define NEXTOR_MBOX_REG(address) \
     ((uint8_t)((uint16_t)(address) - NEXTOR_MBOX_BASE))
 
+/* Is `address` inside the 16-byte mailbox window at NEXTOR_MBOX_BASE?
+ *
+ * Written as a right-shift compare instead of the obvious
+ * `(address & 0xFFF0) == NEXTOR_MBOX_BASE`, because 0x7FF0 does not fit
+ * a 12-bit signed immediate: the masked form makes the compiler
+ * materialise 0xFFF0 and 0x7FF0 as two separate constants before the
+ * AND and the compare (six instructions), while
+ * `(address >> 4) == 0x7FF` needs a shift plus one immediate compare
+ * (three instructions) - 0x7FF is exactly the largest value a 12-bit
+ * signed immediate can hold. The two predicates agree for every 16-bit
+ * address: both are true exactly on 0x7FF0..0x7FFF.
+ *
+ * This test sits in front of every ROM read and every bank write in the
+ * Nextor/Slotted handlers, and a hit is rare (the Z80 only reaches
+ * 0x7FF0..0x7FF5 for mailbox traffic), so the three-instruction miss
+ * path is what the hot cycles actually pay. */
+#define NEXTOR_IN_MBOX_WINDOW(address) \
+    (((address) >> 4) == (NEXTOR_MBOX_BASE >> 4))
+
 /* STATUS bits (bit7 MSB first - the driver tests them as a byte). */
 #define NEXTOR_STAT_READY         0x80U   /* firmware alive            */
 #define NEXTOR_STAT_DONE          0x40U   /* command finished           */
@@ -195,25 +214,24 @@ extern "C" {
 /* --- Breadcrumbs -------------------------------------------------------
  *
  * Reserved command bytes the driver writes to NEXTOR_MBOX_CMD to say
- * "I got this far", with no arguments and no answer. They exist because
- * everything else the Z80 does is invisible from here: it has no console
- * the firmware can read, and a driver that dies half way through
+ * "I got this far", with one diagnostic argument and no result data. They
+ * exist because everything else the Z80 does is invisible from here: it
+ * has no console the firmware can read, and a driver that dies half way through
  * READ_WRITE produces NO mailbox traffic at all - not one line, because
  * the last thing it managed to do was not send a command. In that
  * situation the log cannot tell "the kernel never called READ_WRITE" from
  * "READ_WRITE crashed on its third instruction", and those need opposite
  * fixes.
  *
- * A single store to the command register is the whole mechanism, so a
- * breadcrumb costs 4 bytes of ROM, no protocol change and no answer -
- * Nextor_Service prints the name and returns. The driver is free to leave
- * DONE set afterwards: the next real command clears it.
+ * The lightweight markers are fire-and-forget; the detailed PROBES build
+ * sends an argument and waits for DONE so its diagnostic traffic cannot
+ * overwrite a pending request. Neither form changes the mailbox protocol.
  *
- * Bytes 0x20..0x3F, chosen to be far from the 8 real commands and from
+ * Bytes 0x20..0x5F, chosen to be far from the 8 real commands and from
  * the 0x08..0x1F range a corrupted stack is more likely to produce, so a
  * marker in the log is a marker and not a wild write. */
 #define NEXTOR_CMD_MARK_FIRST      0x20U
-#define NEXTOR_CMD_MARK_COUNT      0x20U
+#define NEXTOR_CMD_MARK_COUNT      0x40U
 #define NEXTOR_CMD_MARK(n)         (NEXTOR_CMD_MARK_FIRST + (n))
 
 /* A breadcrumb carries ONE argument: the register value the step is about.
@@ -243,6 +261,10 @@ void Nextor_Init (void);
 /* Main-loop service hook: drains the command in flight into the result
  * FIFO. Must be called from main(), never from IRQ context - it is the
  * only place blocking disk work is allowed. */
+/* Nonzero while the Z80 driver has a mailbox request waiting or a burst
+ * in flight. Long background work (USB probes, enumeration) polls this
+ * between its blocking steps to yield the service loop immediately. */
+uint8_t Nextor_RequestPending (void);
 void Nextor_Service (void);
 
 /* Called by the USB layer when the stick is removed/re-plugged (or the
@@ -251,6 +273,12 @@ void Nextor_Service (void);
  * and the kernel is told about the media change. Main-loop or service
  * context only - NOT IRQ safe. */
 void Nextor_CacheInvalidate (void);
+
+/* Ask the service loop to run a probe on its next idle pass, bypassing
+ * the rate-limit window a missing-stick STATUS would otherwise sit
+ * behind. Called from the STATUS/STAPEEK command path when the medium
+ * is reported absent. IRQ-safe. */
+void Nextor_ForceProbe (void);
 
 /* --- Code entries for Cart_EXTI0_Nextor_Handler (IRQ context) ------- */
 

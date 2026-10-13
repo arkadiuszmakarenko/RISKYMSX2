@@ -104,9 +104,12 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Diagnostics are deliberately absent from the normal image.  This is a
- * compile-time switch rather than a runtime flag: formatting a line and
- * walking a 512-byte sector must not remain on the USB read path. */
+/* Mailbox tracing is useful during protocol diagnosis, but trace_put() is
+ * called from the EXTI0 write IRQ for every mailbox byte. Keep it out of the
+ * normal timing image; enable explicitly with -DRISKY_DEBUG=1 when needed. */
+#ifndef RISKY_DEBUG
+#define RISKY_DEBUG 0
+#endif
 #if !RISKY_DEBUG
 #define printf(...) do { } while (0)
 #endif
@@ -170,10 +173,12 @@ static const uint16_t s_cmd_args[NEXTOR_CMD_MAX] = {
     0U,                                       /* 0x07 IDENT     */
 };
 
+#if RISKY_DEBUG
 static const char *const s_cmd_name[NEXTOR_CMD_MAX] = {
     "HANDSHAKE", "CAPACITY", "STATUS", "READ",
     "WRITE", "ABORT", "STAPEEK", "IDENT",
 };
+#endif
 
 /* Breadcrumb names, indexed by (command byte - NEXTOR_CMD_MARK_FIRST).
  *
@@ -191,7 +196,7 @@ static const char *const s_cmd_name[NEXTOR_CMD_MAX] = {
 /* NEXTOR_MARK_DEFINED counts the entries above; the reserved range is
  * deliberately wider (see NEXTOR_CMD_MARK_COUNT), so the difference has to
  * be bounded rather than assumed away. */
-#define NEXTOR_MARK_DEFINED        30U
+#define NEXTOR_MARK_DEFINED        36U
 
 static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "RW:enter",              /* MB_MK_RW_ENTER       device number     */
@@ -224,6 +229,12 @@ static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "RW:bad buffer low",    /* MB_MK_RW_BADBUFL     invalid buffer low */
     "RW:bad buffer high",   /* MB_MK_RW_BADBUFH     invalid buffer high*/
     "RW:buf high byte",     /* MB_MK_RW_BUFPG       dest page: 81h=DTA */
+    "DQ2 device number",    /* MB_MK_DQ_INIT_DEVICE device query 2 C  */
+    "DQ2 buffer supplied",  /* MB_MK_DQ_INIT_BUFFER HL=0?             */
+    "DRVQ3 free drives",    /* MB_MK_DQ3_DRIVES     query 3 input B   */
+    "DRVQ3 input flags",    /* MB_MK_DQ3_FLAGS      query 3 input C   */
+    "DRVQ4 input flags",    /* MB_MK_DQ4_FLAGS      query 4 input C   */
+    "DRVQ5 max devices",    /* MB_MK_DQ5_MAXDEV     query 5 output B  */
 };
 
 /* A command byte is a breadcrumb rather than a mistake if it lands in the
@@ -426,6 +437,7 @@ static uint32_t ms_now (void) {
 /* Gap since the previous call, in the same units as ms_now(). The first
  * call has no previous reading to subtract from; take the reading and
  * report a zero gap rather than a wild one. */
+#if RISKY_DEBUG
 static uint32_t ms_since_prev (void) {
     static uint32_t prev;
     static uint8_t  primed;
@@ -441,6 +453,7 @@ static uint32_t ms_since_prev (void) {
     prev = now;
     return d;
 }
+#endif
 
 /* ms_now() reading taken in Nextor_Init, used by raw_probe's boot
  * delay. 0 until then (so a host-side unit test that never calls
@@ -481,8 +494,42 @@ static uint32_t s_boot_start_ms;
 
 static uint32_t s_next_probe;       /* ms timestamp of the next probe */
 
+/* Set by the STATUS/STAPEEK command path when the medium is reported
+ * absent. Forces raw_probe() to attempt USB enumeration on the very
+ * next idle pass, bypassing the rate-limit window a missing stick would
+ * otherwise sit in for NEXTOR_PROBE_RETRY_MS. Cleared as soon as the
+ * probe has been kicked off. */
+static volatile uint8_t s_probe_forced;
+
+void Nextor_ForceProbe (void) {
+    s_probe_forced = 1U;
+    /* Open the rate-limit gate so the very next idle pass is allowed to
+     * run, not a future one (a forced probe is also a "this attempt
+     * has just happened" and the gate would otherwise defer it). */
+    s_next_probe   = 0U;
+}
+
+/* Nonzero when the Z80 driver needs the service loop: a completed request
+ * is waiting for its answer, or a burst is still in flight. Long
+ * background work (raw_probe, USB enumeration) polls this between its
+ * blocking steps so a probe that started in a quiet moment never owns the
+ * service loop past the moment a request arrives - the pile-up documented
+ * below is exactly what happens without it. */
+uint8_t Nextor_RequestPending (void) {
+    return (s_mb.armed != 0U || s_mb.argp != s_mb.args) ? 1U : 0U;
+}
+
 static void raw_probe (void) {
     const uint32_t now = ms_now ();
+
+    /* A STATUS/STAPEEK that answered "no medium" can ask for an
+     * immediate probe here - this is the loop the driver really cares
+     * about: it is the path that makes "drive was inserted after boot"
+     * reliable. Without the explicit kick the rate-limit window would
+     * sit at NEXTOR_PROBE_RETRY_MS and a STATUS burst would see "0"
+     * for that whole window, which is exactly the kind of
+     * "no enumeration" the driver was reporting. */
+    const uint8_t forced = s_probe_forced;
 
     /* Never start a probe while the Z80 is talking. Checked FIRST, because
      * it is the strongest of the three rules and it is the one that was
@@ -532,11 +579,21 @@ static void raw_probe (void) {
      * has_probed() rather than an unconditional delay: a stick that has
      * never been tried must not be locked out by the rate limit an
      * earlier failed attempt established. */
-    if (RawDisk_HasProbed ()
+    if ((forced == 0U)
+        && RawDisk_HasProbed ()
         && (uint32_t)(now - s_next_probe) < NEXTOR_PROBE_RETRY_MS) {
         return;
     }
     s_next_probe = now;
+    /* Consume the forced-probe flag whether or not we actually run
+     * (a Z80 request that arrived between the gate and here is the
+     * one case where we did not, and the next STATUS will set it
+     * again). */
+    s_probe_forced = 0U;
+    /* The silence gate above opened before this call, and a request can
+     * still land in the microseconds in between. Never hand the bus to
+     * a probe while a request is already waiting. */
+    if (Nextor_RequestPending () != 0U) return;
     (void)RawDisk_Probe ();
 }
 
@@ -660,10 +717,33 @@ static void res_begin (void) {
     s_mb.status &= (uint8_t)~(NEXTOR_STAT_RX_AVAIL | NEXTOR_STAT_ERR);
 }
 
+/* --- Answer crossing guard -----------------------------------------------
+ * Set by Nextor_Service to the seq of the request being answered, cleared
+ * by res_publish(). If the capture moves on before the answer is
+ * published (the driver gave up on that request and sent another), the
+ * published DONE would land on the driver's CURRENT command: it pops the
+ * wrong result, and the driver's register state desyncs - observed as a
+ * garbage LBA (0xc9c9c93b) right after a dropped request. */
+static volatile uint8_t s_answer_guard_active;
+static volatile uint8_t s_answer_guard_seq;
+
 /* Publish the result FIFO and release the driver. s_mb.res_end must
  * become visible before DONE, or MB_POLL can return and MB_GETRES can
- * read against a stale end pointer. */
-static void res_publish (void) {
+ * read against a stale end pointer. Returns 1 if published, 0 if the
+ * answer was suppressed because its request was overwritten. */
+static uint8_t res_publish (void) {
+    /* Crossing guard: the request this answer belongs to is already gone
+     * from the capture - the driver abandoned it and is now waiting on a
+     * different command. Publishing DONE here would be an answer for a
+     * request nobody is polling for, landing on the driver's current
+     * poll and desyncing the exchange. Suppress it: the driver's current
+     * request is untouched and gets serviced on the next pass. */
+    if (s_answer_guard_active != 0U
+        && (uint8_t)(s_mb.seq - s_answer_guard_seq) != 0U) {
+        s_answer_guard_active = 0U;
+        return 0U;
+    }
+    s_answer_guard_active = 0U;
     /* DONE is the acquire point for the Z80: once it sees DONE, the cart
      * interrupt may immediately serve DATA reads. Make the result bytes,
      * res_r/res_end, and ERR visible before publishing that status bit on
@@ -679,6 +759,7 @@ static void res_publish (void) {
         s_mb.status |= NEXTOR_STAT_ERR;
     }
     s_mb.status |= NEXTOR_STAT_DONE;
+    return 1U;
 }
 
 /* Record one mailbox write. IRQ context, one caller site, no branches
@@ -686,6 +767,7 @@ static void res_publish (void) {
  * cycle the Z80 is waiting on. tr_tick is the write counter the dumper
  * uses to tell the slots it has actually filled from the ones it has
  * not, which is why the two live in different arrays. */
+#if RISKY_DEBUG
 static void trace_put (uint8_t reg, uint8_t value) {
     const uint8_t pos = s_mb.tr_pos;
 
@@ -695,6 +777,7 @@ static void trace_put (uint8_t reg, uint8_t value) {
     s_mb.tr_tick    = (uint8_t)(s_mb.tr_tick + 1U);
     s_mb.tr_pos     = (uint8_t)((pos + 1U) % NEXTOR_TRACE_N);
 }
+#endif
 
 /* Print the recorded writes newest first, so whatever followed the
  * unexplained one is on top and the command itself is easy to find.
@@ -768,7 +851,7 @@ static void trace_dump (void) {
  * Windows as exFAT/NTFS comes back 07, and that is a "this will never
  * mount in Nextor" rather than a bug worth chasing.
  * ====================================================================== */
-static void dump_mbr (const uint8_t *sec) {
+static void dump_mbr (const uint8_t *sec, const char *source) {
     /* Indexed by (type & 0x0F), the low nibble of the MBR type byte - the
      * high nibble is the "LBA" flag and Nextor looks at the low one. The
      * 16 entries are exhaustive on purpose: a stick formatted as exFAT
@@ -784,7 +867,8 @@ static void dump_mbr (const uint8_t *sec) {
     uint8_t       part;
     uint8_t       usable = 0U;
 
-    printf ("[nx] MBR lba=0: %02x %02x %02x %02x  sig=%04x%s\r\n",
+    printf ("[nx] MBR %s lba=0: %02x %02x %02x %02x  sig=%04x%s\r\n",
+            source,
             (unsigned)sec[0], (unsigned)sec[1], (unsigned)sec[2],
             (unsigned)sec[3], (unsigned)sig,
             (sig == 0xAA55U) ? "" : "  *** NOT A VALID MBR ***");
@@ -801,8 +885,8 @@ static void dump_mbr (const uint8_t *sec) {
         if (typ != 0U) {
             usable++;
         }
-        printf ("[nx]   part%u type=%02x %-10s boot=%s lba=%-10lu sectors=%-10lu",
-                (unsigned)part, (unsigned)typ,
+        printf ("[nx]   part%u type=%02x %-10s active=%s lba=%-10lu sectors=%-10lu",
+                (unsigned)(part + 1U), (unsigned)typ,
                 type_name[typ & 0x0FU],
                 boot_flag ? "yes" : "no ",
                 (unsigned long)lba, (unsigned long)cnt);
@@ -824,13 +908,13 @@ static void dump_mbr (const uint8_t *sec) {
     }
 
     if (sig != 0xAA55U) {
-        printf ("[nx] MBR lba=0: sector 0 has no 55AA signature. Nextor cannot"
+        printf ("[nx] MBR %s: sector 0 has no 55AA signature. Nextor cannot"
                 " automap this stick as-is - it needs a real MBR with a"
                 " bootable FAT12/16 partition (the B key in the terminal"
-                " menu writes one).\r\n");
+                " menu writes one).\r\n", source);
     } else if (usable == 0U) {
-        printf ("[nx] MBR lba=0: signature present but all four partition"
-                " entries are empty.\r\n");
+        printf ("[nx] MBR %s: signature present but all four partition"
+                " entries are empty.\r\n", source);
     }
 }
 
@@ -1072,23 +1156,41 @@ void Nextor_Service (void) {
      * DOS FCB layer's pattern) would otherwise read STATUS's stale
      * args[] while seq said the READ was the one being answered.
      *
-     * The snapshot is taken with interrupts DISABLED, so IRQ cannot
-     * land between the field reads. seq is the ticket number - IRQ
-     * increments it exactly once per completed burst capture, so a
-     * same-seq snapshot is internally consistent by construction.
+     * The snapshot is taken WITHOUT disabling interrupts. An IRQ-off
+     * window here was the instability driver under heavy disk I/O:
+     * the Z80 polls STATUS in a tight loop (one EXTI0 dispatch per
+     * poll, ~1-2 us apart), and every mailbox command re-entered this
+     * section, so a masked-IRQ window eventually landed on the start
+     * of a Z80 bus cycle - the EXTI0 dispatch then ran past the Z80's
+     * data-sample point and the machine read a stale/floating bus.
+     * The same window could also delay EXTI9_5 past the next memory
+     * cycle, making a mapper-bank write land AFTER the read that
+     * needed it (stale bank). SRAM vs PSRAM and priority experiments
+     * cannot fix a masked-IRQ window; removing it can.
      *
-     * Crucially, this NEVER drops a request. An earlier version
-     * returned without answering when seq moved mid-clear; that
-     * made the Z80 time out and retry, with 0.5-1.5 s stalls on
-     * every STATUS during the kernel's per-sector scan. The window
-     * is closed by disabling IRQ around the field reads: the IRQ
-     * will land the moment we re-enable, see armed=0, and complete
-     * normally on the next pass. */
+     * Instead the fields are re-validated with the seq ticket after
+     * reading them: Nextor_WriteByte increments seq exactly once per
+     * completed request, AFTER setting armed, so an unchanged seq
+     * means no burst completed while the fields were being read and
+     * the snapshot is internally consistent by construction. On any
+     * seq movement the read is simply retried - the loop runs at
+     * most twice in practice because the driver protocol never
+     * starts a new request before the previous one is answered with
+     * DONE (which only this code publishes).
+     *
+     * Crucially, this NEVER drops a request. Consumption (armed=0)
+     * happens only AFTER a validated pass, and if the validation
+     * never settles (not reachable through the driver protocol, but
+     * defensive against a crashed Z80 stream) we return without
+     * consuming: the request stays armed and the next pass retries.
+     * That is always safe - a retry is just latency, while acting on
+     * a torn snapshot would answer an old request with another
+     * request's LBA. */
     uint8_t cmd;
     /* Snapshot fields are kept as separate locals because the log needs
      * cmd / seq / nargs / lba after the answer path runs and those
-     * fields are no longer stable (IRQ has been re-enabled and the Z80
-     * is reading the response FIFO). */
+     * fields are no longer stable (IRQ is live and the Z80 is reading
+     * the response FIFO). */
     uint8_t  snap_seq;
     uint8_t  snap_raw;
     uint8_t  snap_arg;
@@ -1096,20 +1198,43 @@ void Nextor_Service (void) {
     uint32_t snap_lba;
     log_snap snap;
     {
-        __disable_irq ();
-        s_mb.armed = 0U;
-        cmd        = s_mb.cmd;
-        snap_raw   = s_mb.raw;
-        snap_seq   = s_mb.seq;
-        snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
-        snap_lba   = arg_lba ();
-        /* A breadcrumb's payload is args[0]. Read it in the same critical
-         * section as everything else: a new command byte resets argp, so
-         * reading it afterwards would race the next marker and report its
-         * value instead. */
-        snap_arg   = (snap_nargs > 0U) ? s_mb.args[0] : 0U;
-        __enable_irq ();
+        /* Bounded so a pathological Z80 stream cannot wedge Service;
+         * every real burst passes on the first or second iteration. */
+        unsigned tries = 8U;
+        for (;;) {
+            const uint8_t seq0 = s_mb.seq;
+            cmd         = s_mb.cmd;
+            snap_raw    = s_mb.raw;
+            snap_seq    = seq0;
+            snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
+            snap_lba   = arg_lba ();
+            /* A breadcrumb's payload is args[0]. Read it in the same
+             * pass as everything else: a new command byte resets argp,
+             * so reading it afterwards would race the next marker and
+             * report its value instead. */
+            snap_arg   = (snap_nargs > 0U) ? s_mb.args[0] : 0U;
+            if ((s_mb.seq == seq0) && (s_mb.armed != 0U)) {
+                /* Coherent: consume so the capture can accept the next
+                 * burst. Ordering is safe because DONE for this request
+                 * is not published yet, so the Z80 is still polling
+                 * STATUS and cannot have started a new burst. */
+                s_mb.armed = 0U;
+                break;
+            }
+            if (--tries == 0U) {
+                /* Torn snapshot; leave the request armed and retry on
+                 * the next pass. */
+                return;
+            }
+        }
     }
+
+    /* Arm the crossing guard: everything from here to res_publish() is
+     * the answer for snap_seq. If the capture moves on in the meantime
+     * (slow USB answer, driver timeout), res_publish() suppresses the
+     * DONE instead of letting it land on the driver's next command. */
+    s_answer_guard_seq    = snap_seq;
+    s_answer_guard_active = 1U;
 
     snap.cmd   = cmd;
     snap.raw   = snap_raw;
@@ -1212,15 +1337,23 @@ void Nextor_Service (void) {
          * not disturb query 3's tracking, or a media check in between two
          * status requests would swallow the change.
          *
-         * No USB traffic and no probing here (see the header note):
-         * STATUS is polled far more often than anything else, including
-         * by the kernel's own startup code, and an enumeration retry in
-         * the middle of it would blow the driver's command budget. */
+         * No USB traffic here (see the header note): STATUS is polled
+         * far more often than anything else, including by the kernel's
+         * own startup code, and an enumeration retry in the middle of it
+         * would blow the driver's command budget. The "no medium" answer
+         * does, however, ask the main loop to run a probe on its very
+         * next idle pass - otherwise a missing stick would sit behind
+         * the rate-limit window (NEXTOR_PROBE_RETRY_MS) and the driver
+         * would see "0" for that whole interval, which is the
+         * "no enumeration" behaviour the driver was reporting. */
         {
             const uint8_t st = RawDisk_MediaState ();
 
             if (cmd == NEXTOR_CMD_STATUS) {
                 RawDisk_MediaLatchConsume ();
+            }
+            if (st == 0U) {
+                Nextor_ForceProbe ();
             }
             s_mb.res[0]  = st;
             s_mb.res_end = s_mb.res + 1U;
@@ -1298,7 +1431,7 @@ void Nextor_Service (void) {
          * successful reads also shows WHY there is no drive. */
         if ((snap_lba == 0U) && (s_mb.mbr_dumped == 0U)) {
             s_mb.mbr_dumped = 1U;
-            dump_mbr (s_mb.res);
+            dump_mbr (s_mb.res, "read");
         }
         s_mb.res_end = s_mb.res + NEXTOR_SECTOR_SIZE;
         break;
@@ -1326,10 +1459,21 @@ void Nextor_Service (void) {
             printf ("[nx]   no medium, write rejected\r\n");
             break;
         }
+        /* FDISK creates/replaces the primary partition table by writing
+         * sector 0. Dump the exact candidate before sending it to USB so
+         * the debug log can distinguish a bad table produced by the kernel
+         * from a failed/short media write. The result line below confirms
+         * whether the raw write completed. */
+        if (snap_lba == 0U) {
+            dump_mbr (&s_mb.args[4], "write candidate");
+        }
         if (RawDisk_WriteSectors (snap_lba, 1U, &s_mb.args[4]) == 0U) {
             s_mb.err = NEXTOR_ERR_IO;
             printf ("[nx]   write failed: %s\r\n", RawDisk_LastFailure ());
             break;
+        }
+        if (snap_lba == 0U) {
+            printf ("[nx] MBR write completed\r\n");
         }
         break;
 
@@ -1369,8 +1513,12 @@ void Nextor_Service (void) {
     snap.nres  = (uint16_t)(s_mb.res_end - s_mb.res_r);
     snap.media = s_mb.res[0];
 
-    res_publish ();
-    log_result (&snap);
+    if (res_publish ()) {
+        log_result (&snap);
+    } else {
+        printf ("[nx] --- answer for #%u suppressed (its request was "
+                "overwritten before DONE) ---\r\n", (unsigned)snap.seq);
+    }
 }
 
 /* ========================================================================
@@ -1390,7 +1538,7 @@ void Nextor_WriteByte (uint16_t address, uint8_t value) {
 #if RISKY_DEBUG
     trace_put (reg, value);
 #else
-    (void)value;
+    (void)reg;
 #endif
 
     if (reg == NEXTOR_MBOX_CMD) {
@@ -1484,19 +1632,16 @@ uint8_t Nextor_ReadByte (uint16_t address) {
         /* Result pop. The driver pops a known count, so this only has
          * to stay in range; an empty FIFO returns 0xFF (the
          * floating-bus pattern) so a driver that over-pops sees a
-         * stable wrong value and bails instead of spinning forever. */
+         * stable wrong value and bails instead of spinning forever.
+         * Single range test: the pop path runs once per byte of a 512-
+         * byte answer, so every removed compare shows up in the bus
+         * duty cycle. */
         uint8_t *p   = s_mb.res_r;
-        const uint8_t *end = s_mb.res_end;
-
-        /* Keep this as one compare.  This function runs once per byte of
-         * every sector and the old two-test form made the compiler reload
-         * the volatile FIFO pointers on the second test. */
-        if (p >= end) {
-            return 0xFFU;
-        }
-        {
-            const uint8_t v = *p++;
-            s_mb.res_r = p;
+        uint8_t *end = s_mb.res_end;
+        uint8_t  v;
+        if (p < end) {
+            v = *p;
+            s_mb.res_r = ++p;
             if (p == end) {
                 s_mb.status &= (uint8_t)~NEXTOR_STAT_RX_AVAIL;
             }

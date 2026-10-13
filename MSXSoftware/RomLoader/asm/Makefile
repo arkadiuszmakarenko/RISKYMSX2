@@ -30,11 +30,12 @@ terminal.ihx: terminal.rel
 $(OUTPUT_BIN): terminal.ihx
 	@makebin -s 65536 < $< > terminal.full.bin
 	@# Trim the 64 KiB makebin output to just the bytes we actually
-	@# use: 0x4000..0x40FF (256 bytes) covers init (0x4010) + body
-	@# (BODY_SIZE = 0x8E bytes ending at 0x40AC) + arrow sprite at
-	@# 0x40F0..0x40F8. Reading cart addresses outside 0x4000..0x40FF
-	@# on the MSX side never happens (the terminal program never
-	@# fetches from beyond its own body), so padding is wasted flash.
+	@# use: 0x4000..0x40FF (256 bytes) covers init (0x4010), the body
+	@# and the arrow sprite pattern that now follows body_end. Reading
+	@# cart addresses outside 0x4000..0x40FF on the MSX side never
+	@# happens (the terminal program never fetches from beyond its own
+	@# body + arrow), so padding is wasted flash. Keep body_end + the
+	@# 8-byte arrow below 0x4100 - bump this count if the body grows.
 	@dd if=terminal.full.bin of=$@ bs=1 skip=16384 count=256 status=none
 	@rm -f terminal.full.bin
 	@echo "$@: $$(wc -c < $@) bytes (trimmed ROM image)"

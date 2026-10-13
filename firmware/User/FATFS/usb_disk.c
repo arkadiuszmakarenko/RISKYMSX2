@@ -40,29 +40,62 @@
 #include "ch32v4x7_psram.h"
 #include <string.h>
 
-/* USB diagnostics are a separate build feature.  In particular, successful
- * sector transfers never pay for printf argument evaluation in release. */
-#if !RISKY_DEBUG
-#define printf(...) do { } while (0)
+#ifndef RISKY_DEBUG
+#define RISKY_DEBUG 0
+#endif
+
+/* PSRAM load path selector:
+ *   0 = PSRAM peripheral DMA burst engine (the original path)
+ *   1 = synchronous CPU word copy
+ *
+ * Why this switch exists: at HCLK 200 MHz the PSRAM device is hardwired to
+ * 2x HCLK = 400 MHz DDR (the PSRAM peripheral has NO clock divider), and the
+ * PSRAM DMA burst engine wedges there - the load hangs at a random chunk
+ * ("PSRAM DMA stuck", repeatable at 200 MHz, fine at 175 MHz). The CPU
+ * single-access path is NOT affected: the boot self-test (psram_test_at, CPU
+ * byte write+readback at three offsets) and the psram_copy_rom 4 MiB CPU fill
+ * both complete at 400 MHz, and mapper-RAM reads are served normally. A
+ * synchronous word copy therefore sidesteps the failing burst engine and uses
+ * the proven path.
+ *
+ * Cost: ~16-20 HCLK/word, i.e. ~13 us per 512 B chunk and ~210 ms for an
+ * 8 MiB image - fine for a load, and it keeps the same per-chunk ~WAIT hold
+ * structure. Set to 0 to A/B against the DMA path. */
+#ifndef USB_PSRAM_SYNC_COPY
+#define USB_PSRAM_SYNC_COPY 1
 #endif
 
 /* ------------------------------------------------------------------------ */
 /* Buffer placement (PSRAM)                                                 */
 /* ------------------------------------------------------------------------ */
 
-/* PSRAM layout (8 MB total @ 0x80000000):
+/* PSRAM layout (8 MB total @ 0x80000000, see cart.h for the full
+ * partition):
  *
- *   0x80000000 - 0x80000020  : DevDesc_Buf     18 bytes
- *   0x80000020 - 0x8000011F  : Com_Buffer      255 bytes
- *   0x80001000 - 0x800FF000  : psram sector buffer for SCSI read (1 MiB,
- *                              enough for a 512-byte sector + slack)
+ *   0x80000000 + 0                 .. +CART_GAME_MAX_BYTES
+ *                                          game image window (default 4 MiB)
+ *   0x80000000 + CART_GAME_BASE    .. +CART_GAME_BASE + 0
+ *                                          (== PSRAM_CART_BASE)
+ *                                          loaded game image (variable,
+ *                                          <= CART_GAME_MAX_BYTES)
+ *   0x80000000 + CART_SLOTTED_BANK_BASE_OFFSET
+ *                                .. +PSRAM_CART_SIZE
+ *                                          sub-slot 1 mapper RAM
+ *                                          (CART_SLOTTED_BANK_COUNT x
+ *                                          CART_SLOTTED_BANK_SIZE = 4 MiB)
  *
- * NB: the cart image window PSRAM_CART_BASE is at the START of PSRAM (set
- * by cart.h).  The buffers above overlap the cart image window. That's
- * OK for the buffers themselves, but it means while a USB read is in
- * progress the cart window contents are being overwritten - the cart
- * mapper is left at NONE during USB operations (see main.c).
- */
+ *   0x80000000 - 0x80000020  : DevDesc_Buf     18 bytes  (overlap warning)
+ *   0x80000020 - 0x8000011F  : Com_Buffer      255 bytes  (overlap warning)
+ *
+ * NB: DevDesc_Buf and Com_Buffer live in the cart-image window and
+ * corrupt the loaded image if read at the wrong moment. They are
+ * only touched during USB enumeration (the very first few SCSI
+ * exchanges after a stick is plugged), which never overlaps a ROM
+ * load - the SCSI read path itself writes into the SRAM scratch
+ * buffer (s_sector_buf) and not into PSRAM, so this is safe in
+ * practice. The 0x80001000+ 1 MiB "psram sector buffer" mentioned
+ * in earlier revisions is stale: scsi_read_sector_once targets the
+ * caller's buf pointer, which is always SRAM for FatFS. */
 
 /* Force 4-byte alignment; the WCH USBHS host SIE requires the
  * descriptor setup-data pointer to be 4-byte aligned. */
@@ -118,6 +151,7 @@ static uint8_t msc_class_request (uint8_t bmRequestType, uint8_t bRequest,
 
 /* Mass Storage: Bulk-Only Mass Storage Reset (bRequest=0xFF, bmRequestType=00100001b) */
 uint8_t msc_mass_storage_reset (void) {
+    printf ("USB: MSC reset (control transfer)\r\n");
     uint8_t rc = msc_class_request (0x21, 0xFF, 0x0000, msc_interface_number,
                                     NULL, NULL);
     if (rc == ERR_SUCCESS) {
@@ -289,6 +323,12 @@ uint8_t USBH_EnumRootDevice (uint8_t usb_port) {
 
     enum_cnt = 0;
 ENUM_START:
+    /* Yield to the Z80 driver before each enumeration attempt: this loop
+     * sits behind hundreds of milliseconds of Delay_Ms backoff, and a
+     * mailbox request that arrives mid-probe must not wait for it. The
+     * error code means "not enumerated this pass, retry later" to every
+     * caller - the probe state machine is fully polled and re-runs. */
+    if (Nextor_RequestPending () != 0U) return ERR_USB_DISCON;
     Delay_Ms (100);
     enum_cnt++;
     Delay_Ms (8 << enum_cnt);
@@ -296,6 +336,7 @@ ENUM_START:
     /* USBHS has no "begin/end reset" mode arg; it just resets. */
     USBHSH_ResetRootHubPort ();
     for (i = 0, s = 0; i < DEF_RE_ATTACH_TIMEOUT; i++) {
+        if (Nextor_RequestPending () != 0U) return ERR_USB_DISCON;
         if (USBHSH_EnableRootHubPort (&RootHubDev[usb_port].bSpeed)
                 == ERR_SUCCESS) {
             i = 0;
@@ -597,8 +638,15 @@ uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size) {
  * into `buf`.  For high-speed sticks the bulk pipe is a 512-byte
  * multi-packet stream; we loop on the per-packet size (512) until
  * `block_size` bytes have been received. */
-static uint8_t scsi_read_sectors_once (uint32_t lba, uint8_t *buf,
-                                       uint16_t blocks, uint32_t block_size) {
+/* DIAGNOSTIC counter for the SCSI read path, re-armed at the end of each
+ * USB_FileToPSRAM run. Keep it out of normal builds with the trace it caps. */
+#if RISKY_DEBUG
+static uint32_t s_scsi_dbg = 0U;
+#endif
+
+/* Single 512-byte read from the stick... */
+static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
+                                      uint32_t block_size) {
     CBW_t cbw;
     CSW_t csw;
     uint8_t  res;
@@ -606,10 +654,19 @@ static uint8_t scsi_read_sectors_once (uint32_t lba, uint8_t *buf,
     uint32_t bytes_received = 0;
     uint32_t transfer_len   = block_size;
 
+    /* DIAGNOSTIC: per-sector chatter is useful for tracing a stuck read,
+     * but floods the normal log during directory scans and file loads. */
+#if RISKY_DEBUG
+    if (s_scsi_dbg < 64U) {
+        printf ("USB: R lba=%lu\r\n", (unsigned long)lba);
+        s_scsi_dbg++;
+    }
+#endif
+
     memset (&cbw, 0, sizeof (cbw));
     cbw.dCBWSignature          = 0x43425355;
     cbw.dCBWTag                = 0xCAFEBABE;
-    transfer_len *= blocks;
+
     cbw.dCBWDataTransferLength = transfer_len;
     cbw.bmCBWFlags             = 0x80;  /* IN */
     cbw.bCBWLUN                = 0;
@@ -619,14 +676,21 @@ static uint8_t scsi_read_sectors_once (uint32_t lba, uint8_t *buf,
     cbw.CBWCB[3] = (lba >> 16) & 0xFF;
     cbw.CBWCB[4] = (lba >> 8)  & 0xFF;
     cbw.CBWCB[5] = (lba)       & 0xFF;
-    cbw.CBWCB[7] = (uint8_t)(blocks >> 8);
-    cbw.CBWCB[8] = (uint8_t)blocks;
+    cbw.CBWCB[7] = 0;          /* 1 block */
+    cbw.CBWCB[8] = 1;
 
-    /* usb_send_cbw already owns the bounded retry/recovery policy.  A second
-     * retry loop here multiplied the worst-case delay beyond MB_POLL's
-     * firmware/driver command budget. */
-    res = usb_send_cbw (&cbw);
-    if (res != ERR_SUCCESS) return 1;
+    int cbw_send_retries = 0;
+    do {
+        res = usb_send_cbw (&cbw);
+        if (res == ERR_SUCCESS) break;
+        Delay_Ms (1);
+        cbw_send_retries++;
+    } while (cbw_send_retries < 20);
+    if (res != ERR_SUCCESS) {
+        printf ("USB: R lba=%lu CBW FAIL r=%02x\r\n",
+                (unsigned long)lba, (unsigned)res);
+        return 1;
+    }
 
     while (bytes_received < transfer_len) {
         plen = transfer_len - bytes_received;
@@ -636,20 +700,44 @@ static uint8_t scsi_read_sectors_once (uint32_t lba, uint8_t *buf,
             res = USBHSH_GetEndpData (usb_in_ep, &in_tog,
                                       buf + bytes_received, &plen);
             if (res != ERR_SUCCESS) {
+                /* Detailed per-packet retry traces are debug-only. The
+                 * terminal NAK LIMIT message below remains in normal logs. */
+#if RISKY_DEBUG
+                if (s_scsi_dbg < 64U) {
+                    printf ("USB: R lba=%lu off=%lu IN r=%02x try=%u\r\n",
+                            (unsigned long)lba,
+                            (unsigned long)bytes_received,
+                            (unsigned)res, (unsigned)nak_retries);
+                    s_scsi_dbg++;
+                }
+#endif
                 Delay_Ms (1);
                 nak_retries++;
-                if (nak_retries >= 20) return 2;
+                if (nak_retries >= 20) {
+                    printf ("USB: R lba=%lu off=%lu NAK LIMIT\r\n",
+                            (unsigned long)lba,
+                            (unsigned long)bytes_received);
+                    return 2;
+                }
             }
         } while (res != ERR_SUCCESS);
         if (res != ERR_SUCCESS || plen == 0) return 2;
         bytes_received += plen;
     }
 
-    /* usb_recv_csw handles bounded NAK/ZLP patience.  Do not wrap it in a
-     * second long retry loop: a command must either finish or publish an
-     * error before the Z80 mailbox poll expires. */
-    res = usb_recv_csw (&csw, cbw.dCBWTag);
-    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
+    int csw_retries = 0;
+    do {
+        res = usb_recv_csw (&csw, cbw.dCBWTag);
+        if (res == ERR_SUCCESS && csw.bCSWStatus == 0) break;
+        Delay_Ms (1);
+        csw_retries++;
+    } while (csw_retries < 40);
+    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
+        printf ("USB: R lba=%lu CSW FAIL r=%02x st=%u tries=%u\r\n",
+                (unsigned long)lba, (unsigned)res,
+                (unsigned)csw.bCSWStatus, (unsigned)csw_retries);
+        return 3;
+    }
     return 0;
 }
 
@@ -661,8 +749,10 @@ uint8_t usb_scsi_read_sectors (uint32_t lba, uint8_t *buf,
                                uint16_t count, uint32_t block_size) {
     if (count == 0U) return 0U;
     for (int attempt = 0; attempt < 2; attempt++) {
-        uint8_t r = scsi_read_sectors_once (lba, buf, count, block_size);
+        uint8_t r = scsi_read_sector_once (lba, buf, block_size);
         if (r == 0) return 0;
+        printf ("USB: R lba=%lu attempt %u failed r=%u -> sense+reset\r\n",
+                (unsigned long)lba, (unsigned)(attempt + 1), (unsigned)r);
         uint8_t sense[18] = {0};
         (void)usb_scsi_request_sense (sense, sizeof(sense));
         (void)msc_mass_storage_reset ();
@@ -830,7 +920,12 @@ uint8_t usb_scsi_test_unit_ready (void) {
  * console isn't flooded (an 8 MiB file = 16384 chunks). */
 #define USB_DMA_DBG_CHUNKS  4U
 static uint32_t s_dbg_count = 0U;
+/* Chunk-loop top-of-iteration diagnostic counter (re-armed at the end
+ * of each USB_FileToPSRAM run; the per-sector counters live above the
+ * SCSI layer). */
+static uint32_t s_chunk_dbg = 0U;
 
+#if !USB_PSRAM_SYNC_COPY
 static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
                                uint32_t byte_count) {
     if ((byte_count & 3U) != 0U) return 1;        /* must be 4-byte aligned */
@@ -844,6 +939,31 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
         s_dbg_count++;
     }
 
+    /* Hold cart ~WAIT around the DMA burst so the cart EXTI0 handler
+     * cannot fire in the middle of a burst and corrupt the PSRAM
+     * controller's internal state.
+     *
+     * Without the hold, the WCH PSRAM DMA is started with global IRQs
+     * enabled. The Z80 keeps executing - it is in a tight FIFO-poll
+     * loop, so it generates EXTI0 cart reads while the DMA is in
+     * flight. The cart handler tries to read/write individual bytes
+     * from PSRAM at the same time the DMA is bursting, the PSRAM
+     * controller's internal bus arbitration loses the interleaving,
+     * the DMATF status bit never asserts, and the bounded-wait
+     * (2000000 spins / ~10 ms) eventually bails with
+     * "PSRAM DMA stuck at 0x...". The MSX-side poll loop is then
+     * stuck in a state where the firmware is no longer servicing the
+     * mailbox - the "lock" the user sees.
+     *
+     * The hold is per-chunk (~512 B = a few hundred microseconds of
+     * DMA at 200 MHz / 32-bit / 8-beat bursts) so the MSX-side
+     * progress bar still updates between chunks. The handler is
+     * allowed to fire while the hold is active - every cart EXTI0
+     * handler early-returns at the very top when s_msx_wait_held=1
+     * (see cart.c::s_msx_wait_held), so the DMA burst has the bus
+     * to itself without us needing to disable EXTI0 in the PFIC. */
+    Cart_HoldMSXWait_Begin ();
+
     PSRAMDMATypeDef dmas = {0};
     dmas.PSRAM_DMA_DAT_DIR      = DMA_DIR_PSRAM;   /* SRAM -> PSRAM */
     dmas.PSRAM_DMA_MEMORY_SIZE  = PSRAM_DMA_SIZE_32;
@@ -853,12 +973,91 @@ static uint8_t psram_dma_copy (const uint8_t *sram_src, uint32_t psram_addr,
 
     PSRAMDMASet ((uint32_t *)sram_src, psram_addr, &dmas);
     PSRAM_DMA_Cmd (ENABLE);
-    while ((PSRAM->ISR & 0x2U) == 0U) {            /* wait DMATF */
-        /* could WFI here but the DMA finishes fast (1 MiB / 8-word burst) */
+    /* Bounded wait: a normal burst completes in microseconds, but if the
+     * PSRAM controller wedges (glitchy device - a long-standing suspicion
+     * on this board) this spin would otherwise hold the main loop forever
+     * with interrupts live: the cart keeps serving Z80 cycles, the mailbox
+     * never gets its answer, and the MSX hangs in its poll loop - the
+     * observed "lock". Bail out with an error so the load fails cleanly
+     * instead. */
+    uint32_t guard = 2000000U;                    /* ~10 ms of spins */
+    uint8_t  rc    = 0U;
+    while ((PSRAM->ISR & 0x2U) == 0U) {           /* wait DMATF */
+        if (--guard == 0U) {
+            PSRAM_DMA_Cmd (DISABLE);
+            PSRAM_ClearITPendingBit (PSRAM_DMATF);
+            printf ("USB: PSRAM DMA stuck at 0x%08lx (%lu bytes)\r\n",
+                    (unsigned long)psram_addr, (unsigned long)byte_count);
+            rc = 2U;
+            break;
+        }
     }
-    PSRAM_ClearITPendingBit (PSRAM_DMATF);
+    if (rc == 0U) {
+        PSRAM_ClearITPendingBit (PSRAM_DMATF);
+    }
     PSRAM_DMA_Cmd (DISABLE);
-    return 0;
+    /* Release ~WAIT. The held Z80 cycle (typically a 0x7FFF FIFO read)
+     * now completes; the EXTI0 edge latched at its start fires the
+     * handler, which runs normally (s_msx_wait_held has just been
+     * cleared by Cart_HoldMSXWait_End, so the handler serves the
+     * cycle as a fresh one - returns the FIFO byte, or 0 if empty,
+     * and the MSX-side poll loop resumes). */
+    Cart_HoldMSXWait_End ();
+    return rc;
+}
+#endif /* !USB_PSRAM_SYNC_COPY */
+
+#if USB_PSRAM_SYNC_COPY
+/* Synchronous (CPU) SRAM -> PSRAM copy. See USB_PSRAM_SYNC_COPY above for
+ * why this replaces the PSRAM DMA burst engine at HCLK 200 MHz.
+ *
+ * Word (32-bit) stores keep the PSRAM controller's preferred access size.
+ * No head/tail handling is needed: the caller always hands us s_sector_buf
+ * (4-byte aligned) and a per-chunk length that is a multiple of 4, so both
+ * source and destination stay aligned for the whole loop. */
+static uint8_t psram_sync_copy (const uint8_t *sram_src, uint32_t psram_addr,
+                                uint32_t byte_count) {
+    if ((byte_count & 3U) != 0U) return 1;        /* must be 4-byte aligned */
+    if (((uint32_t)sram_src & 3U) != 0U) return 1;
+    if (byte_count == 0U) return 0;
+
+    if (s_dbg_count < USB_DMA_DBG_CHUNKS) {
+        printf ("USB:   SYNC[%lu] sram=0x%08lx psram=0x%08lx bytes=%lu\r\n",
+                (unsigned long)s_dbg_count, (unsigned long)sram_src,
+                (unsigned long)psram_addr, (unsigned long)byte_count);
+        s_dbg_count++;
+    }
+
+    /* Same ~WAIT contract as the DMA path: hold the Z80 for the duration of
+     * the copy so its FIFO poll loop cannot re-enter the cart handler and
+     * interleave PSRAM accesses with us. The handler early-returns while
+     * held (see cart.c::s_msx_wait_held). */
+    Cart_HoldMSXWait_Begin ();
+
+    volatile uint32_t *dst = (volatile uint32_t *)psram_addr;
+    const    uint32_t *src = (const uint32_t *)sram_src;
+    uint32_t words = byte_count / 4U;
+    for (uint32_t i = 0U; i < words; i++) {
+        dst[i] = src[i];
+    }
+    /* Ensure the final PSRAM store has retired before ~WAIT is released and
+     * the Z80 reads the byte back. */
+    __asm__ volatile ("fence" ::: "memory");
+
+    Cart_HoldMSXWait_End ();
+    return 0U;
+}
+#endif /* USB_PSRAM_SYNC_COPY */
+
+/* Dispatch: pick the configured SRAM -> PSRAM copy engine. */
+static inline uint8_t psram_copy_chunk (const uint8_t *sram_src,
+                                        uint32_t psram_addr,
+                                        uint32_t byte_count) {
+#if USB_PSRAM_SYNC_COPY
+    return psram_sync_copy (sram_src, psram_addr, byte_count);
+#else
+    return psram_dma_copy (sram_src, psram_addr, byte_count);
+#endif
 }
 
 /* ------------------------------------------------------------------------ */
@@ -879,6 +1078,13 @@ void (*USB_ProgressCB) (uint32_t done, uint32_t total) = 0;
  * "am I mounted?" check out of every f_opendir / f_open. */
 static uint8_t s_fatfs_mounted = 0U;
 
+void USB_InvalidateMount (void) {
+    if (s_fatfs_mounted) {
+        (void)f_mount (NULL, "0:", 0);
+    }
+    s_fatfs_mounted = 0U;
+}
+
 /* Attempt to (re-)enumerate the USB device and mount the FAT volume.
  * Returns 0 on success, non-zero (DEF_ERR_*) on failure.
  *
@@ -893,6 +1099,9 @@ uint8_t USB_TryEnsureEnumerated (void) {
      *    internally, so this loop is mostly for the f_mount side. */
     uint8_t r = DEF_ERR_ENUM;
     for (int tries = 0; tries < 5; tries++) {
+        /* Yield the service loop the moment the Z80 asks for anything:
+         * a probe must never own the bus past a request arrival. */
+        if (Nextor_RequestPending () != 0U) return DEF_ERR_ENUM;
         r = USBH_PreDeal ();
         if (r == DEF_ERR_DETECT) {
             if (s_fatfs_mounted) {
@@ -909,8 +1118,43 @@ uint8_t USB_TryEnsureEnumerated (void) {
             Nextor_CacheInvalidate ();
             return DEF_ERR_DETECT;
         }
-        if (r == DEF_SUCCESS || r == DEF_DEFAULT) break;
+        if (r == DEF_SUCCESS) break;
+
+        /* DEFINITIVE-FIX: DEF_DEFAULT is NOT success.
+         *
+         * USBHSH_CheckRootHubPortStatus() only reports state through the
+         * PORT_STATUS_CHG *edge* flag, which the FIRST PreDeal call
+         * consumed. Every later call with no new edge returns
+         * ROOT_DEV_FAILED -> USBH_PreDeal falls through to DEF_DEFAULT
+         * even while a stick sits enumerated on the port (or is attached
+         * but was never enumerated because our first call missed the
+         * edge). Treating DEF_DEFAULT as "already fine, break out"
+         * credited a fake success above and f_mount then ran against a
+         * HostCtl[] struct that had never been filled - the terminal
+         * showed "USB not mounted" on every boot while the identical
+         * code path under Nextor (RawDisk_Probe -> same function) only
+         * ever ran as the FIRST enumerating call after a connect edge
+         * and therefore worked.
+         *
+         * If the driver actually finished enumeration, credit success.
+         * Otherwise force a fresh enumeration now; USBH_EnumRootDevice
+         * is idempotent and does not need the edge flag. */
+        if (RootHubDev[DEF_USB_PORT].bStatus == ROOT_DEV_SUCCESS) break;
+
+        printf ("USB: no valid enumeration (PreDeal=%u), forcing\r\n",
+                (unsigned)r);
+        if (USBH_EnumRootDevice (DEF_USB_PORT) == ERR_SUCCESS) {
+            RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_SUCCESS;
+            r = DEF_SUCCESS;
+            break;
+        }
+        /* Still failing this pass: rate-limit and retry through the
+         * normal top-of-loop path (the forced enumeration already
+         * happened, so the next pass either sees SUCCESS or forces
+         * again). */
+        r = DEF_ERR_ENUM;
         Delay_Ms (100);
+        continue;
     }
     if (r == DEF_ERR_ENUM) {
         return DEF_ERR_ENUM;
@@ -952,11 +1196,21 @@ uint8_t USB_TryEnsureMounted (void) {
             printf ("FAT: f_mount failed (%u = %s)\r\n", (unsigned)fr, why);
             if (tries < 2) {
                 Delay_Ms (200);
-                /* disk_initialize caches the block size; force a reset
-                 * so the next f_mount re-runs it (and gives the stick
-                 * another chance to settle before the next SCSI burst). */
-                ClearUSB ();
-                (void)USBH_PreDeal ();
+                /* DEFINITIVE-FIX: recover via a real re-enumeration, not
+                 * ClearUSB(). The old sequence wiped HostCtl[] (SCSI needs
+                 * those endpoints) and then called USBH_PreDeal(), which
+                 * - with the PORT_STATUS_CHG edge already consumed -
+                 * happily returned DEF_DEFAULT without ever rebuilding the
+                 * state it just destroyed. Force-enumerate instead: the
+                 * routine is the same one PreDeal calls on a connect edge
+                 * and it refills HostCtl[] from the stick's descriptors. */
+                if (USBH_EnumRootDevice (DEF_USB_PORT) == ERR_SUCCESS) {
+                    RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_SUCCESS;
+                } else {
+                    /* Leave bStatus non-success -> disk_initialize (called
+                     * by the next f_mount) will force-enumerate again. */
+                    RootHubDev[DEF_USB_PORT].bStatus = ROOT_DEV_FAILED;
+                }
             }
         }
         return DEF_ERR_ENUM;
@@ -998,19 +1252,25 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
 
     /* Bounds check: psram_addr is the absolute PSRAM bus address
      * (always >= PSRAM_CART_BASE 0x80000000). Compare the offset
-     * within the cart window against PSRAM_CART_SIZE. The previous
-     * version compared the absolute address against PSRAM_CART_SIZE
-     * directly, which always tripped (0x80000000 >= 0x00800000) and
-     * made the loader's "copy 0 bytes -> PSRAM" silent. */
+     * within the cart window against the game-image size
+     * (CART_GAME_MAX_BYTES = PSRAM_CART_BASE + CART_GAME_BASE ..
+     * PSRAM_CART_BASE + CART_SLOTTED_BANK_BASE_OFFSET). The previous
+     * version compared against the full 8 MiB PSRAM_CART_SIZE, which
+     * let oversize ROMs write into the sub-slot 1 mapper-RAM region
+     * and silently corrupt the MSX-DOS mapper banks. */
     if (psram_addr < PSRAM_CART_BASE
-        || psram_addr - PSRAM_CART_BASE >= PSRAM_CART_SIZE) {
+        || psram_addr - PSRAM_CART_BASE >= CART_GAME_MAX_BYTES) {
         f_close (&fp);
-        printf ("USB: PSRAM address 0x%08lx out of range\r\n",
-                (unsigned long)psram_addr);
+        printf ("USB: PSRAM address 0x%08lx out of range (game window "
+                "= 0x%08lx bytes at PSRAM+0x%08lx)\r\n",
+                (unsigned long)psram_addr,
+                (unsigned long)CART_GAME_MAX_BYTES,
+                (unsigned long)(PSRAM_CART_BASE + CART_GAME_BASE));
         return 0U;
     }
-    printf ("USB: PSRAM addr in range (offset %lu)\r\n",
-            (unsigned long)(psram_addr - PSRAM_CART_BASE));
+    printf ("USB: PSRAM addr in range (offset %lu, game window %lu bytes)\r\n",
+            (unsigned long)(psram_addr - PSRAM_CART_BASE),
+            (unsigned long)CART_GAME_MAX_BYTES);
 
     if (len == 0U) {
         len = (uint32_t)f_size (&fp);
@@ -1018,11 +1278,21 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
                 (unsigned long)len);
     }
 
-    uint32_t remaining = PSRAM_CART_SIZE - (psram_addr - PSRAM_CART_BASE);
+    uint32_t remaining = CART_GAME_MAX_BYTES - (psram_addr - PSRAM_CART_BASE);
     if (len > remaining) {
-        printf ("USB: len %lu capped to remaining %lu\r\n",
-                (unsigned long)len, (unsigned long)remaining);
-        len = remaining;
+        /* Hard error, not a silent cap. A ROM that does not fit the
+         * 4 MiB game window used to be silently truncated (and the
+         * truncated tail usually left the cart unbootable). Surface
+         * the size mismatch so the user knows to re-rip at smaller
+         * size or pick a smaller ROM. */
+        printf ("USB: REJECT: file %lu bytes > game window %lu bytes "
+                "(sub-slot 1 mapper RAM is at PSRAM + 0x%08lx, "
+                "%lu MiB reserved)\r\n",
+                (unsigned long)len, (unsigned long)remaining,
+                (unsigned long)CART_SLOTTED_BANK_BASE_OFFSET,
+                (unsigned long)(CART_SLOTTED_BANK_BASE_OFFSET / (1024UL * 1024UL)));
+        f_close (&fp);
+        return 0U;
     }
     printf ("USB: copy plan: %lu bytes in %lu x %u-byte chunks\r\n",
             (unsigned long)len,
@@ -1033,6 +1303,26 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
     while (total < len) {
         uint32_t chunk = len - total;
         if (chunk > sizeof (s_sector_buf)) chunk = sizeof (s_sector_buf);
+
+        /* DIAGNOSTIC (first 8 chunks): print at the TOP of each chunk
+         * iteration. The DMA[0..3] prints inside psram_dma_copy bracket
+         * the copy itself; this print brackets the f_read that runs
+         * BEFORE each copy. With both prints present the sequence per
+         * chunk is: "chunk N" -> "DMA[N]". A log that stops after
+         * "DMA[0]" pins the freeze to either the chunk-1 f_read (stick
+         * path) or the progress-bar callback between the two. */
+        /* DIAGNOSTIC: EVERY chunk prints its index + offset while the
+         * counter is under the cap (raised to 4096 = a 2 MiB copy's
+         * worth of lines - generous for diagnosis, harmless because
+         * re-armed per load). Sequence per chunk is now unambiguous:
+         *   "chunk N" -> "R lba=..." -> "DMA[N]" (first 4) -> "bar"
+         * The last line before a freeze pins the exact chunk. */
+        if (s_chunk_dbg < 4096U) {
+            printf ("USB: chunk %lu at offset %lu\r\n",
+                    (unsigned long)(total / (uint32_t)sizeof (s_sector_buf)),
+                    (unsigned long)total);
+            s_chunk_dbg++;
+        }
 
         fr = f_read (&fp, s_sector_buf, chunk, &br);
         if (fr != FR_OK) {
@@ -1053,9 +1343,10 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
                     (unsigned long)chunk);
         }
 
-        if (psram_dma_copy (s_sector_buf, psram_addr + total, (uint32_t)br) != 0U) {
-            printf ("USB: PSRAM DMA copy FAILED at offset %lu, len %u "
-                    "(alignment or DMA error)\r\n",
+        if (psram_copy_chunk (s_sector_buf, psram_addr + total,
+                              (uint32_t)br) != 0U) {
+            printf ("USB: PSRAM copy FAILED at offset %lu, len %u "
+                    "(alignment or copy error)\r\n",
                     (unsigned long)total, (unsigned)br);
             break;
         }
@@ -1077,6 +1368,10 @@ uint32_t USB_FileToPSRAM (const char *path, uint32_t psram_addr,
             (total == len) ? "COMPLETE" : "INCOMPLETE");
     f_close (&fp);
     s_dbg_count = 0U;   /* re-arm the first-chunk debug for next load */
+    s_chunk_dbg = 0U;
+#if RISKY_DEBUG
+    s_scsi_dbg  = 0U;
+#endif
     return total;
 }
 

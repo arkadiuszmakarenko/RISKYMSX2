@@ -45,6 +45,18 @@ MAP
 to print the slot-to-drive mapping. The USB stick should show up as
 `A:` (slot 3 primary, drive 0).
 
+## Make Nextor assign all FAT16 partitions
+
+From the terminal menu, open **B=USB**, then press `M` in the USB drive
+manager and confirm. This marks every valid primary FAT16 partition active
+without reformatting it or changing filesystem data. On the next Nextor
+boot, Nextor can assign a drive letter to each active partition, provided
+there are enough free drive letters and reduced-drive mode is off.
+
+`A` activates one selected FAT16 partition and preserves the active flags
+on the others. `P` repartitions and formats the drive, erasing existing
+data; newly created partitions are all marked active.
+
 ## How to get back to the terminal menu from MSX-DOS
 
 From the MSX-DOS prompt:
@@ -89,6 +101,48 @@ showing the file list until you type something.
    seconds.
 4. If the stick is "changed" but not "ready", try `MAP /R` again or
    pull and re-insert.
+
+## Diagnosing partition creation and boot mapping
+
+The driver exposes the USB stick as one raw device; Nextor reads its MBR
+and maps partitions itself. To trace both the partition table written by
+`CALL FDISK` and Nextor's initialization requests, make a diagnostic build
+from `firmware/`:
+
+```sh
+make rebuild PROBES=1 RISKY_DEBUG=1
+```
+
+Flash that build and capture the firmware USART log while creating the
+partitions and rebooting. `RISKY_DEBUG=1` enables the firmware's MBR and
+mailbox logs; `PROBES=1` adds acknowledged driver-side initialization
+markers. Both are diagnostic settings and should be disabled for normal
+use.
+
+During driver initialization, the MSX screen prints a line such as
+`P1 2048 MB initialized` for each active FAT12/16 primary MBR entry. These
+are candidates only: the kernel validates the filesystems and assigns drive
+letters afterward.
+
+Look for:
+
+- `MBR write candidate` followed by `part1` through `part4`: the exact
+  table Nextor/FDISK is attempting to write. `MBR write completed` confirms
+  the USB write succeeded. The later `MBR read` dump shows what the medium
+  returned on boot.
+- Each partition's type, active flag, starting LBA, and sector
+  count. The log calls out empty, inactive, extended, and unsupported types.
+- `DRVQ3`/`DRVQ4` markers for boot allocation inputs and `DRVQ5` for the
+  driver's maximum device count. `DQ2` markers show which device Nextor
+  queries and whether it is validating the device or requesting its
+  parameters.
+- `params:` for the raw device capacity and flags, and
+  `READ lba=0x00000000` for the MBR read. These separate a table/write
+  problem from initialization or sector-read problems.
+
+After boot, `MAP` shows which drive letters Nextor actually assigned. The
+firmware log shows the raw table and driver requests; Nextor's internal
+partition-to-drive assignment is confirmed by `MAP`.
 
 ## What if `CALL SYSTEM` really did break the boot
 

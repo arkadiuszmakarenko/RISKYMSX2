@@ -23,7 +23,15 @@ extern void Delay_Ms (uint32_t n);
  * fields directly. */
 TerminalMailbox g_term_mbox;
 
-#define TERM_MAX_FILES   32U
+/* FatFs logical drive 0 normally auto-detects a partition. During USB
+ * preparation the formatter temporarily pins it to partitions 1..4 so
+ * each primary FAT16 volume can be formatted in turn. */
+PARTITION VolToPart[FF_VOLUMES] = {{0U, 0U}};
+
+/* Keep a useful multi-page directory listing instead of truncating it after
+ * two pages. Each entry costs about 57 bytes across the parallel name/size
+ * arrays, so 512 entries use roughly 29 KiB of SRAM and allow 26 pages. */
+#define TERM_MAX_FILES   512U
 #define FILE_NAME_MAX    26U    /* printed-column width: 25 chars + NUL.
                                  * Line layout = 25 (name) + 1 (space) +
                                  * up to 5 (size, e.g. "1023K") = 31
@@ -39,7 +47,21 @@ TerminalMailbox g_term_mbox;
  * to be ambiguous ("is this row 21 the new one or the old one?").
  * One log line at session start settles it, and it costs one string.
  * Bump this whenever the key map changes. */
-#define TERM_MENU_VERSION "v4 (N=boot)"
+#define TERM_MENU_VERSION "v8 (USB manager)"
+
+/* Maximum depth of the current-directory path the menu can hold. The
+ * full path assembled at boot time (e.g. "0:/A/B/C/file.ROM") is built
+ * out of this same buffer, so 64 bytes is enough for ~10 levels of
+ * 8.3-style nesting. f_opendir on this stick refused to open a path
+ * deeper than about 80 bytes in practice - keep the budget well below. */
+#define TERM_PATH_MAX   64U
+
+/* Display column budgets. The MSX screen is 32 columns and column 0
+ * is reserved for the sprite arrow, so the printable width is 31.
+ * "25 name + 1 sp + 5 size" = 31, which is what FILE_NAME_MAX already
+ * encodes. Directory rows use the full 25 name columns, followed by
+ * a two-space gap and the "DIR" marker. */
+#define TERM_NAME_COLS  (FILE_NAME_MAX - 1U)   /* 25 */
 
 typedef enum {
     MENU_LIST,
@@ -50,13 +72,21 @@ typedef enum {
 static struct {
     /* SFN (8.3 short name, e.g. "METALG~1.ROM") - what f_open() gets
      * for every file operation. LFN paths fail f_open with
-     * FR_NO_FILE (4) on our stick, so all operations use the SFN. */
+     * FR_NO_FILE (4) on our stick, so all operations use the SFN.
+     *
+     * For directory rows this holds the SFN of the directory itself
+     * (fi.altname, e.g. "SUB") or the literal string ".." for the
+     * parent-entry row. */
     char    names[TERM_MAX_FILES][FILE_NAME_MAX];
     /* LFN (long name, up to 25 printable chars) - DISPLAY ONLY.
      * Drawn in the file list so the menu stays human-readable; never
-     * used for f_open / path building. */
+     * used for f_open / path building.
+     *
+     * For directory rows the LFN is the same as the SFN unless the
+     * volume was formatted with LFN support, in which case the
+     * human-readable form is shown. */
     char    lfns[TERM_MAX_FILES][FILE_NAME_MAX];
-    uint32_t sizes[TERM_MAX_FILES];  /* bytes */
+    uint32_t sizes[TERM_MAX_FILES];  /* bytes - 0 for directory rows */
     uint16_t count;
     uint16_t sel;       /* currently-highlighted index (absolute,
                          * i.e. counts across pages) */
@@ -65,6 +95,17 @@ static struct {
                          * screen - s_menu.sel is REUSED as the
                          * mapper-row index on that screen, so this
                          * preserves which LFN to display. */
+    /* Per-row type flag. 0 = file, 1 = directory (including the
+     * synthetic ".. " row at index 0 of every non-root list). The
+     * file list reuses the same array for files and dirs, so the
+     * type travels with the row rather than with a separate path. */
+    uint8_t  is_dir[TERM_MAX_FILES];
+    /* Current directory relative to the volume root. The empty
+     * string means the root. A trailing '/' is always present when
+     * the string is non-empty, so the boot path is built as
+     * "0:/" + s_menu.cwd + s_menu.picked without any case-by-case
+     * separator logic. Bounded to TERM_PATH_MAX-1 chars. */
+    char     cwd[TERM_PATH_MAX];
     uint8_t  loaded;    /* "ROM was loaded into PSRAM" */
     MenuState state;
     char     picked[FILE_NAME_MAX]; /* SFN of the selected file - the
@@ -115,10 +156,33 @@ static const Cart_Mapper kMenuToCart[] = {
 /* FIFO helpers (main-loop side)                                       */
 /* ------------------------------------------------------------------ */
 
+/* Owner-side spin budget for one free output slot. The MSX drains one
+ * byte per terminal-loop iteration (cart.c 0x7FFF read), so waiting in
+ * out_push() is the backpressure that keeps a multi-byte transaction
+ * (ESC Y r c, or the 0x04 X Y cursor command) from being split by a
+ * full queue - split sequences are what produced the partial screens
+ * and stray cursor jumps. The wait MUST be bounded: if the MSX stops
+ * polling (mapper swapped away, or a hung BIOS), blocking forever would
+ * wedge the firmware. On expiry the byte is counted and dropped, which
+ * is no worse than the old silent drop but at least visible. */
+#define TERM_OUT_PUSH_SPIN  200000U
+
 static int out_push (uint8_t b) {
-    uint16_t next = (uint16_t)((g_term_mbox.out_tail + 1U) % 2048U);
-    if (next == g_term_mbox.out_head) return 0;  /* full */
-    g_term_mbox.out_buf[g_term_mbox.out_tail] = b;
+    uint16_t tail = g_term_mbox.out_tail;
+    uint16_t next = (uint16_t)((tail + 1U) % TERM_OUT_FIFO_DEPTH);
+    if (next == g_term_mbox.out_head) {
+        /* Full: wait for the EXTI0 consumer to free a slot. tail is
+         * ours alone, so `next` stays valid for the whole wait. */
+        uint32_t spin = TERM_OUT_PUSH_SPIN;
+        while (next == g_term_mbox.out_head) {
+            if (--spin == 0U) {
+                g_term_mbox.out_dropped++;
+                return 0;  /* consumer stalled: counted, not silent */
+            }
+            __asm__ volatile ("nop");
+        }
+    }
+    g_term_mbox.out_buf[tail] = b;
     /* Memory barrier: make sure the byte write above is visible to the
      * IRQ-side consumer (Cart_EXTI0_Terminal_Handler) BEFORE the
      * tail increment that exposes the slot. RV32 needs a store-store
@@ -126,15 +190,24 @@ static int out_push (uint8_t b) {
      * standard RISC-V mnemonics. */
     __asm__ volatile ("fence w, w" ::: "memory");
     g_term_mbox.out_tail = next;
-    g_term_mbox.out_n++;
     return 1;
 }
 
+/* Occupancy, derived from the SPSC indices rather than a shared counter
+ * (see terminal.h). The main loop may observe one byte more than is
+ * actually queued if the EXTI0 consumer advances out_head mid-read;
+ * every caller treats this as a scheduling hint, so the conservative
+ * over-estimate is harmless. */
+uint16_t Terminal_OutLevel (void) {
+    return (uint16_t)((g_term_mbox.out_tail - g_term_mbox.out_head)
+                      & (TERM_OUT_FIFO_DEPTH - 1U));
+}
+
 static int kbd_pop (uint8_t *out) {
-    if (g_term_mbox.kbd_n == 0U) return 0;
+    if (g_term_mbox.kbd_head == g_term_mbox.kbd_tail) return 0;
     *out = g_term_mbox.kbd_buf[g_term_mbox.kbd_head];
-    g_term_mbox.kbd_head = (uint8_t)((g_term_mbox.kbd_head + 1U) % 16U);
-    g_term_mbox.kbd_n--;
+    g_term_mbox.kbd_head = (uint8_t)((g_term_mbox.kbd_head + 1U)
+                                     % TERM_KBD_FIFO_DEPTH);
     return 1;
 }
 
@@ -189,7 +262,7 @@ static void newline (void) {
     out_push ('\n');
 }
 
-/* Spin until the MSX has drained the output FIFO (out_n == 0) or the
+/* Spin until the MSX has drained the output FIFO (level == 0) or the
  * given millisecond budget expires, whichever comes first.
  *
  * Clock-derived calibration: empirically 4,000,000 iterations = 20 ms
@@ -200,7 +273,7 @@ static void term_wait_drain (uint32_t ms) {
     const uint32_t iters = ms * (SystemCoreClock / 1000U);
     uint32_t i;
     for (i = 0; i < iters; i++) {
-        if (g_term_mbox.out_n == 0U) break;
+        if (Terminal_OutLevel () == 0U) break;
         __asm__ volatile ("nop");
     }
 }
@@ -211,15 +284,64 @@ static void term_wait_drain (uint32_t ms) {
 
 /* Set once per terminal session: the next Terminal_Service pass scans
  * the stick and renders the file list. Terminal_Reset() re-arms it, so
- * a session entered via the boot gate (BOOTGATE -> TERMINAL swap)
- * renders even though Terminal_Service already ran while the boot
- * gate was active (the firmware main loop calls every service
- * unconditionally). */
+ * a session entered via the boot gate (the MSX-side init reports GRAPH
+ * held) renders on its first post-gate pass even though Terminal_Service
+ * already ran while the gate was still waiting for that report. */
 static uint8_t s_list_pending = 1;
 
+/* Boot gate. At power-on the MSX-side terminal ROM's init probes GRAPH
+ * and writes its decision to the control mailbox before it starts
+ * polling:
+ *   0x00 -> GRAPH held     -> render the terminal menu (this pass).
+ *   0x01 -> GRAPH not held -> boot Nextor instead of rendering.
+ * Until that byte arrives the main loop must NOT render the menu (else
+ * a no-GRAPH power-on flashes the menu for ~40 ms before Nextor boots),
+ * so the first render is gated on s_bootgate_done. A timeout keyed off
+ * rdcycle is the safety net: if the byte never arrives (e.g. a stale
+ * MSX-side ROM that writes nothing) the menu still renders, exactly as
+ * the pre-gate firmware did. */
+static uint8_t  s_bootgate_done = 0U;
+static uint32_t s_bootgate_t0   = 0U;
+static uint32_t s_reported_out_dropped = 0U;
+
+/* Set the moment a soft-reset launch starts swapping the mapper away
+ * from the terminal. Once that happens the terminal mailbox is dead
+ * (the MSX-side body is about to reboot into the launched ROM), so the
+ * key-drain loop must stop immediately and Terminal_Service must not
+ * touch the USB/menu again - otherwise keys still queued behind the
+ * launch key get "handled" against a mapper that is no longer ours.
+ * Re-armed by Terminal_Reset(). */
+static uint8_t  s_launching = 0U;
+
+/* Maximum keys handled per Terminal_Service pass. A burst (auto-repeat
+ * or the user mashing keys) used to be drained in one go, so one pass
+ * could emit several full-list repaints back to back. Each repaint is
+ * ~800 bytes; the output ring is 2048, so more than two repaints in a
+ * single pass can outrun the MSX drain and force out_push() to drop -
+ * the truncated ESC-Y / sprite sequences that show up as partial
+ * screens. Two keeps a whole pass inside the ring with margin while
+ * still draining faster than any human can type. */
+#define TERM_KEY_BUDGET 2U
+
+/* Core-cycle counter, used only for the boot-gate safety timeout. The
+ * threshold below is deliberately coarse (it only has to be "a few
+ * seconds"), so no Delay_Ms-based calibration is needed: the core clock
+ * is a few hundred MHz (400 MHz on this part), and even a 2x error still
+ * gives a multi-second fallback well under the ~10 s rdcycle wrap.
+ * 2.4e9 cycles ~= 6 s at 400 MHz. Unsigned subtraction makes wrap
+ * harmless. */
+#define TERM_BOOTGATE_TIMEOUT_CYC 2400000000U
+
+static inline uint32_t term_rdcycle (void) {
+    uint32_t c;
+    __asm__ volatile ("rdcycle %0" : "=r" (c));
+    return c;
+}
+
 void Terminal_Reset (void) {
-    g_term_mbox.kbd_head = g_term_mbox.kbd_tail = g_term_mbox.kbd_n = 0;
-    g_term_mbox.out_head = g_term_mbox.out_tail = g_term_mbox.out_n = 0;
+    g_term_mbox.kbd_head = g_term_mbox.kbd_tail = 0;
+    g_term_mbox.out_head = g_term_mbox.out_tail = 0;
+    g_term_mbox.out_dropped = 0U;
     g_term_mbox.control = 0xFFU;
     s_menu.count = 0;
     s_menu.sel   = 0;
@@ -228,7 +350,14 @@ void Terminal_Reset (void) {
     s_menu.loaded = 0;
     s_menu.state  = MENU_LIST;
     s_menu.picked[0] = '\0';
+    /* Start at the volume root. A subsequent scan_usb() will list its
+     * contents. */
+    s_menu.cwd[0] = '\0';
     s_list_pending = 1U;
+    s_bootgate_done = 0U;
+    s_bootgate_t0   = 0U;
+    s_reported_out_dropped = 0U;
+    s_launching = 0U;
 }
 
 /* ------------------------------------------------------------------ */
@@ -318,7 +447,11 @@ static void print_file_list (void) {
     move_cursor (0, 0);
     print_menu_title ();
 
-    /* Files of the current page. */
+    /* Keep all 20 list rows available on every level. The previous
+     * cwd header consumed a row but paging and pointer positioning
+     * still assumed 20 visible entries, causing the last row to
+     * overlap the footer in subdirectories. */
+    const uint8_t body_offset = 1U;
     uint16_t start = (uint16_t)(s_menu.page * TERM_PAGE_SIZE);
     uint16_t end   = (uint16_t)(start + TERM_PAGE_SIZE);
     if (end > s_menu.count) end = s_menu.count;
@@ -326,38 +459,75 @@ static void print_file_list (void) {
     for (uint16_t i = start; i < end; i++) {
         /* Reserve column 0 for the sprite cursor - text starts at
          * column 1. */
-        move_cursor ((uint8_t)(1 + (i - start)), 1);
-        /* print the long name, padded to FILE_NAME_MAX for a stable
-         * column layout (operations keep using the SFN - see
-         * scan_usb). */
-        const char *n = s_menu.lfns[i];
-        for (int j = 0; j < FILE_NAME_MAX - 1; j++) {
-            char c = n[j];
-            if (c == '\0') {
-                for (; j < FILE_NAME_MAX - 1; j++) out_push (' ');
-                    break;
+        move_cursor ((uint8_t)(body_offset + (i - start)), 1);
+        /* Two column layouts share the same 25-char name budget:
+         *
+         *   file:       "<name padded to 25> <size>"
+         *   directory:  "<name padded to 25>  DIR"
+         *
+         * The synthetic "<DIR> .." row uses the same 8 chars at the
+         * front as "<DIR> ..", padded to 25 - unambiguous on screen
+         * and visibly distinct from an ordinary directory name. */
+        const char *n;
+        if (s_menu.is_dir[i]) {
+            if (s_menu.names[i][0] == '.' && s_menu.names[i][1] == '.' &&
+                s_menu.names[i][2] == '\0') {
+                /* "<DIR> .." - 8 chars, padded to 25 */
+                static const char kUp[] = "<DIR> ..";
+                for (int j = 0; j < 8; j++) out_push ((uint8_t)kUp[j]);
+                for (int j = 8; j < (int)TERM_NAME_COLS; j++) out_push (' ');
+            } else {
+                /* Use the full name width; don't prefix it with DIR,
+                 * since that clipped long folder names and pushed the
+                 * type marker past the right edge of the screen. */
+                n = s_menu.lfns[i];
+                for (int j = 0; j < (int)TERM_NAME_COLS; j++) {
+                    char c = n[j];
+                    if (c == '\0') {
+                        for (; j < (int)TERM_NAME_COLS; j++) out_push (' ');
+                        break;
+                    }
+                    out_push ((uint8_t)c);
+                }
             }
-            out_push ((uint8_t)c);
+            out_str ("  DIR");
+        } else {
+            /* file: 25 chars of name, padded, then size */
+            n = s_menu.lfns[i];
+            for (int j = 0; j < (int)TERM_NAME_COLS; j++) {
+                char c = n[j];
+                if (c == '\0') {
+                    for (; j < (int)TERM_NAME_COLS; j++) out_push (' ');
+                    break;
+                }
+                out_push ((uint8_t)c);
+            }
+            out_push (' ');
+            print_size (s_menu.sizes[i]);
         }
-        out_push (' ');
-        print_size (s_menu.sizes[i]);
         newline ();
     }
     if (s_menu.count == 0U) {
-        out_str ("  (no .ROM files on USB stick)");
+        move_cursor (body_offset, 1);
+        out_str ("  (empty directory)");
         newline ();
     }
 
     /* Two hint rows at the bottom: row 21 is the page indicator, row 22
-     * carries the key map. */
+     * carries the key map. They are anchored to the SAME physical
+     * rows as before (21/22), so the body region is now 20 rows tall
+     * when the cwd header is hidden, or 19 rows when it is shown.
+     * With TERM_PAGE_SIZE = 20 the unadorned list fills the screen;
+     * the cwd line costs one body row on a deep list, which is the
+     * only honest answer to the user's "where am I?" question. */
     char buf[32];
-    move_cursor ((uint8_t)(1 + TERM_PAGE_SIZE), 1);
+    move_cursor (21, 1);
     snprintf (buf, sizeof (buf), " Pg %u/%u",
               (unsigned)(s_menu.page + 1U), (unsigned)menu_page_count ());
     out_str (buf);
     newline ();
-    move_cursor ((uint8_t)(2 + TERM_PAGE_SIZE), 1);
-    out_str (" N=nextor B=mbr F=old ESC=scan");
+    move_cursor (22, 1);
+    out_str ("N=Nextor B=USB ESC=back");
     newline ();
 }
 
@@ -390,39 +560,198 @@ static void print_mapper_menu (void) {
 /* FAT scan                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Copy a NUL-terminated string into a fixed-size buffer. Truncates
+ * silently if the source is longer than the buffer; the destination
+ * is always NUL-terminated as long as `cap > 0`. Same semantics as
+ * snprintf(src, cap, "%s", s) but smaller and avoids pulling in the
+ * full printf machinery for two hot callers. */
+static void term_str_copy (char *dst, const char *src, size_t cap) {
+    size_t k = 0;
+    if (cap == 0U) return;
+    while (src[k] != '\0' && k + 1U < cap) {
+        dst[k] = src[k];
+        k++;
+    }
+    dst[k] = '\0';
+}
+
+/* Build "0:/<cwd><sfx>" into `out` (NUL-terminated, bounded by
+ * `out_cap`). Always emits the volume prefix; the cwd (if any) is
+ * inserted with its trailing '/'. The result is the absolute path
+ * that f_open / f_opendir accept on this volume, and is what
+ * Terminal_BootCart used to assemble by hand out of "0:/" + name.
+ *
+ * Truncation is reported by returning 0 on overflow; the caller is
+ * expected to surface that to the UART and refuse the operation, not
+ * try to f_open a path that does not fit in our buffer. The LFN
+ * truncation in scan_usb() keeps SFNs within 12 chars by design, so
+ * the only realistic overflow source is a deeply nested cwd, and
+ * the boot caller's own path check in Terminal_BootCart already
+ * guarantees 40 bytes there. */
+static int term_build_path (char *out, size_t out_cap, const char *sfx) {
+    /* "0:/" + cwd + sfx + NUL */
+    const char *prefix = "0:/";
+    size_t p = 0;
+    while (prefix[p] != '\0') {
+        if (p + 1U >= out_cap) return 0;
+        out[p] = prefix[p];
+        p++;
+    }
+    size_t i = 0;
+    while (s_menu.cwd[i] != '\0') {
+        if (p + 1U >= out_cap) return 0;
+        out[p++] = s_menu.cwd[i++];
+    }
+    size_t j = 0;
+    while (sfx[j] != '\0') {
+        if (p + 1U >= out_cap) return 0;
+        out[p++] = sfx[j++];
+    }
+    out[p] = '\0';
+    return 1;
+}
+
+static uint8_t term_fold_ascii (uint8_t c) {
+    if (c >= (uint8_t)'A' && c <= (uint8_t)'Z') {
+        c = (uint8_t)(c + ((uint8_t)'a' - (uint8_t)'A'));
+    }
+    return c;
+}
+
+static int term_name_compare (const char *left, const char *right) {
+    while (*left != '\0' && *right != '\0') {
+        const uint8_t a = term_fold_ascii ((uint8_t)*left++);
+        const uint8_t b = term_fold_ascii ((uint8_t)*right++);
+        if (a != b) return (a < b) ? -1 : 1;
+    }
+    if (*left == *right) return 0;
+    return (*left == '\0') ? -1 : 1;
+}
+
+/* Directories sort before files; within each group use the displayed LFN
+ * case-insensitively. The SFN breaks ties consistently when two displayed
+ * names truncate to the same text. */
+static int menu_entry_compare (uint16_t left, uint16_t right) {
+    if (s_menu.is_dir[left] != s_menu.is_dir[right]) {
+        return s_menu.is_dir[left] ? -1 : 1;
+    }
+    {
+        const int lfn_order = term_name_compare (s_menu.lfns[left],
+                                                s_menu.lfns[right]);
+        if (lfn_order != 0) return lfn_order;
+    }
+    return term_name_compare (s_menu.names[left], s_menu.names[right]);
+}
+
+static void menu_entry_swap (uint16_t left, uint16_t right) {
+    char name_tmp[FILE_NAME_MAX];
+    char lfn_tmp[FILE_NAME_MAX];
+    uint32_t size_tmp;
+    uint8_t dir_tmp;
+
+    memcpy (name_tmp, s_menu.names[left], sizeof (name_tmp));
+    memcpy (s_menu.names[left], s_menu.names[right], sizeof (name_tmp));
+    memcpy (s_menu.names[right], name_tmp, sizeof (name_tmp));
+    memcpy (lfn_tmp, s_menu.lfns[left], sizeof (lfn_tmp));
+    memcpy (s_menu.lfns[left], s_menu.lfns[right], sizeof (lfn_tmp));
+    memcpy (s_menu.lfns[right], lfn_tmp, sizeof (lfn_tmp));
+
+    size_tmp = s_menu.sizes[left];
+    s_menu.sizes[left] = s_menu.sizes[right];
+    s_menu.sizes[right] = size_tmp;
+    dir_tmp = s_menu.is_dir[left];
+    s_menu.is_dir[left] = s_menu.is_dir[right];
+    s_menu.is_dir[right] = dir_tmp;
+}
+
+/* Shell sort the collected directory entries. Keep the synthetic parent
+ * row fixed at index 0 so it remains the first entry on every subfolder. */
+static void sort_menu_entries (void) {
+    const uint16_t first = (s_menu.cwd[0] != '\0') ? 1U : 0U;
+    uint16_t gap = (uint16_t)((s_menu.count - first) / 2U);
+
+    while (gap > 0U) {
+        for (uint16_t i = (uint16_t)(first + gap); i < s_menu.count; i++) {
+            uint16_t j = i;
+            while (j >= (uint16_t)(first + gap) &&
+                   menu_entry_compare ((uint16_t)(j - gap), j) > 0) {
+                menu_entry_swap ((uint16_t)(j - gap), j);
+                j = (uint16_t)(j - gap);
+            }
+        }
+        gap = (uint16_t)(gap / 2U);
+    }
+}
+
 static void scan_usb (void) {
     s_menu.count = 0;
     if (USB_TryEnsureMounted () != DEF_SUCCESS) {
         printf ("TERM: scan_usb - USB not mounted\r\n");
         return;
     }
-    DIR dir; FILINFO fi;
-    FRESULT fr = f_opendir (&dir, "0:/");
-    if (fr != FR_OK) {
-        printf ("TERM: scan_usb - f_opendir failed (%u)\r\n", (unsigned)fr);
+    /* Add the parent entry before opening the child directory. If the
+     * child disappeared or cannot be read, the user can still select
+     * this row to return to its parent. */
+    if (s_menu.cwd[0] != '\0') {
+        term_str_copy (s_menu.names[0], "..", FILE_NAME_MAX);
+        term_str_copy (s_menu.lfns[0],  "..", FILE_NAME_MAX);
+        s_menu.sizes[0] = 0U;
+        s_menu.is_dir[0] = 1U;
+        s_menu.count = 1U;
+    }
+    /* Open the current directory rather than always the root. The
+     * path is built from s_menu.cwd; the empty-cwd case yields the
+     * volume root. */
+    char path[TERM_PATH_MAX + 4U];   /* "0:/" + cwd (63) + NUL = 68 */
+    if (!term_build_path (path, sizeof (path), "")) {
+        printf ("TERM: scan_usb - cwd path too long ([%s])\r\n", s_menu.cwd);
         return;
     }
-    while (s_menu.count < TERM_MAX_FILES) {
-        fr = f_readdir (&dir, &fi);
-        /* End-of-directory check MUST use fi.fname - FatFS only
-         * clears fname[0] on end-of-dir, leaving altname holding a
-         * stale copy of the previous entry's SFN. Using altname made
-         * the last file repeat over and over (observed as "last file
-         * repeated 18 times" on page 2). */
-        if (fr != FR_OK || fi.fname[0] == 0) break;
-        if (fi.fattrib & AM_DIR) continue;
-        /* Accept any file - the v303 firmware filtered by extension
-         * (.ROM) but the cart loader may serve .BIN/.MX1 too.
-         *
-         * Store BOTH name forms:
+    DIR dir; FILINFO fi;
+    FRESULT fr = f_opendir (&dir, path);
+    if (fr != FR_OK) {
+        printf ("TERM: scan_usb - f_opendir([%s]) failed (%u)\r\n",
+                path, (unsigned)fr);
+        return;
+    }
+
+    /* Read the directory twice: first collect directories, then files.
+     * This keeps folders together at the top regardless of the order
+     * FatFS returns entries in, with the synthetic parent row above
+     * them. */
+    for (uint8_t pass = 0U; pass < 2U && s_menu.count < TERM_MAX_FILES; pass++) {
+        if (pass != 0U) {
+            fr = f_rewinddir (&dir);
+            if (fr != FR_OK) break;
+        }
+        while (s_menu.count < TERM_MAX_FILES) {
+            fr = f_readdir (&dir, &fi);
+            /* End-of-directory check MUST use fi.fname - FatFS only
+             * clears fname[0] on end-of-dir, leaving altname holding a
+             * stale copy of the previous entry's SFN. */
+            if (fr != FR_OK || fi.fname[0] == 0) break;
+            /* Skip "." (the directory itself) - the synthetic parent
+             * row is the only way to leave a non-root directory. */
+            if (fi.fname[0] == '.' && fi.fname[1] == '\0') continue;
+            if (fi.fattrib & AM_HID) continue;
+            if (fi.fattrib & AM_SYS) continue;
+            /* Pass zero is directories; pass one is files. */
+            if (((fi.fattrib & AM_DIR) != 0U) != (pass == 0U)) continue;
+
+        /* Store BOTH name forms:
          *   - s_menu.names[] = SFN (fi.altname, 8.3) - used for ALL
          *     file operations (f_open in Terminal_BootCart). LFN
          *     paths fail f_open with FR_NO_FILE (4) on our stick.
          *   - s_menu.lfns[]  = LFN (fi.fname) - display only, so the
          *     menu shows "Metal Gear 2 - Solid Snake" instead of
          *     METALG~1.ROM. Truncated to the printable width with a
-         *     trailing '.'-style ellipsis when longer. */
-        const char *sf = fi.altname;
+         *     trailing '.'-style ellipsis when longer.
+         *
+         * Directory rows reuse the same two columns. The SFN is what
+         * gets passed to term_build_path() when descending, and the
+         * SFN is always 8.3 for FAT volumes - so directory navigation
+         * is robust regardless of LFN formatting on the stick. */
+        const char *sf = fi.altname[0] ? fi.altname : fi.fname;
         size_t k = 0;
         while (sf[k] && k < FILE_NAME_MAX - 1) {
             s_menu.names[s_menu.count][k] = sf[k];
@@ -437,80 +766,68 @@ static void scan_usb (void) {
             k++;
         }
         s_menu.lfns[s_menu.count][k] = '\0';
-        /* If the LFN is longer than the display width, keep the
-         * extension readable: show first (width-4) chars + "~X" style
-         * ellipsis + extension. Simplest robust rule: keep the last
-         * '.' and truncate the stem. */
-        if (ln[k] != '\0') {
-            /* find extension in the SFN (always present for ROMs) */
-            const char *dot = sf;
-            for (size_t t = 0; sf[t]; t++) if (sf[t] == '.') dot = sf + t;
-            const char *ext = dot;   /* ".ROM" */
-            size_t ext_len = 0;
-            while (ext[ext_len] && (ext - sf) + ext_len < 12U) ext_len++;
-            if (ext_len > 0 && ext_len <= 4U &&
-                (size_t)(FILE_NAME_MAX - 1) > ext_len) {
-                size_t stem = (size_t)(FILE_NAME_MAX - 1) - ext_len;
-                /* copy first `stem` chars of LFN then the extension */
-                for (size_t t = 0; t < stem && ln[t]; t++) {
-                    s_menu.lfns[s_menu.count][t] = ln[t];
-                }
-                size_t w = stem < k ? stem : k;
-                for (size_t t = 0; t < ext_len; t++) {
-                    s_menu.lfns[s_menu.count][w + t] = ext[t];
-                }
-                s_menu.lfns[s_menu.count][w + ext_len] = '\0';
+        /* Files: if the LFN is longer than the display width, keep
+         * the extension readable: show first (width-4) chars + "~X"
+         * style ellipsis + extension. Simplest robust rule: keep
+         * the last '.' and truncate the stem.
+         *
+         * Directories: no extension to preserve, so show the LFN up
+         * to the full 25-character name-column width. The SFN fallback
+         * covers directory navigation independently of this display
+         * name. */
+        if (fi.fattrib & AM_DIR) {
+            if (ln[k] != '\0') {
+                /* LFN was truncated at FILE_NAME_MAX-1; just force a
+                 * NUL where the truncation happened and move on. */
+                s_menu.lfns[s_menu.count][k] = '\0';
             }
+            s_menu.sizes[s_menu.count] = 0U;
+            s_menu.is_dir[s_menu.count] = 1U;
+            printf ("TERM:   dir [%u] SFN=[%s] LFN=[%s]\r\n",
+                    s_menu.count, s_menu.names[s_menu.count], fi.fname);
+        } else {
+            if (ln[k] != '\0') {
+                /* find extension in the SFN (always present for ROMs) */
+                const char *dot = sf;
+                for (size_t t = 0; sf[t]; t++) if (sf[t] == '.') dot = sf + t;
+                const char *ext = dot;   /* ".ROM" */
+                size_t ext_len = 0;
+                while (ext[ext_len] && (ext - sf) + ext_len < 12U) ext_len++;
+                if (ext_len > 0 && ext_len <= 4U &&
+                    (size_t)(FILE_NAME_MAX - 1) > ext_len) {
+                    size_t stem = (size_t)(FILE_NAME_MAX - 1) - ext_len;
+                    /* copy first `stem` chars of LFN then the extension */
+                    for (size_t t = 0; t < stem && ln[t]; t++) {
+                        s_menu.lfns[s_menu.count][t] = ln[t];
+                    }
+                    size_t w = stem < k ? stem : k;
+                    for (size_t t = 0; t < ext_len; t++) {
+                        s_menu.lfns[s_menu.count][w + t] = ext[t];
+                    }
+                    s_menu.lfns[s_menu.count][w + ext_len] = '\0';
+                }
+            }
+            s_menu.sizes[s_menu.count] = fi.fsize;
+            s_menu.is_dir[s_menu.count] = 0U;
+            printf ("TERM:   file[%u] SFN=[%s] LFN=[%s] sz=%u\r\n",
+                    s_menu.count, s_menu.names[s_menu.count], fi.fname, (unsigned)fi.fsize);
         }
-        s_menu.sizes[s_menu.count] = fi.fsize;
-        printf ("TERM:   file[%u] SFN=[%s] LFN=[%s] sz=%u\r\n",
-                s_menu.count, s_menu.names[s_menu.count], fi.fname, (unsigned)fi.fsize);
-        s_menu.count++;
+            s_menu.count++;
+        }
     }
     f_closedir (&dir);
+    sort_menu_entries ();
 }
 
 /* ------------------------------------------------------------------ */
-/* Bootable-stick helper                                               */
+/* USB drive management                                                */
 /* ------------------------------------------------------------------ */
-/*
- * The stick is the disk (NEXTOR_PLAN.md D4), so Nextor boots from the
- * stick's OWN MBR + active FAT partition - there is no image file to
- * place on it. That makes one stick shape unbootable: a single
- * whole-disk FAT volume, which is what `mkfs.fat /dev/sdX` produces and
- * what most USB-stick vendors ship. Its filesystem starts at LBA 0, so
- * there is no partition table at all, and a Nextor kernel with no
- * partition to map has no drive. The host-side fixes are `parted`,
- * `diskpart`, `sfdisk` - none of which the user necessarily has next to
- * the machine. So the terminal can do it.
- *
- * WHAT IT WRITES, exactly:
- *
- *   sector 1   the volume's existing boot sector, with the BPB's
- *              "hidden sectors" field (offset 28) set to 1
- *   sector 0   a fresh MBR: zeroed bootstrap area, one primary
- *              partition entry - active, start LBA 1, length = the rest
- *              of the medium, type derived from the volume's own
- *              cluster count - and the 55AA signature
- *
- * and NOTHING ELSE. Every sector from 2 up is left exactly as it was.
- *
- * The FAT needs no rewriting, and that is the part worth being sure
- * about, because it is the part that decides whether this is safe: a FAT
- * stores no absolute sector numbers anywhere outside its BPB. Cluster
- * numbers are relative to the partition, and the partition's start is
- * what "hidden sectors" describes. Moving a volume from LBA 0 to LBA 1
- * is therefore a two-sector operation - exactly what every partitioning
- * tool does when it shifts a partition, and the reason `sfdisk` can
- * prepend a partition table to a superfloppy at all.
- *
- * WRITE ORDER IS THE SAFETY PROPERTY. Sector 1 goes FIRST. A power cut
- * between the two writes leaves the volume intact and merely
- * unpartitioned: the stick still mounts over this terminal, and the
- * helper can simply be run again. The other order would leave a live
- * partition table pointing at a boot sector that is about to be
- * overwritten - a stick that no longer mounts anywhere.
- */
+/* The stick is the raw disk exposed to Nextor. The terminal can create
+ * up to four primary FAT16 partitions, format them, and mark each active
+ * so Nextor 3 can assign a drive to each one at boot. Preparation replaces
+ * the partition table and FAT metadata; it is explicitly confirmed in
+ * the UI. Files are not securely overwritten, so this is a format, not
+ * a sanitization tool. */
 
 #define MBR_SECT        512U
 #define MBR_PT_OFF      446U    /* first of the four partition entries */
@@ -518,12 +835,9 @@ static void scan_usb (void) {
 #define MBR_PT_MAX      4U
 #define MBR_SIG_OFF     510U
 
-/* Scratch for sector 0 as read, and for the MBR to write. Static rather
- * than on the stack: 1 KiB of automatic storage is a lot to ask of an
- * embedded stack, and the read-back verification reuses the first
- * buffer, so both have to outlive the individual steps. */
+/* Static sector scratch: disk setup and verification share one sector
+ * buffer rather than placing 512-byte sectors on the embedded stack. */
 static uint8_t s_sect[MBR_SECT];
-static uint8_t s_mbr[MBR_SECT];
 
 /* What sector 0 says about the stick. */
 #define MBRST_VOLUME    0U  /* no partition table: a filesystem boot sector */
@@ -537,13 +851,6 @@ static uint16_t mbr_get16 (const uint8_t *p) {
 static uint32_t mbr_get32 (const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static void mbr_put32 (uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)v;
-    p[1] = (uint8_t)(v >> 8);
-    p[2] = (uint8_t)(v >> 16);
-    p[3] = (uint8_t)(v >> 24);
 }
 
 /* --- What sector 0 is.
@@ -621,44 +928,6 @@ static uint8_t mbr_fattype (const uint8_t *s) {
     return 0x0BU;                              /* FAT32 */
 }
 
-/* --- Assemble the MBR into s_mbr.
- *
- * The 446-byte bootstrap area is left zeroed on purpose. Nothing on the
- * cartridge chain-loads an MBR - the MSX goes straight to the Z80 and
- * the Z80 maps a ROM - so boot code in that area would be dead bytes we
- * would have to invent, and inventing it is exactly the kind of thing
- * that turns a working stick into an unbootable one.
- *
- * The CHS triple in a partition entry is legacy: every reader that
- * matters uses the LBA fields, and 0xFE / 0xC0 in the head and cylinder-
- * high bytes is the conventional "this entry is LBA, ignore the CHS"
- * marker. It is filled in rather than zeroed because old CHS-only code
- * (a BIOS `int 13h`, MSX-DOS's own CHS path) does read it, and a zeroed
- * CHS reads as "cylinder 0, head 0, sector 0", which is not a sector.
- */
-static void mbr_build (uint32_t lba, uint32_t nsec, uint8_t type) {
-    uint8_t *e = s_mbr + MBR_PT_OFF;
-    uint32_t cyl;
-
-    memset (s_mbr, 0, MBR_SECT);
-    s_mbr[MBR_SIG_OFF]     = 0x55U;
-    s_mbr[MBR_SIG_OFF + 1U] = 0xAAU;
-
-    cyl = lba / 63U;
-    if (cyl > 1023U) cyl = 1023U;
-
-    e[0] = 0x80U;                              /* active / bootable         */
-    e[1] = (uint8_t)(cyl & 0xFFU);
-    e[2] = (uint8_t)(((cyl >> 8) & 0x03U) | 0xC0U);
-    e[3] = (uint8_t)((lba % 63U) + 1U);
-    e[4] = 0xFEU;
-    e[5] = type;
-    e[6] = e[2];
-    e[7] = e[3];
-    mbr_put32(&e[8], lba);
-    mbr_put32(&e[12], nsec);
-}
-
 /* --- Wait for one keypress, up to `ms`. Returns 0xFF on timeout.
  *
  * Safe to block on: the key FIFO is filled by an EXTI interrupt on this
@@ -677,199 +946,439 @@ static uint8_t term_wait_key (uint32_t ms) {
     }
 }
 
-static void mbr_end (const char *line) {
-    out_str (line);
-    newline ();
-    term_wait_drain (200U);
-    (void)term_wait_key (5000U);
+/* FAT16 partitions are deliberately capped at 2 GiB (4,194,304 sectors
+ * of 512 bytes) so cluster sizes remain compatible with DOS variants.
+ * The prep wizard creates at most four primary partitions; any extra
+ * capacity is left untouched/unpartitioned. */
+#define TERM_FAT16_PART_SECTORS  4194304UL
+#define TERM_FAT16_MIN_SECTORS   65536UL  /* 32 MiB, safely above FAT12 range */
+
+static int mbr_entry_valid (const uint8_t *e, uint32_t total) {
+    uint32_t first = mbr_get32 (&e[8]);
+    uint32_t count = mbr_get32 (&e[12]);
+    if (e[4] == 0U || first == 0U || count == 0U || first >= total) return 0;
+    if (count > total - first) return 0;
+    return 1;
 }
 
-/* --- The 'B' entry point: report what the stick looks like, and make it
- *     bootable if it is not.
- *
- * Every step reports before doing and re-reads after writing. That is
- * more output than a menu usually prints, and it is deliberate: this
- * routine rewrites sector 0 of a filesystem the user did not create here,
- * and the only thing that makes a user trust that afterwards is being
- * able to see the answer come back off the stick rather than out of the
- * firmware.
- */
-static void mbr_helper (void) {
-    uint32_t total, nsec;
-    uint8_t  state, fattype, k;
-    char buf[32];
+static const char *mbr_type_name (uint8_t type) {
+    if (type == 0x01U) return "FAT12";
+    if (type == 0x04U || type == 0x06U || type == 0x0EU) return "FAT16";
+    if (type == 0x0BU || type == 0x0CU) return "FAT32";
+    return "OTHER";
+}
 
+static int mbr_is_fat16 (uint8_t type) {
+    return type == 0x04U || type == 0x06U || type == 0x0EU;
+}
+
+static void manager_pause (const char *message) {
     clear_screen ();
-    out_str (" Bootable-stick check");
+    out_str (" USB drive manager");
     newline ();
     newline ();
+    out_str (message);
+    newline ();
+    newline ();
+    out_str (" Press any key");
+    newline ();
+    term_wait_drain (200U);
+    (void)term_wait_key (15000U);
+}
 
-    printf ("TERM: mbr_helper entry\r\n");
+static uint8_t manager_mark_active (uint8_t part, uint32_t total) {
+    uint8_t *e;
+    if (part >= MBR_PT_MAX || RawDisk_ReadSectors (0U, 1U, s_sect) == 0U)
+        return 0U;
+    if (s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
+    e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
+    if (!mbr_entry_valid (e, total) || !mbr_is_fat16 (e[4])) return 0U;
+    /* Set this partition active without clearing any other active flags;
+     * Nextor 3 can automap one drive per active FAT partition. */
+    s_sect[MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE] = 0x80U;
+    if (RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
+        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
+    e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
+    return (uint8_t)(e[0] == 0x80U && mbr_entry_valid (e, total));
+}
 
-    /* RawDisk_Probe() is the expensive one - it may have to enumerate a
-     * freshly plugged stick, which is hundreds of milliseconds. Safe
-     * here and nowhere else: the terminal mapper is active, so no
-     * Nextor mailbox request can be in flight while it runs. */
-    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U) {
-        out_str (" No USB stick found.");
-        newline ();
-        mbr_end (" Cannot read sector 0.");
-        return;
+/* Mark every valid primary FAT16 partition active, preserving the rest of
+ * the MBR. Returns the number verified after writing, or zero on failure. */
+static uint8_t manager_mark_all_active (uint32_t total) {
+    uint8_t count = 0U;
+
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
+
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (mbr_entry_valid (e, total) && mbr_is_fat16 (e[4])) {
+            e[0] = 0x80U;
+            count++;
+        }
     }
-    total = RawDisk_SectorCount ();
-    snprintf (buf, sizeof (buf), " Stick: %u MB, vendor [%s]",
-              (unsigned)((uint64_t)total / 2048U), RawDisk_Manufacturer ());
-    out_str (buf);
-    newline ();
+    if (count == 0U || RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
+        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU)
+        return 0U;
 
-    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) {
-        out_str (" Read of sector 0 FAILED.");
+    count = 0U;
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        const uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (mbr_entry_valid (e, total) && mbr_is_fat16 (e[4])) {
+            if (e[0] != 0x80U) return 0U;
+            count++;
+        }
+    }
+    return count;
+}
+
+static FRESULT manager_prepare_fat16 (uint32_t total) {
+    LBA_t parts[MBR_PT_MAX] = {0, 0, 0, 0};
+    /* Let FatFs choose the cluster size from the partition capacity. It
+     * selects 32 KiB clusters at 2 GiB and smaller clusters for a short
+     * final partition, while FM_FAT keeps the filesystem out of FAT32. */
+    MKFS_PARM fmt = {FM_FAT, 2U, 0U, 512U, 0U};
+    uint32_t remaining = (total > 63U) ? total - 63U : 0U;
+    uint8_t count = 0U;
+    FRESULT fr;
+
+    for (uint8_t i = 0U; i < MBR_PT_MAX &&
+         remaining >= TERM_FAT16_MIN_SECTORS; i++) {
+        uint32_t n = (remaining > TERM_FAT16_PART_SECTORS)
+                   ? TERM_FAT16_PART_SECTORS : remaining;
+        parts[i] = (LBA_t)n;
+        remaining -= n;
+        count++;
+    }
+    if (count == 0U) return FR_MKFS_ABORTED;
+    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U ||
+        RawDisk_SectorCount () != total) return FR_NOT_READY;
+
+    /* Drop FatFs's cached view before changing the partition table. */
+    USB_InvalidateMount ();
+    VolToPart[0].pd = 0U;
+    VolToPart[0].pt = 0U;
+    fr = f_fdisk (0U, parts, s_sect);
+    if (fr != FR_OK) goto done;
+
+    for (uint8_t i = 0U; i < count; i++) {
+        char line[32];
+        snprintf (line, sizeof (line), " Formatting FAT16 %u/%u",
+                  (unsigned)(i + 1U), (unsigned)count);
+        clear_screen ();
+        out_str (" Preparing USB drive");
         newline ();
-        mbr_end (" Nothing was written.");
-        return;
+        out_str (line);
+        newline ();
+        term_wait_drain (200U);
+
+        VolToPart[0].pt = (BYTE)(i + 1U);
+        fr = f_mkfs ("0:", &fmt, s_sect, sizeof (s_sect));
+        if (fr != FR_OK) goto done;
+        if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+            !mbr_is_fat16 (s_sect[MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE + 4U])) {
+            fr = FR_MKFS_ABORTED;
+            goto done;
+        }
     }
 
-    state = mbr_classify (s_sect);
-    if (state == MBRST_READY) {
-        const uint8_t *e = s_sect + MBR_PT_OFF;
-        snprintf (buf, sizeof (buf), " Already bootable: type %02Xh, LBA %u",
-                  (unsigned)e[5], (unsigned)mbr_get32(&e[8]));
+    /* f_fdisk/f_mkfs create the table and FAT volumes but leave all
+     * partitions inactive. Mark every created FAT16 partition active so
+     * Nextor 3 can allocate one drive per partition, then verify the MBR. */
+    VolToPart[0].pt = 0U;
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        s_sect[MBR_SIG_OFF] != 0x55U || s_sect[MBR_SIG_OFF + 1U] != 0xAAU) {
+        fr = FR_DISK_ERR;
+        goto done;
+    }
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (i < count &&
+            (!mbr_entry_valid (e, total) || !mbr_is_fat16 (e[4]))) {
+            fr = FR_DISK_ERR;
+            goto done;
+        }
+        e[0] = (i < count) ? 0x80U : 0U;
+    }
+    if (RawDisk_WriteSectors (0U, 1U, s_sect) == 0U ||
+        RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        mbr_classify (s_sect) != MBRST_READY) {
+        fr = FR_DISK_ERR;
+        goto done;
+    }
+    for (uint8_t i = 0U; i < count; i++) {
+        const uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (e[0] != 0x80U || !mbr_entry_valid (e, total) ||
+            !mbr_is_fat16 (e[4])) {
+            fr = FR_DISK_ERR;
+            goto done;
+        }
+    }
+
+done:
+    VolToPart[0].pd = 0U;
+    VolToPart[0].pt = 0U;
+    if (USB_TryEnsureMounted () != DEF_SUCCESS && fr == FR_OK) {
+        fr = FR_NO_FILESYSTEM;
+    }
+    return fr;
+}
+
+static void manager_show (uint8_t present, uint32_t total) {
+    char buf[32];
+    uint8_t sector_ok;
+    clear_screen ();
+    out_str (" USB drive manager");
+    newline ();
+    if (!present) {
+        out_str (" No readable USB drive");
+        newline ();
+    } else {
+        snprintf (buf, sizeof (buf), " Stick: %u MB",
+                  (unsigned)(total / 2048U));
         out_str (buf);
         newline ();
+        out_str (" Partitions (* = active)");
         newline ();
-        out_str (" Nothing to do.");
-        newline ();
-        mbr_end ("");
-        return;
+        sector_ok = RawDisk_ReadSectors (0U, 1U, s_sect);
+        if (!sector_ok) {
+            out_str (" Cannot read partition table");
+            newline ();
+        } else if (mbr_classify (s_sect) != MBRST_VOLUME) {
+            for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+                const uint8_t *e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+                if (e[4] == 0U) {
+                    snprintf (buf, sizeof (buf), " %u: (empty)", (unsigned)(i + 1U));
+                } else if (!mbr_entry_valid (e, total)) {
+                    snprintf (buf, sizeof (buf), " %u: invalid", (unsigned)(i + 1U));
+                } else {
+                    snprintf (buf, sizeof (buf), " %u%c %-5s %uMB",
+                              (unsigned)(i + 1U), e[0] == 0x80U ? '*' : ' ',
+                              mbr_type_name (e[4]),
+                              (unsigned)(mbr_get32 (&e[12]) / 2048U));
+                }
+                move_cursor ((uint8_t)(3U + i), 1U);
+                out_str (buf);
+                newline ();
+            }
+        } else {
+            uint8_t type = mbr_fattype (s_sect);
+            out_str (type ? " No MBR; whole-disk FAT volume" : " No MBR/FAT volume found");
+            newline ();
+        }
     }
+    move_cursor (18U, 1U);
+    out_str ("P=prepare FAT16 (ERASES USB)");
+    newline ();
+    move_cursor (19U, 1U);
+    out_str ("A=activate FAT16 partition");
+    newline ();
+    move_cursor (20U, 1U);
+    out_str ("M=activate all FAT16");
+    newline ();
+    move_cursor (21U, 1U);
+    out_str ("ESC=return");
+    newline ();
+}
 
-    fattype = mbr_fattype (s_sect);
-    if (state == MBRST_NO_PART) {
-        /* Refuse rather than guess. There IS a partition table here, so
-         * the filesystem's real start is not sector 0 and this helper
-         * has no way to find it - it would have to parse the entries and
-         * guess which one is the intended volume, and guessing at sector
-         * 0 of somebody's disk is not a thing to do. */
-        out_str (" Has a partition table, but no");
-        newline ();
-        out_str (" active partition. Not touching");
-        newline ();
-        out_str (" it - fix this on a PC.");
-        newline ();
-        mbr_end ("");
-        return;
-    }
-    if (fattype == 0U) {
-        out_str (" Sector 0 is not a 512-byte");
-        newline ();
-        out_str (" FAT boot sector, so there is");
-        newline ();
-        out_str (" no volume to partition.");
-        newline ();
-        mbr_end (" Nothing was written.");
-        return;
-    }
-
-    /* Everything checks out: a whole-disk FAT volume. */
-    nsec = total - 1U;                          /* everything past the MBR */
-    mbr_build (1U, nsec, fattype);
-
-    out_str (" Found a whole-disk volume:");
-    newline ();
-    snprintf (buf, sizeof (buf), "   %s, no partition",
-              fattype == 0x01U ? "FAT12" : fattype == 0x06U ? "FAT16" : "FAT32");
-    out_str (buf);
+static int manager_confirm_prepare (uint32_t total) {
+    uint8_t k;
+    clear_screen ();
+    out_str (" PREPARE USB AS FAT16?");
     newline ();
     newline ();
-    out_str (" Will write:");
+    out_str (" THIS ERASES ALL DATA");
     newline ();
-    out_str ("  LBA 1 = its boot sector,");
-    newline ();
-    snprintf (buf, sizeof (buf), "  LBA 0 = MBR: 1 part %02Xh, boot,",
-              (unsigned)fattype);
-    out_str (buf);
-    newline ();
-    snprintf (buf, sizeof (buf), "           start LBA 1, %u MB", (unsigned)(nsec / 2048U));
-    out_str (buf);
+    out_str (" and replaces the table.");
     newline ();
     newline ();
-    out_str (" Sectors 2 and up: UNTOUCHED.");
+    snprintf ((char *)s_sect, sizeof (s_sect), " Stick: %u MB",
+              (unsigned)(total / 2048U));
+    out_str ((const char *)s_sect);
+    newline ();
+    out_str (" Up to 4 x 2GB FAT16.");
+    newline ();
+    out_str (" All created partitions active.");
+    newline ();
+    out_str (" Nextor can assign A-D.");
     newline ();
     newline ();
-    out_str (" Write it? (Y/N)");
+    out_str (" Confirm? Y/N");
     newline ();
-
+    term_wait_drain (200U);
     k = term_wait_key (15000U);
-    if (k != 'Y' && k != 'y') {
-        printf ("TERM: mbr_helper cancelled (key=0x%02X)\r\n", (unsigned)k);
-        mbr_end (" Cancelled - nothing written.");
-        return;
-    }
+    return (k == 'Y' || k == 'y');
+}
 
-    /* Hidden sectors = 1: the volume now starts one sector in. Set on the
-     * copy that goes to sector 1, and it is the ONLY byte of the
-     * filesystem's own metadata that changes. */
-    mbr_put32(&s_sect[28], 1U);
+static void manager_activate_partition (uint32_t total) {
+    uint8_t k, part;
+    uint8_t *e;
+    char buf[32];
 
-    printf ("TERM: mbr_helper writing LBA 1 (boot sector)\r\n");
-    if (RawDisk_WriteSectors (1U, 1U, s_sect) == 0U) {
-        printf ("TERM: mbr_helper LBA 1 write FAILED\r\n");
-        out_str (" FAILED at sector 1 - the MBR");
-        newline ();
-        out_str (" was NOT written, so the");
-        newline ();
-        out_str (" stick is unchanged.");
-        newline ();
-        mbr_end (" Run this again to retry.");
+    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U ||
+        mbr_classify (s_sect) == MBRST_VOLUME) {
+        manager_pause (" No MBR partition table");
         return;
     }
-    printf ("TERM: mbr_helper writing LBA 0 (MBR)\r\n");
-    if (RawDisk_WriteSectors (0U, 1U, s_mbr) == 0U) {
-        printf ("TERM: mbr_helper LBA 0 write FAILED\r\n");
-        out_str (" FAILED at sector 0. Sector 1");
+    clear_screen ();
+    out_str (" Activate which FAT16?");
+    newline ();
+    for (uint8_t i = 0U; i < MBR_PT_MAX; i++) {
+        e = s_sect + MBR_PT_OFF + (size_t)i * MBR_PT_STRIDE;
+        if (mbr_entry_valid (e, total) && mbr_is_fat16 (e[4])) {
+            snprintf (buf, sizeof (buf), " %u%c FAT16 %uMB",
+                      (unsigned)(i + 1U), e[0] == 0x80U ? '*' : ' ',
+                      (unsigned)(mbr_get32 (&e[12]) / 2048U));
+        } else {
+            snprintf (buf, sizeof (buf), " %u: not FAT16", (unsigned)(i + 1U));
+        }
+        move_cursor ((uint8_t)(2U + i), 1U);
+        out_str (buf);
         newline ();
-        out_str (" now holds a boot sector but");
-        newline ();
-        out_str (" there is no partition table.");
-        newline ();
-        mbr_end (" Reformat, then run this again.");
+    }
+    move_cursor (8U, 1U);
+    out_str ("Press 1-4, ESC=cancel");
+    newline ();
+    term_wait_drain (200U);
+    k = term_wait_key (15000U);
+    if (k < '1' || k > '4') return;
+    part = (uint8_t)(k - '1');
+    e = s_sect + MBR_PT_OFF + (size_t)part * MBR_PT_STRIDE;
+    if (!mbr_entry_valid (e, total) || !mbr_is_fat16 (e[4])) {
+        manager_pause (" Selected partition is not FAT16");
         return;
     }
-
-    /* Verify against the stick, not against what we meant to write. */
-    if (RawDisk_ReadSectors (0U, 1U, s_sect) == 0U) {
-        mbr_end (" Wrote both sectors, but could");
-        newline ();
-        out_str (" not read sector 0 back to");
-        newline ();
-        out_str (" verify. Check on a PC.");
-        return;
-    }
-    if (mbr_classify (s_sect) != MBRST_READY) {
-        printf ("TERM: mbr_helper verify FAILED\r\n");
-        mbr_end (" Wrote, but the stick does");
-        newline ();
-        out_str (" not read back bootable.");
-        return;
-    }
-    if (RawDisk_ReadSectors (1U, 1U, s_sect) == 0U ||
-        mbr_get32(&s_sect[28]) != 1U) {
-        printf ("TERM: mbr_helper verify BPB FAILED\r\n");
-        mbr_end (" MBR is good but sector 1");
-        newline ();
-        out_str (" did not take the boot sector.");
-        return;
-    }
-
-    out_str (" Done - the stick is bootable.");
+    clear_screen ();
+    snprintf (buf, sizeof (buf), " Set partition %u active?",
+              (unsigned)(part + 1U));
+    out_str (buf);
     newline ();
     newline ();
-    out_str (" Reboot, then press N in the");
+    out_str (" This adds a boot choice.");
     newline ();
-    out_str (" file list to boot Nextor.");
+    out_str (" Other active flags stay set.");
     newline ();
-    printf ("TERM: mbr_helper OK\r\n");
-    mbr_end ("");
+    out_str (" Filesystem data is kept.");
+    newline ();
+    newline ();
+    out_str (" Confirm? Y/N");
+    newline ();
+    term_wait_drain (200U);
+    k = term_wait_key (15000U);
+    if (k != 'Y' && k != 'y') return;
+
+    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U ||
+        RawDisk_SectorCount () != total) {
+        manager_pause (" USB drive changed; cancelled");
+        return;
+    }
+    USB_InvalidateMount ();
+    if (!manager_mark_active (part, total)) {
+        (void)USB_TryEnsureMounted ();
+        manager_pause (" Active flag write failed");
+        return;
+    }
+    if (USB_TryEnsureMounted () != DEF_SUCCESS) {
+        manager_pause (" Active set; FAT mount failed");
+    } else {
+        manager_pause (" FAT16 partition is active");
+    }
+}
+
+static void manager_activate_all_partitions (uint32_t total) {
+    uint8_t k, count;
+    char message[32];
+
+    clear_screen ();
+    out_str (" ACTIVATE ALL FAT16?");
+    newline ();
+    newline ();
+    out_str (" All valid primary FAT16");
+    newline ();
+    out_str (" partitions become active.");
+    newline ();
+    out_str (" Filesystem data is kept.");
+    newline ();
+    out_str (" Nextor may assign one drive");
+    newline ();
+    out_str (" per partition at reboot.");
+    newline ();
+    newline ();
+    out_str (" Confirm? Y/N");
+    newline ();
+    term_wait_drain (200U);
+    k = term_wait_key (15000U);
+    if (k != 'Y' && k != 'y') return;
+
+    if (RawDisk_Probe () == 0U || RawDisk_IsPresent () == 0U ||
+        RawDisk_SectorCount () != total) {
+        manager_pause (" USB drive changed; cancelled");
+        return;
+    }
+    USB_InvalidateMount ();
+    count = manager_mark_all_active (total);
+    if (count == 0U) {
+        (void)USB_TryEnsureMounted ();
+        manager_pause (" No FAT16 partitions or write failed");
+        return;
+    }
+    if (USB_TryEnsureMounted () != DEF_SUCCESS) {
+        manager_pause (" Active flags set; FAT mount failed");
+    } else {
+        snprintf (message, sizeof (message), " %u FAT16 partitions active",
+                  (unsigned)count);
+        manager_pause (message);
+    }
+}
+
+/* B opens a small on-device drive-preparation wizard. Raw-sector and
+ * FatFs work only runs here while the terminal mapper owns the cartridge;
+ * the Nextor mailbox cannot have an I/O request in flight. */
+static void usb_drive_manager (void) {
+    uint32_t total = 0U;
+    uint8_t present = (uint8_t)(RawDisk_Probe () != 0U && RawDisk_IsPresent () != 0U);
+    uint8_t key;
+    if (present) total = RawDisk_SectorCount ();
+
+    for (;;) {
+        manager_show (present, total);
+        term_wait_drain (100U);
+        key = term_wait_key (15000U);
+        if (key == 0x1BU) return;
+        if (key == 'P' || key == 'p') {
+            FRESULT fr;
+            if (!present) {
+                manager_pause (" No USB drive to prepare");
+                continue;
+            }
+            if (!manager_confirm_prepare (total)) {
+                manager_pause (" Cancelled; drive unchanged");
+                continue;
+            }
+            fr = manager_prepare_fat16 (total);
+            if (fr == FR_OK) {
+                manager_pause (" Copy DOS files to partition 1");
+            } else {
+                char msg[32];
+                snprintf (msg, sizeof (msg), " Prepare failed (FatFs %u)",
+                          (unsigned)fr);
+                manager_pause (msg);
+            }
+        } else if ((key == 'A' || key == 'a') && present) {
+            manager_activate_partition (total);
+        } else if ((key == 'M' || key == 'm') && present) {
+            manager_activate_all_partitions (total);
+        }
+        /* Refresh capacity/presence after every action, including a
+         * format which may have caused the USB device to reset. */
+        present = (uint8_t)(RawDisk_Probe () != 0U && RawDisk_IsPresent () != 0U);
+        total = present ? RawDisk_SectorCount () : 0U;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -881,6 +1390,7 @@ static void mbr_helper (void) {
  * USB_ProgressCB hook - keep it short. */
 static void term_progress_cb (uint32_t done, uint32_t total) {
     static uint32_t s_last_pct = 0xFFFFU;
+    static int s_bar_dbg = 0;
 
     if (total == 0U) return;
     /* Throttle: only redraw when the percentage changes. */
@@ -888,15 +1398,24 @@ static void term_progress_cb (uint32_t done, uint32_t total) {
     if (pct == s_last_pct) return;
     s_last_pct = pct;
 
+    /* DIAGNOSTIC: first few percentage changes print to the UART. If
+     * the load freezes mid-copy, the last "bar N%" line brackets which
+     * chunk the freeze happened in (1% of 16 KiB = every ~512 B for
+     * tiny ROMs, i.e. every chunk). */
+    if (s_bar_dbg < 8) {
+        printf ("TERM: bar %u%%\r\n", (unsigned)pct);
+        s_bar_dbg++;
+    }
+
     /* Backpressure: the ring is only 2048 bytes and the MSX drains at
-     * ~50 µs/byte, so a bar redraw every 1% can outrun it. If out_n is
-     * high, SKIP this redraw - a skipped cosmetic update is harmless,
-     * but out_push() silently drops bytes when full, and dropping the
-     * trailing " OK - booting MSX into cart" + 0x03 launch byte (see
-     * soft_reset_into_cart) leaves the MSX in the terminal loop and
-     * the cart never boots. Threading the ring below ~50% always
-     * leaves room for the launch sequence. */
-    if (g_term_mbox.out_n > 1024U) return;
+     * ~50 µs/byte, so a bar redraw every 1% can outrun it. If the
+     * queue is high, SKIP this redraw - a skipped cosmetic update is
+     * harmless, but out_push() silently drops bytes when full, and
+     * dropping the trailing " OK - booting MSX into cart" + 0x03 launch
+     * byte (see soft_reset_into_cart) leaves the MSX in the terminal
+     * loop and the cart never boots. Threading the ring below ~50%
+     * always leaves room for the launch sequence. */
+    if (Terminal_OutLevel () > 1024U) return;
 
     /* Row 3, column 0 - must match the header layout in
      * Terminal_BootCart. */
@@ -904,6 +1423,28 @@ static void term_progress_cb (uint32_t done, uint32_t total) {
 }
 
 static void soft_reset_into_cart (Cart_Mapper m) {
+    /* Once this starts, the terminal is being torn down for good:
+     * block any further key handling / menu servicing this session. */
+    s_launching = 1U;
+#if CART_TFMSX_HARD_RESET
+    /* TFMSX validation path: use the physical MSX reset instead of the
+     * terminal FIFO slingshot.  This removes the timing dependency between
+     * the MSX-side rom_start and the firmware mapper swap.  The target
+     * mapper is installed while the Z80 is held in reset, then the BIOS
+     * cold-boots and probes the already-live ROM. */
+    printf ("TERM: hard_reset assert\r\n");
+    Cart_HardReset_Assert ();
+    Delay_Ms (50U);
+    printf ("TERM: hard_reset set mapper=%d\r\n", (int)m);
+    (void)Cart_SetMapper_Safe (m);
+    Delay_Ms (5U);
+    printf ("TERM: hard_reset release\r\n");
+    Cart_HardReset_Release ();
+    /* Give the BIOS and ROM INIT time to complete before returning to the
+     * normal firmware service loop.  IRQs remain enabled for cart reads. */
+    Delay_Ms (1000U);
+    return;
+#else
     printf ("TERM: soft_reset push 0x03 to FIFO\r\n");
     /* Two MSX-side reboot paths exist, both must end up with the
      * NEW mapper live so the slot probe finds the user ROM's 'AB':
@@ -933,7 +1474,8 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * them within one jiffy frame (<= ~18 ms). */
     out_push (0x03);
     {
-        /* FIXED 30 ms delay via the timer-calibrated Delay_Ms (the
+        /* Known-good NextorOnly timing: 20 ms via the timer-calibrated
+         * Delay_Ms (the
          * old 4,000,000-iteration spin measured anywhere from ~20 to
          * ~110 ms depending on codegen - too imprecise to land the
          * swap inside the launch window). Timing contract with the
@@ -951,10 +1493,10 @@ static void soft_reset_into_cart (Cart_Mapper m) {
          * so this race now has huge margins instead of being a
          * knife-edge. */
         Delay_Ms (20U);
-        if (g_term_mbox.out_n != 0U) {
-            printf ("TERM: WARNING FIFO not drained (out_n=%u at swap "
+        if (Terminal_OutLevel () != 0U) {
+            printf ("TERM: WARNING FIFO not drained (level=%u at swap "
                     "time) - MSX has not read the 0x03 yet, it may "
-                    "show rubbish\r\n", g_term_mbox.out_n);
+                    "show rubbish\r\n", (unsigned)Terminal_OutLevel ());
         }
     }
     printf ("TERM: soft_reset swap mapper=%d\r\n", (int)m);
@@ -963,6 +1505,14 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * unknown) reach the BIOS slot probe within ~20 ms and find the
      * new ROM's 'AB' header. */
     (void)Cart_SetMapper_Safe (m);
+#if 0 /* V3 cart.c internals not migrated - re-enable with cart.c port */
+    /* Baseline for the post-settle report below: the counters BEFORE
+     * the MSX reboots. */
+    const uint32_t reads0 = g_cart_slotted_reads;
+    const uint32_t gr0    = g_cart_game_reads;
+    const uint32_t gl0    = g_cart_game_late;
+    const uint32_t cycto0 = g_cart_cycle_timeout;
+#endif
     /* Post-swap settle cushion: keep the firmware quiet (no PSRAM /
      * USB churn) while the game's own INIT runs its first cart reads.
      * The legacy 55b6b88 build spun ~10,000,000 iterations here
@@ -970,6 +1520,36 @@ static void soft_reset_into_cart (Cart_Mapper m) {
      * Konami-SCC with a large INIT) fail to boot. Tune via the
      * constant below if a title needs more. */
     Delay_Ms (800U);
+#if 0 /* V3 cart.c internals not migrated - re-enable with cart.c port */
+    /* Did the MSX actually cold-reboot into the new mapper? A BIOS
+     * cold boot re-runs the slot probe and the sub-slot RAM test,
+     * which drives tens of thousands of mapper-RAM reads (the
+     * power-on boot logged ~60000). For the plain ROM mappers the
+     * meaningful signal is instead the GAME-image counter: the BIOS
+     * slot probe reads 0x4000/0x4001 for the 'AB' and then the game's
+     * INIT + code fetches hammer the image, so a healthy game boot
+     * shows game reads well into the hundreds+ within this window.
+     * Interpretation:
+     *   game reads +2          -> the slot probe saw the cart at all.
+     *   game reads +100s..1000s-> probe + INIT + code fetches: the
+     *                            game is actually executing from the
+     *                            cart image.
+     *   game reads +0          -> nothing read the cart: the BIOS
+     *                            never probed it (no reboot, or the
+     *                            slot probe skipped the cart).
+     *   game late > 0 / cyc    -> a served read missed the Z80 cycle
+     *                            (deadline miss during the boot). */
+    printf ("TERM: post-launch: mapper-RAM reads +%lu, game-image reads +%lu"
+            " (late=%lu, cycles %lu..%lu), cycle-timeouts +%lu\r\n",
+            (unsigned long)(g_cart_slotted_reads - reads0),
+            (unsigned long)(g_cart_game_reads - gr0),
+            (unsigned long)(g_cart_game_late - gl0),
+            (unsigned long)((g_cart_game_cyc_min == 0xFFFFFFFFU)
+                            ? 0U : g_cart_game_cyc_min),
+            (unsigned long)g_cart_game_cyc_max,
+            (unsigned long)(g_cart_cycle_timeout - cycto0));
+#endif
+#endif
 }
 
 void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
@@ -982,18 +1562,31 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
         return;
     }
     Cart_Mapper m = kMenuToCart[mapper_idx];
-    printf ("TERM: BootCart start mapper=%u (%s) file=[%s]\r\n", mapper_idx, kMapperNames[mapper_idx], filename);
+    printf ("TERM: BootCart start mapper=%u (%s) file=[%s] cwd=[%s]\r\n",
+            mapper_idx, kMapperNames[mapper_idx], filename, s_menu.cwd);
 
-    /* Build a "0:/NAME" path. The FAT volume is "0:" on the USB
-     * stick; loader-side uses the same path scheme (see loader.c). */
-    char path[40];
-    int p = 0;
-    path[p++] = '0'; path[p++] = ':'; path[p++] = '/';
-    int i = 0;
-    while (filename[i] && p < (int)sizeof(path) - 1) {
-        path[p++] = filename[i++];
+    /* Build "0:/<cwd><filename>" using the shared helper. The path
+     * has to be assembled from the CURRENT directory, not the
+     * volume root, because the user may have descended several
+     * levels and the filename the caller holds is just the leaf
+     * (s_menu.picked) - the cwd is what gives the path context.
+     *
+     * The 40-byte budget the original code used is no longer enough
+     * for a deeply nested cwd; size the buffer at TERM_PATH_MAX plus
+     * 4 ("0:/" + cwd + filename + NUL, with the filename bounded by
+     * FILE_NAME_MAX). The 64-byte cwd ceiling set in scan_usb()
+     * means a worst-case total of 4 + 63 + 25 = 92 bytes plus NUL,
+     * which is what the buffer holds. */
+    char path[TERM_PATH_MAX + FILE_NAME_MAX + 4U];
+    if (!term_build_path (path, sizeof (path), filename)) {
+        printf ("TERM: BootCart REFUSED - path too long (cwd=[%s] "
+                "file=[%s])\r\n", s_menu.cwd, filename);
+        clear_screen ();
+        out_str (" Path too deep to boot");
+        newline ();
+        return;
     }
-    path[p] = '\0';
+    printf ("TERM: BootCart assembled path [%s]\r\n", path);
 
     clear_screen ();
     out_str (" Loading ");
@@ -1017,7 +1610,11 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
         /* len = 0 makes USB_FileToPSRAM use the real file size, so
          * the progress percentage is relative to the ROM being
          * loaded - not the full 8 MiB PSRAM window (a 1 MiB ROM
-         * would otherwise only ever reach ~12%). */
+         * would otherwise only ever reach ~12%). The address is
+         * bounded to the GAME-IMAGE window (see
+         * USB_FileToPSRAM's bounds check); a ROM that exceeds
+         * CART_GAME_MAX_BYTES is rejected with "USB: REJECT" before
+         * any byte hits PSRAM. */
         uint32_t got = USB_FileToPSRAM (path,
                                         PSRAM_CART_BASE + CART_GAME_BASE,
                                         0U);
@@ -1069,10 +1666,10 @@ void Terminal_BootCart (uint8_t mapper_idx, const char *filename) {
          * µs/byte (~102 ms) with margin; normally it returns in tens
          * of ms. */
         term_wait_drain (600U);
-        if (g_term_mbox.out_n != 0U) {
-            printf ("TERM: WARNING MSX still draining (out_n=%u after "
+        if (Terminal_OutLevel () != 0U) {
+            printf ("TERM: WARNING MSX still draining (level=%u after "
                     "600 ms) - launch text will queue behind it\r\n",
-                    g_term_mbox.out_n);
+                    (unsigned)Terminal_OutLevel ());
         }
         out_str (" OK - booting MSX into cart");
         newline ();
@@ -1118,6 +1715,49 @@ static void nextor_boot (void) {
     soft_reset_into_cart (CART_MAP_NEXTOR);
 }
 
+/* Trim the trailing '/name' component off the end of s_menu.cwd, so
+ * "GAMES/SUB/" becomes "GAMES/" and "GAMES/" becomes "". Idempotent
+ * on an already-empty cwd. Used when the user picks the synthetic
+ * "<DIR> .." row at the top of a subdirectory listing. */
+static void cwd_pop (void) {
+    size_t n = 0U;
+    while (s_menu.cwd[n] != '\0' && n < sizeof (s_menu.cwd) - 1U) n++;
+    /* Walk back over the trailing-slash + last-component. The cwd
+     * invariant is "trailing '/' iff non-empty" - see the scan
+     * function. If n is 0 the cwd is already empty and there is
+     * nothing to pop. */
+    if (n == 0U) return;
+    /* Drop the trailing '/' (always present when n > 0). */
+    n--;
+    if (n == 0U) { s_menu.cwd[0] = '\0'; return; }
+    /* Now find the previous '/' so the surviving prefix still ends in
+     * one. */
+    while (n > 0U && s_menu.cwd[n - 1U] != '/') n--;
+    s_menu.cwd[n] = '\0';
+}
+
+/* Append "<name>/" to s_menu.cwd, bounded by TERM_PATH_MAX. The name
+ * is the SFN of the subdirectory the user picked, which is always
+ * 8.3 on this volume - so the 64-byte budget covers deep trees with
+ * plenty of room. Returns 0 on overflow (caller refuses and tells
+ * the user). */
+static int cwd_push (const char *name) {
+    size_t cur = 0U;
+    while (s_menu.cwd[cur] != '\0' && cur < sizeof (s_menu.cwd)) cur++;
+    /* cur is the NUL position. The cwd already ends in '/' when
+     * non-empty, so the next char is the start of the new component
+     * and the trailing '/' has to be appended. The total write is
+     * name + '/' + NUL. */
+    size_t need = 0U;
+    while (name[need] != '\0') need++;
+    /* + 1 for the trailing '/', + 1 for the NUL. */
+    if (cur + need + 2U > sizeof (s_menu.cwd)) return 0;
+    for (size_t k = 0U; k < need; k++) s_menu.cwd[cur + k] = name[k];
+    s_menu.cwd[cur + need]     = '/';
+    s_menu.cwd[cur + need + 1U] = '\0';
+    return 1;
+}
+
 static void handle_list_key (uint8_t key) {
     /* arrow up / down / RET / ESC / LEFT/RIGHT (page nav) */
     printf ("TERM: list key=0x%02X sel=%u count=%u page=%u\r\n",
@@ -1157,12 +1797,46 @@ static void handle_list_key (uint8_t key) {
             return;
         }
     } else if (key == 0x0D && s_menu.count > 0U) {
-        /* pick this file -> show mapper menu */
+        if (s_menu.is_dir[s_menu.sel]) {
+            /* Directory row: descend, or ascend on the synthetic
+             * "<DIR> .." entry. The list is rebuilt from disk in both
+             * cases - the directory contents may have changed since
+             * the user last visited (especially for a USB stick the
+             * user is editing on a PC), and the cost is one
+             * f_readdir loop on a small directory. */
+            const char *name = s_menu.names[s_menu.sel];
+            if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+                printf ("TERM: RET on <DIR> .. -> up\r\n");
+                cwd_pop ();
+            } else {
+                if (!cwd_push (name)) {
+                    /* The cwd ran out of room. The boot path would
+                     * also overflow, so refusing to descend is the
+                     * right answer - surface it to the UART and stay
+                     * on the current list. */
+                    printf ("TERM: REFUSED descend into [%s] - cwd full "
+                            "(len=%u)\r\n", name, (unsigned)sizeof (s_menu.cwd));
+                    out_str (" Path too deep");
+                    newline ();
+                    return;
+                }
+                printf ("TERM: RET on dir [%s] -> descend, cwd now [%s]\r\n",
+                        name, s_menu.cwd);
+            }
+            scan_usb ();
+            s_menu.page = 0;
+            s_menu.sel  = 0;
+            print_file_list ();
+            return;
+        }
+        /* file row: copy the SFN into s_menu.picked, then show the
+         * mapper menu. */
         int i = 0;
         const char *n = s_menu.names[s_menu.sel];
         while (n[i] && i < FILE_NAME_MAX - 1) { s_menu.picked[i] = n[i]; i++; }
         s_menu.picked[i] = '\0';
-        printf ("TERM: picked file [%s] -> mapper menu\r\n", s_menu.picked);
+        printf ("TERM: picked file [%s] (cwd=[%s]) -> mapper menu\r\n",
+                s_menu.picked, s_menu.cwd);
         /* Remember which file was picked (for the LFN display on the
          * mapper screen) BEFORE s_menu.sel is reused as the
          * mapper-row index. */
@@ -1174,30 +1848,26 @@ static void handle_list_key (uint8_t key) {
         s_menu.state = MENU_MAPPER;
         print_mapper_menu ();
         return;
-    } else if (key == 0x1B) {            /* ESC = rescan */
-        printf ("TERM: ESC -> rescan\r\n");
+    } else if (key == 0x1B) {            /* ESC = parent, or root rescan */
+        if (s_menu.cwd[0] != '\0') {
+            /* ESC is a quick back action inside a folder. At the root
+             * it retains its original meaning: rescan the USB volume. */
+            printf ("TERM: ESC -> parent from cwd=[%s]\r\n", s_menu.cwd);
+            cwd_pop ();
+        } else {
+            printf ("TERM: ESC -> rescan root\r\n");
+        }
         scan_usb ();
         s_menu.page = 0;
         s_menu.sel   = 0;
         print_file_list ();
         return;
-    } else if (key == 'F' || key == 'f') {
-        /* User wants the OLD loader (FLASH mapper - serves selector_rom
-         * with the existing 0x7FF0 mailbox protocol). */
-        printf ("TERM: F -> FLASH loader\r\n");
-        clear_screen ();
-        out_str (" Switching to OLD loader");
-        newline ();
-        (void)Cart_SetMapper_Safe (CART_MAP_FLASH);
-        return;
     } else if (key == 'N' || key == 'n') {
         nextor_boot ();
         return;
     } else if (key == 'B' || key == 'b') {
-        /* Make the stick bootable, if it is not already. See the
-         * "Bootable-stick helper" section for why this is needed at
-         * all and what it is allowed to touch. */
-        mbr_helper ();
+        usb_drive_manager ();
+        scan_usb ();
         print_file_list ();
         return;
     }
@@ -1244,28 +1914,67 @@ static void handle_mapper_key (uint8_t key) {
 }
 
 void Terminal_Service (void) {
-    /* Drop the control byte if the cart wrote one (the IRQ latches
-     * it; we consume it once and clear it). */
+    /* Boot gate. The MSX-side ROM's init() writes its GRAPH decision to
+     * the control mailbox before it starts polling; consume it once.
+     *   0x00 -> GRAPH held     -> render the terminal menu.
+     *   0x01 -> GRAPH not held -> boot Nextor instead of rendering.
+     * Any other value (e.g. the legacy v303 0x04) is treated as
+     * "terminal" so a stale/older MSX-side ROM can never silently boot
+     * Nextor. */
     uint8_t c = g_term_mbox.control;
     if (c != 0xFFU) {
         g_term_mbox.control = 0xFFU;
-        /* Note: the previous version had a "GRPH-skip" branch that
-         * switched to CART_MAP_FLASH on control=0x04. v303's MSX-side
-         * asm probes GRPH via CALL #141 and writes 0x04 to 0x7FFE
-         * when GRPH is held - but CALL #141 is GTSIZE, which is
-         * model-dependent (Panasonic MSX2+ returns GRPH bit, some
-         * clones return 0x04 always). On affected hardware the
-         * terminal would silently switch to the OLD cart loader even
-         * when GRPH was not held, with no way to recover except a
-         * power cycle. To keep the terminal predictable across MSX
-         * models, the GRPH-skip behaviour is removed: the user picks
-         * the FLASH loader explicitly from the menu (key F on the
-         * file list). */
+        if (!s_bootgate_done) {
+            s_bootgate_done = 1U;
+            if (c == TERM_CTL_BOOT_NEXTOR) {
+                printf ("TERM: boot gate -> GRAPH not held, booting Nextor\r\n");
+                /* Do not render the menu: hand straight to the Nextor
+                 * launch, which pushes its own text + 0x03. */
+                s_list_pending = 0U;
+                nextor_boot ();
+                return;
+            }
+            printf ("TERM: boot gate -> GRAPH held, terminal menu\r\n");
+        }
     }
 
-    /* Drain keyboard FIFO. */
+    /* Waiting for the boot-gate decision: do not render yet, or a
+     * no-GRAPH power-on would flash the menu for ~40 ms before Nextor
+     * boots. The timeout is the safety net for a missing/stale
+     * MSX-side ROM - it falls back to the pre-gate behaviour (menu). */
+    if (!s_bootgate_done) {
+        if (s_bootgate_t0 == 0U) {
+            s_bootgate_t0 = term_rdcycle ();
+            if (s_bootgate_t0 == 0U) s_bootgate_t0 = 1U;  /* keep != 0 */
+        }
+        if ((uint32_t)(term_rdcycle () - s_bootgate_t0)
+            < TERM_BOOTGATE_TIMEOUT_CYC) {
+            return;
+        }
+        printf ("TERM: boot gate timeout - rendering menu\r\n");
+        s_bootgate_done = 1U;
+    }
+
+    /* Report output backpressure drops from the main loop (never from
+     * the EXTI0 ISR). A nonzero count means the MSX stopped draining
+     * long enough to expire the out_push() wait, and a multi-byte
+     * sequence may have been truncated - the signal that this needs
+     * more attention than a bounded wait can give. */
+    if (g_term_mbox.out_dropped != s_reported_out_dropped) {
+        s_reported_out_dropped = g_term_mbox.out_dropped;
+        printf ("TERM: out FIFO backpressure timeout - dropped %lu byte(s)\r\n",
+                (unsigned long)s_reported_out_dropped);
+    }
+
+    /* Drain keyboard FIFO, but only a bounded batch per pass (see
+     * TERM_KEY_BUDGET). A key that launches a ROM (N / RET on a file /
+     * a mapper pick) flips s_launching and swaps the mapper inside
+     * handle_*_key, so stop at once: any keys still queued belong to a
+     * session that no longer exists. */
     uint8_t key;
-    while (kbd_pop (&key)) {
+    unsigned drained = 0U;
+    while (drained < TERM_KEY_BUDGET && kbd_pop (&key)) {
+        drained++;
         switch (s_menu.state) {
         case MENU_MAPPER:
             handle_mapper_key (key);
@@ -1279,6 +1988,14 @@ void Terminal_Service (void) {
             handle_list_key (key);
             break;
         }
+        if (s_launching != 0U) {
+            break;
+        }
+    }
+    if (s_launching != 0U) {
+        /* Launch in progress: do not scan the USB or repaint the menu
+         * on top of the mapper swap. */
+        return;
     }
 
     /* On the first service pass of each terminal session, render the

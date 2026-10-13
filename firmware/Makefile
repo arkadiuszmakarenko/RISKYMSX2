@@ -52,8 +52,8 @@ LINKER        := Ld/Link.ld
 # FLASH 576K; RAM region is 136K-1K = 135K (the linker script places RAM at
 # 0x20000000+1024 and keeps the first 1 KiB out of the region). Used to turn
 # the binutils size output into "bytes used / bytes free" in `showsize`.
-FLASH_SIZE    := 589824      # 576 * 1024
-RAM_SIZE      := 138240      # 135 * 1024
+FLASH_SIZE    := 524288      # 512 * 1024
+RAM_SIZE      := 203776      # 199 * 1024
 
 # --- Parallel builds --------------------------------------------------------
 # Default to -j8 unless the user passes -jN (including -j1) on the command
@@ -168,6 +168,52 @@ CFLAGS_COMMON += -DCART_GAME_BASE_MB=$(GAME_BASE_MB)
 KONAMISCC_SCC_QUEUE ?= 1
 CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
 
+# Mapper-RAM (sub-slot 1) backing-store selector - see the block above
+# s_mapper_ram in User/cart.c and the CART_MAPPER_RAM_* values in
+# User/cart.h. Default 1 = the in-MCU SRAM array (128 KiB, 8 banks, no
+# external bus latency - the isolation build that proves handler
+# logic). Set to 0 = the PSRAM mapper RAM at PSRAM+CART_SLOTTED_BANK_
+# BASE_OFFSET (4 MiB, 256 banks, the original hardware path with the
+# memory-controller store latency on the sub-slot 1 write path).
+#
+#     make rebuild                         # default: SRAM backend
+#     make rebuild MAPPER_RAM_BACKEND=0    # PSRAM backend (hardware path)
+#
+# NOTE: changing this only affects User/cart.c, but the .o does not
+# track the flag - use `make rebuild`, not `make`.
+MAPPER_RAM_BACKEND ?= 1
+CFLAGS_COMMON += -DCART_MAPPER_RAM_BACKEND=$(MAPPER_RAM_BACKEND)
+
+# Cart timing instrumentation switch. Default 1 = the extended-stats
+# build: mcycle reads + counter updates inside the EXTI0 handlers, and
+# the combined mapper-RAM logger in main.c reporting them. Set 0 to
+# compile the measuring OUT of the handlers entirely - every mcycle
+# read (entry, drive and store timestamps) and every counter update is
+# gated on this, and the main.c logger goes silent because the
+# counters stop moving:
+#
+#     make rebuild                         # default: stats ON
+#     make rebuild CART_TIMING_STATS=0     # measuring fully OFF
+#
+# NOTE: use `make rebuild` - the .o files do not track this flag.
+# The measuring extends each served cart cycle's IRQ tail, so use the
+# OFF build for real timing-sensitive work (BIOS memory test etc.).
+CART_TIMING_STATS ?= 1
+CFLAGS_COMMON += -DCART_TIMING_STATS=$(CART_TIMING_STATS)
+
+# Nextor engine diagnostics (mailbox command names, trace ring, gap
+# timings). nextor.c silences every printf when RISKY_DEBUG=0 (the
+# release default) - a quiet log after a mapper swap is therefore
+# expected in release and tells you nothing. Build with this set to 1
+# while diagnosing the kernel <-> driver exchange:
+#
+#     make rebuild RISKY_DEBUG=1
+#
+# NOTE: the trace_put() call runs in the EXTI0 mailbox IRQ, so this
+# build is NOT for timing-sensitive work - diagnostics only.
+RISKY_DEBUG      ?= 0
+CFLAGS_COMMON += -DRISKY_DEBUG=$(RISKY_DEBUG)
+
 # --- Flash tool --------------------------------------------------------------
 # CH32V4x7 (chip id 0xa6) is NOT supported by upstream `wlink` or `minichlink`
 # (they report "Chip Type unknown [a6]" and refuse to program). The WCH-LinkE
@@ -195,6 +241,25 @@ WLINK_CHIP    ?= CH32V30X         # CH32V4x7 family is selected via CH32V30X id
 # driver expects the offset that matches the bank base (0x0). Override
 # WLINK_ADDR=0x08000000 only if you change the flash bank address.
 WLINK_ADDR    ?= 0x00000000       # WCH openocd flash bank base
+
+# --- Link-Time Optimization (bus-handler latency) -----------------------------
+# The EXTI0 handlers call Nextor_ReadByte/Nextor_WriteByte across translation
+# units, so every mailbox pop pays a call + prologue/epilogue inside the Z80
+# cycle deadline. LTO inlines those calls into the handlers and is worth
+# roughly 6-10% of the per-cycle serve time during disk I/O. OFF by default:
+# the WCH toolchain's LTO pass interacting with the HPE
+# ("WCH-Interrupt-fast") handler markers is not boot-tested. Enable, flash,
+# and verify a cold boot before keeping it:
+#
+#     make rebuild RISKY_LTO=1 && make flash
+#
+RISKY_LTO         ?= 0
+ifeq ($(RISKY_LTO),1)
+  CFLAGS_COMMON += -flto
+  LTO_LDFLAGS     := -flto
+else
+  LTO_LDFLAGS     :=
+endif
 
 # --- Directories -------------------------------------------------------------
 SRCDIRS        := Startup Debug Core Peripheral/src \
@@ -347,7 +412,7 @@ all: $(ELF) $(HEX) $(LST) showsize
 #   --specs=nano.specs / nosys.specs are WCH's default newlib configs.
 $(ELF): $(OBJS) $(EXTRA_OBJS) $(LINKER)
 	@echo "  LD    $@"
-	@"$(CC)" $(ARCH_FLAGS) -O3 -g -gdwarf-4 $(QUIET_LDFLAGS) \
+	@"$(CC)" $(ARCH_FLAGS) -Os -g -gdwarf-4 $(QUIET_LDFLAGS) $(LTO_LDFLAGS) \
 		-T "$(CURDIR)/$(LINKER)" \
 		-nostartfiles \
 		-Xlinker --gc-sections \
