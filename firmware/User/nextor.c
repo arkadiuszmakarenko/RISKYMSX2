@@ -68,8 +68,9 @@
  * -------------------------------------------------------------
  * Enumerating a USB stick takes hundreds of milliseconds - retries, a
  * bus reset, descriptor fetches - and the driver's command budget is
- * about 0.8 s (MB_POLL in driver.asm spins three passes of a 16-bit
- * counter). Probing from inside a command therefore spends most of the
+ * about 2.9 s (MB_POLL in driver.asm spins three passes of a 16-bit
+ * counter at ~53 T-states per iteration; the old "0.8 s" estimate
+ * under-counted the loop body). Probing from inside a command therefore spends most of the
  * kernel's patience on a request the kernel is actively blocked on, and
  * the failure mode is not a slow answer but a timeout: the drive goes
  * away and DOS wedges.

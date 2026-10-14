@@ -1923,7 +1923,12 @@ MB_PUSH_L:
 
 
 ;--- MB_POLL: wait for DONE in STATUS.
-;    Bounded: 3 passes of a 16-bit poll counter (~0.8 s total at 3.58 MHz).
+;    Bounded: 3 passes of a 16-bit poll counter. The loop body is ~53
+;    T-states (ld a,(nn) 13 + and 7 + jr 7 + dec bc 6 + ld 4 + or 4 +
+;    jr 12), so a pass is 65535 x 53 ~= 3.47M cycles and the bound is
+;    ~10.4M cycles ~= 2.9 s at 3.58 MHz. (The old "~0.8 s" note here
+;    under-counted the loop body; firmware command budgets must fit
+;    inside ~2.5 s or the answer lands after this poll has failed.)
 ;    Out: on DONE: A = STATUS bits, Cy=0.  On timeout: Cy=1.
 ;    Trashes AF, BC. The pass counter uses B' because BC is the main-set
 ;    poll counter. The kernel parks its live registers in the shadow set

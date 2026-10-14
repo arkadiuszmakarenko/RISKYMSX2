@@ -786,13 +786,21 @@ static uint8_t scsi_read_sector_once (uint32_t lba, uint8_t *buf,
         bytes_received += plen;
     }
 
+    /* Reads interleave with WRITE commits on the same stick during a
+     * stick-to-stick copy: the read's data flows from the controller's
+     * cache, but its CSW NAKs until the commit finishes - measured
+     * beyond 2.4 s on the test stick (write commits of 0.2-1.1 s with
+     * rarer longer stalls). Same window policy as the write path: the
+     * total CSW patience stays inside the Z80 driver's MB_POLL bound
+     * (~2.9 s by cycle count), because an answer that arrives after the
+     * driver has timed out is a DOS drive error anyway. */
     int csw_retries = 0;
     do {
-        res = usb_recv_csw (&csw, cbw.dCBWTag);
+        res = usb_recv_csw_wait (&csw, cbw.dCBWTag, 100U, (uint16_t *)0);
         if (res == ERR_SUCCESS && csw.bCSWStatus == 0) break;
         Delay_Ms (1);
         csw_retries++;
-    } while (csw_retries < 40);
+    } while (csw_retries < 20);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
         printf ("USB: R lba=%lu CSW FAIL r=%02x st=%u tries=%u\r\n",
                 (unsigned long)lba, (unsigned)res,
@@ -831,12 +839,20 @@ uint8_t usb_scsi_read_sectors (uint32_t lba, uint8_t *buf,
 }
 
 /* Cheap flash sticks commit a WRITE(10) in batches; while an erase/commit
- * runs, the stick NAKs the CSW - measured on the current test stick for
- * well over 600 ms.  SCSI hosts allow seconds for this (Linux/Windows use
- * 5-30 s).  4500 polls ~= 5 s is the compromise: long enough for any sane
- * FTL commit, short enough that a genuinely stuck stick does not freeze
- * the (blocked, synchronous) MSX mailbox for tens of seconds. */
-#define WR10_CSW_MAX_TRIES   4500U
+ * runs, the stick NAKs the CSW. Measured on the current test stick:
+ * ~210 ms and ~1075 ms alternating under sustained load, with rare
+ * stalls past 4.5 s.
+ *
+ * The budget is NOT "as long as the stick might take". The Z80 driver
+ * polls for the answer with MB_POLL, which gives up after ~2.9 s
+ * (3 passes x 65535 x ~53 T-states at 3.58 MHz), and an answer that
+ * arrives later than that is a DOS drive error anyway - so waiting
+ * longer only wedges the mailbox behind a command nobody is listening
+ * to anymore. Policy: ~2 s per attempt; the MSC reset plus the one
+ * retry then lands the answer just inside the poll window (the commit
+ * that stalled attempt 1 is finished by then, so attempt 2 is fast),
+ * and a genuinely stuck stick costs DOS a Retry. */
+#define WR10_CSW_MAX_TRIES   1800U
 
 /* Write a single block with SCSI WRITE(10).  Mirrors scsi_read_sector_once:
  * CBW (OUT, data-out) -> DATA-OUT packets on the bulk OUT endpoint ->
