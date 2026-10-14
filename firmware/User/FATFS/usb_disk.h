@@ -77,6 +77,13 @@ uint8_t usb_scsi_read_sector (uint32_t lba, uint8_t *buf, uint32_t block_size);
 uint8_t usb_scsi_read_sectors (uint32_t lba, uint8_t *buf,
                                uint16_t count, uint32_t block_size);
 uint8_t usb_scsi_write_sector (uint32_t lba, const uint8_t *buf, uint32_t block_size);
+
+/* Single-attempt WRITE(10) that also reports the approximate commit
+ * latency in ms (CSW poll count).  Used by the format-time
+ * usable-capacity scan; production writes use usb_scsi_write_sector. */
+uint8_t usb_scsi_write_sector_timed (uint32_t lba, const uint8_t *buf,
+                                     uint32_t block_size,
+                                     uint32_t *commit_ms);
 uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len);
 uint8_t usb_scsi_inquiry (uint8_t *buf, uint16_t len);
 uint8_t usb_scsi_test_unit_ready (void);

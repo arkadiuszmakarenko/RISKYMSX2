@@ -148,6 +148,15 @@ uint8_t RawDisk_ReadSectors (uint32_t lba, uint32_t count, uint8_t *dst);
 uint8_t RawDisk_WriteSectors (uint32_t lba, uint32_t count,
                               const uint8_t *src);
 
+/* Single-sector write with the measured WRITE(10) commit latency out in
+ * `*commit_ms` (approximately milliseconds; 0 on a failed write). One
+ * attempt, no retry/reset storm - used by the format-time
+ * usable-capacity scan to tell real flash (a few ms per sector) from a
+ * phantom tail that READ CAPACITY lied about (hundreds of ms to
+ * seconds). Returns 1 on success. */
+uint8_t RawDisk_WriteSectorTimed (uint32_t lba, const uint8_t *src,
+                                 uint32_t *commit_ms);
+
 #ifdef __cplusplus
 }
 #endif

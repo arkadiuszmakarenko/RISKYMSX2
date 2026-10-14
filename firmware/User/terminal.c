@@ -1037,15 +1037,113 @@ static uint8_t manager_mark_all_active (uint32_t total) {
     return count;
 }
 
+/* --- Usable-capacity detection ------------------------------------------
+ *
+ * Some sticks report more sectors than they can really write (counterfeit
+ * capacity, or an FTL that cannot program its last blocks). Reads beyond
+ * the real end "work", writes "succeed" only after seconds of internal
+ * grinding - or fail after long timeouts. A volume that extends into
+ * that tail then copies files at seconds per sector. READ CAPACITY cannot
+ * be trusted on such a stick; the only honest test is a timed write.
+ *
+ * Every probe below reads a sector and writes the SAME bytes back, so it
+ * is safe on a stick that still holds data. Real flash commits that in a
+ * handful of ms; the phantom tail takes hundreds of ms to seconds. The
+ * gap between the two is enormous - 150 ms is comfortably inside it. */
+#define PROBE_FAST_MS   150U
+
+/* One write-latency probe at `lba`. Returns 1 = fast. A slow or failed
+ * verdict is confirmed with a second probe: a real erase-batch hiccup in
+ * live flash clears within a second, while a phantom-tail write stays
+ * slow - better to spend one extra write than to cut real capacity off
+ * the volume on a transient. */
+static int probe_lba_fast (uint32_t lba) {
+    uint32_t ms;
+    if (RawDisk_ReadSectors (lba, 1U, s_sect) == 0U) return 0;
+    if (RawDisk_WriteSectorTimed (lba, s_sect, &ms) != 0U
+        && ms <= PROBE_FAST_MS) return 1;
+    if (RawDisk_ReadSectors (lba, 1U, s_sect) == 0U) return 0;
+    return (RawDisk_WriteSectorTimed (lba, s_sect, &ms) != 0U
+            && ms <= PROBE_FAST_MS);
+}
+
+/* Largest usable sector count, by write-latency boundary search.
+ *
+ * Common case first: if the LAST reported sector commits fast, READ
+ * CAPACITY is honest and the whole stick is usable - two probes total.
+ *
+ * Otherwise binary-search downward from the reported end for the last
+ * fast LBA, anchored at LBA 63 (the first data sector of partition 1 on
+ * a fresh prep; any usable stick must write it fast). Returns 0 if even
+ * the anchor is dead - there is no fast-write region at all. */
+static uint32_t manager_usable_sectors (uint32_t total) {
+    uint32_t lo, hi;
+
+    if (total > 64U && probe_lba_fast (total - 1U)) return total;
+
+    if (!probe_lba_fast (63U)) return 0U;
+
+    /* [lo, hi): lo is a confirmed-fast LBA, hi is the reported end (or
+     * the first confirmed-dead LBA once one is found). */
+    lo = 63U;
+    hi = total;
+    while ((hi - lo) > 1U) {
+        uint32_t mid = lo + ((hi - lo) / 2U);
+        if (probe_lba_fast (mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo + 1U;
+}
+
 static FRESULT manager_prepare_fat16 (uint32_t total) {
     LBA_t parts[MBR_PT_MAX] = {0, 0, 0, 0};
     /* Let FatFs choose the cluster size from the partition capacity. It
      * selects 32 KiB clusters at 2 GiB and smaller clusters for a short
      * final partition, while FM_FAT keeps the filesystem out of FAT32. */
     MKFS_PARM fmt = {FM_FAT, 2U, 0U, 512U, 0U};
-    uint32_t remaining = (total > 63U) ? total - 63U : 0U;
+    uint32_t usable;
+    uint32_t remaining;
     uint8_t count = 0U;
     FRESULT fr;
+
+    /* Measure the REAL writable extent before creating any volume. A
+     * lying READ CAPACITY silently becomes a volume whose tail writes
+     * at seconds per sector; the scan below only runs when the last
+     * reported sector is slow, so an honest stick pays two fast probes
+     * and nothing else. On a lying stick the search costs up to ~a
+     * minute of slow tail writes - once, at format time. */
+    clear_screen ();
+    out_str (" Preparing USB drive");
+    newline ();
+    out_str (" Measuring usable capacity...");
+    newline ();
+    term_wait_drain (200U);
+
+    usable = manager_usable_sectors (total);
+    printf ("TERM: usable capacity %lu of %lu reported sectors\r\n",
+            (unsigned long)usable, (unsigned long)total);
+    if (usable < TERM_FAT16_MIN_SECTORS + 63U) {
+        manager_pause (" Stick unusable: no fast-write region");
+        return FR_MKFS_ABORTED;
+    }
+    if (usable < total) {
+        char line[40];
+        out_str (" Usable: less than reported.");
+        newline ();
+        snprintf (line, sizeof (line), " Using %u MB of %u MB",
+                  (unsigned)(usable / 2048U),
+                  (unsigned)(total / 2048U));
+        out_str (line);
+        newline ();
+        out_str (" (stick reports more than it can write)");
+        newline ();
+        term_wait_drain (400U);
+    }
+
+    remaining = usable - 63U;
 
     for (uint8_t i = 0U; i < MBR_PT_MAX &&
          remaining >= TERM_FAT16_MIN_SECTORS; i++) {

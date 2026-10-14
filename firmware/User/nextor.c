@@ -998,6 +998,14 @@ static void log_request (const log_snap *s) {
         return;
     }
 
+    /* This diagnostic stream is being used to chase write failures. Keep
+     * status/capacity/read chatter out of it; still advance last_seq so a
+     * skipped non-write command is not reported as a dropped write. */
+    if (cmd != NEXTOR_CMD_WRITE) {
+        s_mb.last_seq = seq;
+        return;
+    }
+
     /* One request, one pair of lines. If seq moved by more than one, a
      * real request was overwritten before Nextor_Service reached it. */
     if ((uint8_t)(seq - s_mb.last_seq) > 1U) {
@@ -1034,6 +1042,9 @@ static void log_request (const log_snap *s) {
 static void log_result (const log_snap *s) {
     if (is_mark (s->raw)) {
         return;                 /* a breadcrumb has no answer to print */
+    }
+    if (s->cmd != NEXTOR_CMD_WRITE) {
+        return;                 /* this stream is write-only */
     }
     if (s->cmd >= NEXTOR_CMD_MAX) {
         return;                 /* trace_dump already said everything */
@@ -1473,6 +1484,17 @@ void Nextor_Service (void) {
         if (snap_lba == 0U) {
             dump_mbr (&s_mb.args[4], "write candidate");
         }
+        /* The request line identifies the sector, while this lets the log
+         * prove that the 512-byte payload reached the USB layer intact. If
+         * these bytes are wrong, the fault is in the mailbox capture; if
+         * they match but USB reports an error, it is below Nextor. */
+        printf ("[nx]   write data lba=%lu head=%02x %02x %02x %02x "
+                "tail=%02x %02x\r\n",
+                (unsigned long)snap_lba,
+                (unsigned)s_mb.args[4], (unsigned)s_mb.args[5],
+                (unsigned)s_mb.args[6], (unsigned)s_mb.args[7],
+                (unsigned)s_mb.args[4U + NEXTOR_SECTOR_SIZE - 2U],
+                (unsigned)s_mb.args[4U + NEXTOR_SECTOR_SIZE - 1U]);
         if (RawDisk_WriteSectors (snap_lba, 1U, &s_mb.args[4]) == 0U) {
             s_mb.err = NEXTOR_ERR_IO;
             printf ("[nx]   write failed: %s\r\n", RawDisk_LastFailure ());

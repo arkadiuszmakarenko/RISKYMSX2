@@ -209,6 +209,15 @@ typedef struct {
 /* Bulk transport helpers (USBHS)                                            */
 /* ------------------------------------------------------------------------ */
 
+/* USBHSH_Transact folds the received token PID into its error code, and
+ * the two interesting codes need OPPOSITE recovery:
+ *   0x2A = ERR_USB_TRANSFER|USB_PID_NAK   "busy, no data yet" -> be patient
+ *   0x2E = ERR_USB_TRANSFER|USB_PID_STALL "endpoint halted"    -> clear halt
+ * Clearing the halt of a merely-busy endpoint is actively harmful: the
+ * extra control transfer disturbs a flash controller that is committing
+ * a WRITE, and the clear can resync the bulk data toggles out of step. */
+#define MSC_ERR_STALL   ((uint8_t)(ERR_USB_TRANSFER | USB_PID_STALL))
+
 static uint8_t usb_send_cbw (const CBW_t *cbw) {
     uint16_t plen = sizeof (CBW_t);
     uint8_t  res;
@@ -216,21 +225,26 @@ static uint8_t usb_send_cbw (const CBW_t *cbw) {
         res = USBHSH_SendEndpData (usb_out_ep, &out_tog,
                                    (uint8_t *)cbw, plen);
         if (res == ERR_SUCCESS) return res;
-        if ((tries % 10) == 9) {
+        if (res == MSC_ERR_STALL) {
+            /* A halted OUT endpoint stays halted until CLEAR_FEATURE;
+             * retrying into it is futile. Both sides return to DATA0. */
             uint8_t ep0 = RootHubDev[DEF_USB_PORT].bEp0MaxPks;
             (void)USBHSH_ClearEndpStall (ep0, usb_out_ep);
             out_tog = 0;
             Delay_Ms (2);
+        } else {
+            /* NAK: the device is busy. Leave it alone and retry. */
+            Delay_Ms (1);
         }
-        Delay_Ms (1);
     }
     return res;
 }
 
-static uint8_t usb_recv_csw (CSW_t *csw, uint32_t expected_tag) {
+static uint8_t usb_recv_csw_wait (CSW_t *csw, uint32_t expected_tag,
+                                  uint16_t max_tries, uint16_t *csw_tries) {
     uint8_t  res;
     int zlp_retries = 0;
-    for (int tries = 0; tries < 60; tries++) {
+    for (uint16_t tries = 0U; tries < max_tries; tries++) {
         uint16_t plen = sizeof (CSW_t);
         res = USBHSH_GetEndpData (usb_in_ep, &in_tog,
                                   (uint8_t *)csw, &plen);
@@ -251,6 +265,10 @@ static uint8_t usb_recv_csw (CSW_t *csw, uint32_t expected_tag) {
                 || csw->dCSWTag != expected_tag) {
                 return ERR_USB_TRANSFER;
             }
+            if (csw_tries != (uint16_t *)0) {
+                /* One poll + 1 ms back-off per try ~= milliseconds. */
+                *csw_tries = tries;
+            }
             return res;
         }
         if (res == ERR_SUCCESS) {
@@ -258,15 +276,34 @@ static uint8_t usb_recv_csw (CSW_t *csw, uint32_t expected_tag) {
             Delay_Us (100);
             continue;
         }
-        if ((tries % 10) == 9) {
+        if (res == MSC_ERR_STALL) {
+            /* The endpoint was really halted (phase error / refused
+             * command).  Clear it - both sides return to DATA0 - and
+             * keep polling for the CSW. */
             uint8_t ep0 = RootHubDev[DEF_USB_PORT].bEp0MaxPks;
             (void)USBHSH_ClearEndpStall (ep0, (uint8_t)(0x80 | usb_in_ep));
             in_tog = 0;
             Delay_Ms (2);
+            continue;
         }
+        /* Anything else is a NAK: the device is still busy finishing the
+         * command (a flash controller committing a WRITE can NAK for
+         * hundreds of milliseconds and cheap ones for seconds).  Do NOT
+         * clear-halt a merely-busy endpoint - the control transfer
+         * disturbs the commit and can desync the bulk toggles. */
         Delay_Ms (1);
     }
+    if (csw_tries != (uint16_t *)0) {
+        *csw_tries = max_tries;
+    }
     return res;
+}
+
+/* Normal commands keep the short wait used by the existing read path.
+ * Flash media can take substantially longer to commit a WRITE(10), so the
+ * write path opts into the longer wait below without slowing reads. */
+static uint8_t usb_recv_csw (CSW_t *csw, uint32_t expected_tag) {
+    return usb_recv_csw_wait (csw, expected_tag, 60U, (uint16_t *)0);
 }
 
 static uint8_t bulk_in_read_retry (uint8_t *buf, uint16_t *plen,
@@ -300,13 +337,16 @@ static uint8_t bulk_in_read_retry (uint8_t *buf, uint16_t *plen,
             Delay_Us (100);
             continue;
         }
-        if ((tries % 10) == 9) {
+        if (res == MSC_ERR_STALL) {
+            /* Real halt: clear it (both sides return to DATA0), retry. */
             uint8_t ep0 = RootHubDev[DEF_USB_PORT].bEp0MaxPks;
             (void)USBHSH_ClearEndpStall (ep0, (uint8_t)(0x80 | usb_in_ep));
             in_tog = 0;
             Delay_Ms (2);
+        } else {
+            /* NAK: busy. Leave the endpoint alone. */
+            Delay_Ms (1);
         }
-        Delay_Ms (1);
         tries++;
     } while (tries < max_retries);
     return res;
@@ -578,7 +618,11 @@ static uint8_t scsi_read_capacity16_once (uint32_t *block_count,
     res = bulk_in_read_retry (cap_buf, &plen, 40);
     if (res != ERR_SUCCESS || plen < 12) return 2;
     Delay_Ms (1);
-    res = usb_recv_csw (&csw, cbw.dCBWTag);
+    /* A successful OUT only means the block reached the device. Cheap flash
+     * sticks may spend hundreds of milliseconds programming it before the
+     * CSW is available. Do not reset the BOT pipe while that commit is still
+     * in progress. */
+    res = usb_recv_csw_wait (&csw, cbw.dCBWTag, 250U, (uint16_t *)0);
     if (res != ERR_SUCCESS || csw.bCSWStatus != 0) return 3;
     {
         uint32_t lba_hi = ((uint32_t)cap_buf[0] << 24)
@@ -772,22 +816,63 @@ uint8_t usb_scsi_read_sectors (uint32_t lba, uint8_t *buf,
                 (unsigned long)lba, (unsigned)(attempt + 1), (unsigned)r);
         uint8_t sense[18] = {0};
         (void)usb_scsi_request_sense (sense, sizeof(sense));
-        (void)msc_mass_storage_reset ();
+        {
+            uint8_t rr = msc_mass_storage_reset ();
+            printf ("USB: W lba=%lu recovery reset rc=%02x\r\n",
+                    (unsigned long)lba, (unsigned)rr);
+            if (rr != 0U) {
+                printf ("USB: W lba=%lu recovery reset failed\r\n",
+                        (unsigned long)lba);
+            }
+        }
         Delay_Ms (5);
     }
     return 3;
 }
 
+/* Cheap flash sticks commit a WRITE(10) in batches; while an erase/commit
+ * runs, the stick NAKs the CSW - measured on the current test stick for
+ * well over 600 ms.  SCSI hosts allow seconds for this (Linux/Windows use
+ * 5-30 s).  4500 polls ~= 5 s is the compromise: long enough for any sane
+ * FTL commit, short enough that a genuinely stuck stick does not freeze
+ * the (blocked, synchronous) MSX mailbox for tens of seconds. */
+#define WR10_CSW_MAX_TRIES   4500U
+
 /* Write a single block with SCSI WRITE(10).  Mirrors scsi_read_sector_once:
  * CBW (OUT, data-out) -> DATA-OUT packets on the bulk OUT endpoint ->
  * CSW (IN).  The data stage sends `block_size` bytes in 512-byte
- * (USBHS_BULK_MAX_PACKET) chunks. */
+ * (USBHS_BULK_MAX_PACKET) chunks.
+ *
+ * Returns:
+ *   0 - written and acknowledged (CSW status 0)
+ *   1 - CBW never reached the device
+ *   2 - data stage failed (endpoint stayed halted / device refused)
+ *   3 - no CSW within the budget - the write MAY STILL BE COMMITTING
+ *       inside the FTL; no more SCSI commands may be overlapped
+ *   4 - CSW arrived with CHECK CONDITION (the command really completed,
+ *       and REQUEST SENSE is now legal and meaningful) */
 static uint8_t scsi_write_sector_once (uint32_t lba, const uint8_t *buf,
-                                       uint32_t block_size) {
+                                       uint32_t block_size,
+                                       uint16_t csw_max_tries,
+                                       uint16_t *csw_tries) {
     CBW_t cbw;
     CSW_t csw = {0};
     uint8_t  res;
     uint32_t bytes_sent = 0;
+
+    /* Keep the write path as observable as the read path.  In particular,
+     * WRITE(10) has an OUT data stage, so a failure can happen before the
+     * command ever reaches the device (CBW or OUT), or after the device has
+     * received the block (CSW). */
+#if RISKY_DEBUG
+    printf ("USB: W lba=%lu bytes=%lu head=%02x %02x %02x %02x "
+            "tail=%02x %02x\r\n",
+            (unsigned long)lba, (unsigned long)block_size,
+            (unsigned)buf[0], (unsigned)buf[1],
+            (unsigned)buf[2], (unsigned)buf[3],
+            (unsigned)buf[block_size - 2U],
+            (unsigned)buf[block_size - 1U]);
+#endif
 
     memset (&cbw, 0, sizeof (cbw));
     cbw.dCBWSignature          = 0x43425355;
@@ -822,22 +907,52 @@ static uint8_t scsi_write_sector_once (uint32_t lba, const uint8_t *buf,
             res = USBHSH_SendEndpData (usb_out_ep, &out_tog,
                                        buf + bytes_sent, chunk);
             if (res == ERR_SUCCESS) break;
-            Delay_Ms (1);
-            if (++out_retries >= 20) return 2;
+            if (res == MSC_ERR_STALL) {
+                /* The device halted the OUT endpoint (phase error or
+                 * refused command).  A halted endpoint stays halted
+                 * until CLEAR_FEATURE, so retrying into it is futile -
+                 * clear the halt, resync both sides to DATA0, retry. */
+                uint8_t ep0 = RootHubDev[DEF_USB_PORT].bEp0MaxPks;
+                (void)USBHSH_ClearEndpStall (ep0, usb_out_ep);
+                out_tog = 0;
+                Delay_Ms (2);
+            } else {
+                Delay_Ms (1);
+            }
+            if (++out_retries >= 20) break;
         } while (res != ERR_SUCCESS);
+        if (res != ERR_SUCCESS) {
+            printf ("USB: W lba=%lu off=%lu OUT FAIL r=%02x "
+                    "tries=%u\r\n",
+                    (unsigned long)lba, (unsigned long)bytes_sent,
+                    (unsigned)res, (unsigned)out_retries);
+            return 2;
+        }
         bytes_sent += chunk;
     }
 
-    /* Match the READ path's CSW patience. A WRITE CSW only arrives after
-     * the stick has accepted the block, and cheap sticks stall that for
-     * tens of milliseconds (flash programming / wear levelling), which is
-     * precisely when a single usb_recv_csw() would give up. The read side
-     * has always retried this in an outer loop; writes now do too. */
-    res = usb_recv_csw (&csw, cbw.dCBWTag);
-    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
-        printf ("USB: WR10 CSW rc=%02x status=%u\r\n",
-                (unsigned)res, (unsigned)csw.bCSWStatus);
+    /* The data OUT stage only tells us that the block reached the device.
+     * Flash media may need hundreds of milliseconds - cheap ones seconds -
+     * for programming and wear-levelling before it returns the CSW.  Do
+     * not mistake that normal busy interval for a transport failure and
+     * reset the BOT pipe. */
+    res = usb_recv_csw_wait (&csw, cbw.dCBWTag, csw_max_tries, csw_tries);
+    if (res != ERR_SUCCESS) {
+        printf ("USB: WR10 CSW rc=%02x after ~%u polls\r\n",
+                (unsigned)res, (unsigned)csw_max_tries);
         return 3;
+    }
+    /* A late CSW is worth reporting: it is the direct measurement of how
+     * long this stick's FTL really takes to commit a write, and the number
+     * that says whether the wait budget above is generous enough. */
+    if (csw_tries != (uint16_t *)0 && *csw_tries > 100U) {
+        printf ("USB: W lba=%lu CSW after ~%u ms (FTL commit delay)\r\n",
+                (unsigned long)lba, (unsigned)*csw_tries);
+    }
+    if (csw.bCSWStatus != 0) {
+        printf ("USB: WR10 CSW status=%u (CHECK CONDITION)\r\n",
+                (unsigned)csw.bCSWStatus);
+        return 4;
     }
     return 0;
 }
@@ -845,14 +960,63 @@ static uint8_t scsi_write_sector_once (uint32_t lba, const uint8_t *buf,
 uint8_t usb_scsi_write_sector (uint32_t lba, const uint8_t *buf,
                                uint32_t block_size) {
     for (int attempt = 0; attempt < 2; attempt++) {
-        uint8_t r = scsi_write_sector_once (lba, buf, block_size);
+        uint16_t csw_tries = 0U;
+        uint8_t r = scsi_write_sector_once (lba, buf, block_size,
+                                            WR10_CSW_MAX_TRIES,
+                                            &csw_tries);
         if (r == 0) return 0;
-        uint8_t sense[18] = {0};
-        (void)usb_scsi_request_sense (sense, sizeof(sense));
-        (void)msc_mass_storage_reset ();
+        printf ("USB: W lba=%lu attempt=%u failed stage=%u\r\n",
+                (unsigned long)lba, (unsigned)(attempt + 1),
+                (unsigned)r);
+        if (r != 3) {
+            /* The command completed (CHECK CONDITION) or never started
+             * (CBW/OUT stage), so the BOT pipe is idle and REQUEST SENSE
+             * is legal.  It is NOT legal after stage 3: the WRITE may
+             * still be committing inside the FTL, and overlapping another
+             * command is exactly what used to wedge the pipe on this
+             * stick (the "REQUEST SENSE failed r=02" lines). */
+            uint8_t sense[18] = {0};
+            uint8_t sr = usb_scsi_request_sense (sense, sizeof(sense));
+            if (sr == 0U) {
+                printf ("USB: W lba=%lu sense key=%02x asc=%02x "
+                        "ascq=%02x\r\n",
+                        (unsigned long)lba,
+                        (unsigned)(sense[2] & 0x0FU),
+                        (unsigned)sense[12], (unsigned)sense[13]);
+            } else {
+                printf ("USB: W lba=%lu REQUEST SENSE failed r=%02x\r\n",
+                        (unsigned long)lba, (unsigned)sr);
+            }
+        }
+        if (r != 4) {
+            /* Stage 4 (CHECK CONDITION) left the pipe clean - the CSW
+             * arrived - so the BOT reset would be pointless disruption.
+             * Every other stage needs the reset before the retry. */
+            (void)msc_mass_storage_reset ();
+        }
         Delay_Ms (5);
     }
+    printf ("USB: W lba=%lu FAILED after 2 attempts "
+            "(see the stage lines above)\r\n",
+            (unsigned long)lba);
     return 3;
+}
+
+/* Single-attempt WRITE(10) with the measured CSW commit latency, for the
+ * format-time usable-capacity scan (see terminal.c).  One attempt, no
+ * retry/reset storm: the measurement is the point.  `*commit_ms` is the
+ * CSW poll count (one poll ~= 1 ms), i.e. approximately how long the
+ * stick's FTL took to commit the block.  Returns 0 on success. */
+uint8_t usb_scsi_write_sector_timed (uint32_t lba, const uint8_t *buf,
+                                     uint32_t block_size,
+                                     uint32_t *commit_ms) {
+    uint16_t tries = 0U;
+    uint8_t r = scsi_write_sector_once (lba, buf, block_size,
+                                        WR10_CSW_MAX_TRIES, &tries);
+    if (commit_ms != (uint32_t *)0) {
+        *commit_ms = (uint32_t)tries;
+    }
+    return r;
 }
 
 uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len) {

@@ -370,3 +370,32 @@ uint8_t RawDisk_WriteSectors (uint32_t lba, uint32_t count,
     }
     return 1U;
 }
+
+/* Single-attempt timed write, for the format-time usable-capacity scan.
+ * Same validation as RawDisk_WriteSectors, but no retry/reset storm, and
+ * the WRITE(10) commit latency comes back with the result: a few ms
+ * anywhere in real flash, hundreds of ms to seconds in the phantom tail
+ * of a stick whose READ CAPACITY lies.  Returns 1 on success. */
+uint8_t RawDisk_WriteSectorTimed (uint32_t lba, const uint8_t *src,
+                                  uint32_t *commit_ms) {
+    s_last_failure = "";
+
+    if (src == (const uint8_t *)0) {
+        s_last_failure = "null source buffer";
+        return 0U;
+    }
+    if (RawDisk_IsPresent () == 0U) {
+        s_last_failure = "no medium (stick not enumerated, or not probed yet)";
+        return 0U;
+    }
+    if (range_ok (lba, 1U) == 0U) {
+        s_last_failure = "LBA out of range (check the reported capacity)";
+        return 0U;
+    }
+    if (usb_scsi_write_sector_timed (lba, src, RAW_DISK_SECTOR_SIZE,
+                                     commit_ms) != 0U) {
+        s_last_failure = "SCSI WRITE(10) failed (see the USB: lines above)";
+        return 0U;
+    }
+    return 1U;
+}
