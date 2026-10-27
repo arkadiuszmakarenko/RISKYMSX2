@@ -394,11 +394,12 @@ handle_reset:
 	j	4f				/* no clock: bounded fallback */
 2:
 	li	t3, 0x1000
+3:
 	lw	t0, 0(t1)
 	andi	t0, t0, 0x0200
 	beqz	t0, 4f
 	addi	t3, t3, -1
-	bnez	t3, 2b
+	bnez	t3, 3b
 
 	/* Assert on timeout as well; the MSX clock was absent or stopped. */
 4:
