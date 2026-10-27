@@ -209,7 +209,28 @@ extern "C" {
                                                 *    the media change latch  */
 #define NEXTOR_CMD_IDENT          0x07U   /* -> 28 bytes: INQUIRY vendor(8)
                                                 *    + product(20), space-padded */
-#define NEXTOR_CMD_MAX            0x08U
+/* Revision 4: the bulk commands. A flash stick charges its WRITE(10)
+ * commit (measured 210 ms-1075 ms on the test stick) once per SCSI
+ * COMMAND, not per sector, so N sectors in one command pay ONE commit
+ * instead of N. The single-sector commands above remain the fallback
+ * path - and are the whole protocol for revision-3 pairs, which is what
+ * the version bump in the handshake enforces. */
+#define NEXTOR_CMD_WRITEM         0x08U   /* <- LBA(4) + count(1) +
+                                          *    count*512 bytes           */
+#define NEXTOR_CMD_READM          0x09U   /* <- LBA(4) + count(1)
+                                          *    -> count*512 bytes        */
+#define NEXTOR_CMD_MAX            0x0AU
+
+/* Bulk command sizing. 32 sectors = 16 KiB keeps the whole exchange
+ * inside the Z80's ~2.9 s MB_POLL window even on a slow stick: the data
+ * push costs ~8 us/byte (~125 ms for 16 KiB) and the firmware answers
+ * after ONE WRITE(10) budget (~2 s), so DONE or ERR always lands while
+ * the driver is still polling. On failure the driver falls back to
+ * per-sector commands for the same range - they are the retry. */
+#define NEXTOR_BULK_MAX_SECTORS   32U
+#define NEXTOR_BULK_HDR           5U     /* LBA(4) + count(1)           */
+#define NEXTOR_BULK_ARG_MAX       (NEXTOR_BULK_HDR \
+                                   + NEXTOR_BULK_MAX_SECTORS * 512U)
 
 /* --- Breadcrumbs -------------------------------------------------------
  *
@@ -246,9 +267,12 @@ extern "C" {
  * being dropped by the overflow guard. See Nextor_WriteByte(). */
 #define NEXTOR_MARK_ARGC           1U
 
-/* Handshake reply: "RNX3" + version byte. */
-#define NEXTOR_MAGIC              "RNX3"
-#define NEXTOR_VERSION            0x03U
+/* Handshake reply: "RNX4" + version byte. The magic's last character and
+ * the version byte move together; the driver's MB_EXPECT holds the same
+ * pair, so a mismatched driver/firmware pair fails at boot instead of
+ * silently decoding arguments in the wrong places. */
+#define NEXTOR_MAGIC              "RNX4"
+#define NEXTOR_VERSION            0x04U
 
 /* ========================================================================
  * Public API

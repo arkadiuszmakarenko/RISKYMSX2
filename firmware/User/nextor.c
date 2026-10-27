@@ -147,6 +147,23 @@
  * are both well inside it. */
 #define NEXTOR_RES_MAX       NEXTOR_SECTOR_SIZE            /* 512 */
 
+/* Bulk staging buffer: one multi-sector burst. WRITE-MULTI's arguments
+ * are LBA(4) + count(1) + count*512 data bytes and READ-MULTI's result
+ * is count*512 bytes, both bounded by NEXTOR_BULK_MAX_SECTORS. Internal
+ * SRAM (the build leaves ~160 KiB free), NOT PSRAM: the arg sink runs
+ * one byte at a time in EXTI context and PSRAM is game-image space.
+ * NEXTOR_BULK_ARG_MAX is sized by nextor.h's bulk constants; this is
+ * only the SRAM reservation.
+ *
+ * The buffer does double duty: a WRITE-MULTI's data lands at
+ * s_bulk_buf + NEXTOR_BULK_HDR and is handed to raw_disk.c where it
+ * lies, while a READ-MULTI fills it from offset 0 (its own 5-byte
+ * header is consumed by then) and publishes the result pointers into
+ * it - the res machinery is pointer-based, so a 16 KiB answer needs no
+ * copy. */
+static __attribute__((aligned(4)))
+uint8_t s_bulk_buf[NEXTOR_BULK_ARG_MAX];
+
 /* Mailbox writes remembered for the invalid-command report. 24 is about
  * one HANDSHAKE plus its poll, which is the shortest span that can hold
  * an unexplained CMD write together with whatever it interrupted. */
@@ -172,12 +189,17 @@ static const uint16_t s_cmd_args[NEXTOR_CMD_MAX] = {
     0U,                                       /* 0x05 ABORT     */
     0U,                                       /* 0x06 STAPEEK   */
     0U,                                       /* 0x07 IDENT     */
+    (uint16_t)NEXTOR_BULK_HDR,                /* 0x08 WRITEM: LBA + count;
+                                               * the data stage extends
+                                               * the sink dynamically */
+    (uint16_t)NEXTOR_BULK_HDR,                /* 0x09 READM:  LBA + count */
 };
 
 #if RISKY_DEBUG
 static const char *const s_cmd_name[NEXTOR_CMD_MAX] = {
     "HANDSHAKE", "CAPACITY", "STATUS", "READ",
     "WRITE", "ABORT", "STAPEEK", "IDENT",
+    "WRITEM", "READM",
 };
 #endif
 
@@ -197,7 +219,7 @@ static const char *const s_cmd_name[NEXTOR_CMD_MAX] = {
 /* NEXTOR_MARK_DEFINED counts the entries above; the reserved range is
  * deliberately wider (see NEXTOR_CMD_MARK_COUNT), so the difference has to
  * be bounded rather than assumed away. */
-#define NEXTOR_MARK_DEFINED        36U
+#define NEXTOR_MARK_DEFINED        38U
 
 static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "RW:enter",              /* MB_MK_RW_ENTER       device number     */
@@ -236,6 +258,8 @@ static const char *const s_mark_name[NEXTOR_CMD_MARK_COUNT] = {
     "DRVQ3 input flags",    /* MB_MK_DQ3_FLAGS      query 3 input C   */
     "DRVQ4 input flags",    /* MB_MK_DQ4_FLAGS      query 4 input C   */
     "DRVQ5 max devices",    /* MB_MK_DQ5_MAXDEV     query 5 output B  */
+    "RW:bulk write",        /* MB_MK_RW_BULKW       bulk chunk sectors*/
+    "RW:bulk read",         /* MB_MK_RW_BULKR       bulk chunk sectors*/
 };
 
 /* A command byte is a breadcrumb rather than a mistake if it lands in the
@@ -711,6 +735,15 @@ static uint32_t arg_lba (void) {
          | ((uint32_t)s_mb.args[3] << 24);
 }
 
+/* The bulk commands' LBA: the same little-endian four bytes, but captured
+ * at the head of s_bulk_buf (their arg sink) instead of args[]. */
+static uint32_t bulk_lba (void) {
+    return  (uint32_t)s_bulk_buf[0]
+         | ((uint32_t)s_bulk_buf[1] << 8)
+         | ((uint32_t)s_bulk_buf[2] << 16)
+         | ((uint32_t)s_bulk_buf[3] << 24);
+}
+
 /* Start an answer: empty the result FIFO and clear the error. The
  * driver only issues a new command after draining the previous answer,
  * so there is never a result worth keeping. */
@@ -999,16 +1032,18 @@ static void log_request (const log_snap *s) {
         return;
     }
 
-    /* This diagnostic stream is being used to chase write failures. Keep
-     * status/capacity/read chatter out of it; still advance last_seq so a
-     * skipped non-write command is not reported as a dropped write. */
-    if (cmd != NEXTOR_CMD_WRITE) {
+    /* Log every command except STATUS. This stream was write-only while
+     * the write path was being tuned, but the bulk-desync chase needs to
+     * see EVERY exchange - in particular what a per-sector fallback
+     * WRITE's command byte actually arrives as, which a silent skip
+     * hides completely. STATUS stays excluded because the kernel polls
+     * it in a tight loop; still advance last_seq so a skipped command
+     * is not reported as a dropped one. */
+    if (cmd == NEXTOR_CMD_STATUS) {
         s_mb.last_seq = seq;
         return;
     }
 
-    /* One request, one pair of lines. If seq moved by more than one, a
-     * real request was overwritten before Nextor_Service reached it. */
     if ((uint8_t)(seq - s_mb.last_seq) > 1U) {
         printf ("[nx] --- %u request(s) dropped, service fell behind ---\r\n",
                 (unsigned)((uint8_t)(seq - s_mb.last_seq) - 1U));
@@ -1029,7 +1064,8 @@ static void log_request (const log_snap *s) {
 
     printf ("[nx] #%u %s args=%u", (unsigned)seq, s_cmd_name[cmd],
             (unsigned)nargs);
-    if ((cmd == NEXTOR_CMD_READ) || (cmd == NEXTOR_CMD_WRITE)) {
+    if ((cmd == NEXTOR_CMD_READ) || (cmd == NEXTOR_CMD_WRITE)
+        || (cmd == NEXTOR_CMD_READM) || (cmd == NEXTOR_CMD_WRITEM)) {
         printf (" lba=0x%08x", (unsigned)lba);
     }
     /* Gap since the previous request. The first line reads how long the
@@ -1044,8 +1080,8 @@ static void log_result (const log_snap *s) {
     if (is_mark (s->raw)) {
         return;                 /* a breadcrumb has no answer to print */
     }
-    if (s->cmd != NEXTOR_CMD_WRITE) {
-        return;                 /* this stream is write-only */
+    if (s->cmd == NEXTOR_CMD_STATUS) {
+        return;                 /* polled in a tight loop: pure noise */
     }
     if (s->cmd >= NEXTOR_CMD_MAX) {
         return;                 /* trace_dump already said everything */
@@ -1224,13 +1260,29 @@ void Nextor_Service (void) {
             cmd         = s_mb.cmd;
             snap_raw    = s_mb.raw;
             snap_seq    = seq0;
-            snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
-            snap_lba   = arg_lba ();
-            /* A breadcrumb's payload is args[0]. Read it in the same
-             * pass as everything else: a new command byte resets argp,
-             * so reading it afterwards would race the next marker and
-             * report its value instead. */
-            snap_arg   = (snap_nargs > 0U) ? s_mb.args[0] : 0U;
+            if ((cmd == NEXTOR_CMD_WRITEM)
+                || (cmd == NEXTOR_CMD_READM)) {
+                /* The bulk commands capture into s_bulk_buf, so both the
+                 * arg count and the LBA live there: argend-args would be
+                 * a subtraction across two different arrays (undefined,
+                 * and wrong either way). For WRITE the honest count is
+                 * header + count*512 - what the burst actually carried. */
+                snap_nargs = (uint16_t)((cmd == NEXTOR_CMD_WRITEM)
+                    ? (uint16_t)(NEXTOR_BULK_HDR
+                                + (uint32_t)s_bulk_buf[4]
+                                  * NEXTOR_SECTOR_SIZE)
+                    : (uint16_t)NEXTOR_BULK_HDR);
+                snap_lba   = bulk_lba ();
+                snap_arg   = s_bulk_buf[4];
+            } else {
+                snap_nargs = (uint16_t)(s_mb.argend - s_mb.args);
+                snap_lba   = arg_lba ();
+                /* A breadcrumb's payload is args[0]. Read it in the same
+                 * pass as everything else: a new command byte resets argp,
+                 * so reading it afterwards would race the next marker and
+                 * report its value instead. */
+                snap_arg   = (snap_nargs > 0U) ? s_mb.args[0] : 0U;
+            }
             if ((s_mb.seq == seq0) && (s_mb.armed != 0U)) {
                 /* Coherent: consume so the capture can accept the next
                  * burst. Ordering is safe because DONE for this request
@@ -1506,6 +1558,132 @@ void Nextor_Service (void) {
         }
         break;
 
+    case NEXTOR_CMD_WRITEM: {
+        /* Revision 4's bulk write: LBA(4) + count(1) + count*512 bytes,
+         * all captured contiguously in s_bulk_buf. ONE multi-block
+         * WRITE(10) for the whole run - one CBW, one data stage, one
+         * CSW, and on this class of stick one FTL commit (measured
+         * 210-1075 ms per SCSI command, not per sector) instead of one
+         * per sector.
+         *
+         * One attempt, bounded by the write budget: DONE or ERR has to
+         * land inside the driver's ~2.9 s poll, and the driver's
+         * fallback to per-sector commands IS the retry. Same error
+         * discipline as the single WRITE: "no medium" stays .NRDY so a
+         * present drive is never unmapped, everything else is .DISK. */
+        const uint32_t n = (uint32_t)s_bulk_buf[4];
+
+        if (RawDisk_IsPresent () == 0U) {
+            s_mb.err = NEXTOR_ERR_NO_MEDIA;
+            printf ("[nx]   no medium, bulk write rejected\r\n");
+            break;
+        }
+        if ((n == 0U) || (n > NEXTOR_BULK_MAX_SECTORS)) {
+            /* The sink never arms a bad count, so this is unreachable
+             * through the driver; it is the guard against answering a
+             * torn capture with a wild run. */
+            s_mb.err = NEXTOR_ERR_IO;
+            printf ("[nx]   bulk write rejected: count=%u\r\n",
+                    (unsigned)n);
+            break;
+        }
+        if (n == 1U) {
+            /* DESYNC, not a request: READ_WRITE routes only 2+-sector
+             * requests to the bulk commands, so this driver can never
+             * legitimately send count=1. And it is not harmless: the
+             * driver advances by ITS chunk after DONE, so answering a
+             * 1-sector capture would make it skip every sector past the
+             * first - silently. Answer ERR and let the driver's
+             * per-sector fallback rewrite the whole range correctly. */
+            s_mb.err = NEXTOR_ERR_IO;
+            printf ("[nx]   bulk write DESYNC: count=1 (this driver "
+                    "never sends 1) - answering ERR for the "
+                    "per-sector fallback\r\n");
+            break;
+        }
+        if (snap_lba == 0U) {
+            dump_mbr (&s_bulk_buf[NEXTOR_BULK_HDR],
+                      "bulk write candidate");
+        }
+        printf ("[nx]   bulk write lba=%lu n=%u head=%02x %02x %02x %02x "
+                "tail=%02x %02x\r\n",
+                (unsigned long)snap_lba, (unsigned)n,
+                (unsigned)s_bulk_buf[NEXTOR_BULK_HDR],
+                (unsigned)s_bulk_buf[NEXTOR_BULK_HDR + 1U],
+                (unsigned)s_bulk_buf[NEXTOR_BULK_HDR + 2U],
+                (unsigned)s_bulk_buf[NEXTOR_BULK_HDR + 3U],
+                (unsigned)s_bulk_buf[NEXTOR_BULK_HDR
+                                     + (n * NEXTOR_SECTOR_SIZE) - 2U],
+                (unsigned)s_bulk_buf[NEXTOR_BULK_HDR
+                                     + (n * NEXTOR_SECTOR_SIZE) - 1U]);
+        if (RawDisk_WriteSectorsBulk (snap_lba, (uint16_t)n,
+                                       &s_bulk_buf[NEXTOR_BULK_HDR]) == 0U) {
+            s_mb.err = NEXTOR_ERR_IO;
+            printf ("[nx]   bulk write failed: %s\r\n",
+                    RawDisk_LastFailure ());
+            break;
+        }
+        /* Success: no result, exactly like the single WRITE. */
+        break;
+    }
+
+    case NEXTOR_CMD_READM: {
+        /* Revision 4's bulk read: ONE multi-block READ(10) for the whole
+         * run, the count*512 bytes published straight out of the staging
+         * buffer (the res machinery is pointer-based, so a 16 KiB answer
+         * needs no copy - res_r/res_end just point into s_bulk_buf). The
+         * header's LBA+count are consumed before the fill overwrites
+         * them, starting at offset 0. */
+        const uint32_t n = (uint32_t)s_bulk_buf[4];
+
+        if (RawDisk_IsPresent () == 0U) {
+            s_mb.err = NEXTOR_ERR_NO_MEDIA;
+            printf ("[nx]   no medium, bulk read rejected\r\n");
+            break;
+        }
+        if ((n == 0U) || (n > NEXTOR_BULK_MAX_SECTORS)) {
+            s_mb.err = NEXTOR_ERR_IO;
+            printf ("[nx]   bulk read rejected: count=%u\r\n",
+                    (unsigned)n);
+            break;
+        }
+        if (n == 1U) {
+            /* Same desync guard as WRITEM: the driver drains its OWN
+             * chunk sectors after DONE, so a 1-sector answer against a
+             * 2+-sector request would fill the rest of the kernel's
+             * buffer with the empty-FIFO 0xFF pattern - garbage the
+             * kernel then writes back. ERR sends it to the per-sector
+             * fallback instead. */
+            s_mb.err = NEXTOR_ERR_IO;
+            printf ("[nx]   bulk read DESYNC: count=1 (this driver "
+                    "never sends 1) - answering ERR for the "
+                    "per-sector fallback\r\n");
+            break;
+        }
+        if (RawDisk_ReadSectorsBulk (snap_lba, (uint16_t)n,
+                                     s_bulk_buf) == 0U) {
+            s_mb.err = NEXTOR_ERR_IO;
+            printf ("[nx]   bulk read failed: %s (present=%u "
+                    "sectors=%lu)\r\n",
+                    RawDisk_LastFailure (), (unsigned)RawDisk_IsPresent (),
+                    (unsigned long)RawDisk_SectorCount ());
+            break;
+        }
+        printf ("[nx]   bulk read lba=%lu n=%u head=%02x %02x "
+                "tail=%02x %02x\r\n",
+                (unsigned long)snap_lba, (unsigned)n,
+                (unsigned)s_bulk_buf[0], (unsigned)s_bulk_buf[1],
+                (unsigned)s_bulk_buf[(n * NEXTOR_SECTOR_SIZE) - 2U],
+                (unsigned)s_bulk_buf[(n * NEXTOR_SECTOR_SIZE) - 1U]);
+        if (snap_lba == 0U && s_mb.mbr_dumped == 0U) {
+            s_mb.mbr_dumped = 1U;
+            dump_mbr (s_bulk_buf, "read");
+        }
+        s_mb.res_r   = s_bulk_buf;
+        s_mb.res_end = s_bulk_buf + (n * NEXTOR_SECTOR_SIZE);
+        break;
+    }
+
     default:
         /* A breadcrumb, or a byte the driver should never have sent.
          *
@@ -1590,12 +1768,25 @@ void Nextor_WriteByte (uint16_t address, uint8_t value) {
              * exactly like "the value really was zero". */
             s_mb.argend = is_mark (cmd) ? (s_mb.args + NEXTOR_MARK_ARGC)
                                         : s_mb.args;
+            s_mb.argp   = s_mb.args;
         } else {
             s_mb.cmd    = cmd;
-            s_mb.argend = s_mb.args + s_cmd_args[cmd];
+            if ((cmd == NEXTOR_CMD_WRITEM)
+                || (cmd == NEXTOR_CMD_READM)) {
+                /* Bulk commands capture into s_bulk_buf, not args[]:
+                 * LBA(4) + count(1) land at the header positions and a
+                 * WRITE's data stage follows at NEXTOR_BULK_HDR, so the
+                 * SCSI layer gets the whole run contiguous. The sink
+                 * extension for the data stage happens where the header
+                 * completes - see the DATA case below. */
+                s_mb.argp   = s_bulk_buf;
+                s_mb.argend = s_bulk_buf + NEXTOR_BULK_HDR;
+            } else {
+                s_mb.argend = s_mb.args + s_cmd_args[cmd];
+                s_mb.argp   = s_mb.args;
+            }
         }
         s_mb.raw   = cmd;
-        s_mb.argp  = s_mb.args;
         /* Zero-argument commands (all but READ/WRITE) are complete the
          * moment the command byte lands - there is no DATA write to trip
          * the completion test in the branch below. seq is bumped here
@@ -1636,6 +1827,29 @@ void Nextor_WriteByte (uint16_t address, uint8_t value) {
             *p = value;
             s_mb.argp = ++p;
             if (p == end) {
+                /* WRITE-MULTI's data stage is dynamic: the header (LBA +
+                 * count) just completed, and the count now says how many
+                 * whole sectors follow. Extend the sink by count*512,
+                 * still bounded by the staging buffer: arming happens
+                 * only when the LAST data byte lands. */
+                if (s_mb.cmd == NEXTOR_CMD_WRITEM
+                    && end == s_bulk_buf + NEXTOR_BULK_HDR) {
+                    const uint8_t n = s_bulk_buf[4];
+                    if ((n >= 1U)
+                        && ((uint16_t)n <= NEXTOR_BULK_MAX_SECTORS)) {
+                        s_mb.argend = s_bulk_buf + NEXTOR_BULK_HDR
+                                    + (uint32_t)n * NEXTOR_SECTOR_SIZE;
+                        return;
+                    }
+                    /* Bad count: park the sink empty so the rest of the
+                     * burst is swallowed and the request never arms. The
+                     * driver's poll then times out and it falls back to
+                     * per-sector commands - the safe answer, because a
+                     * burst whose length nobody knows must never be
+                     * executed. */
+                    s_mb.argend = p;
+                    return;
+                }
                 s_mb.armed = 1U;
                 s_mb.seq++;
             }

@@ -157,6 +157,16 @@ uint8_t RawDisk_WriteSectors (uint32_t lba, uint32_t count,
 uint8_t RawDisk_WriteSectorTimed (uint32_t lba, const uint8_t *src,
                                  uint32_t *commit_ms);
 
+/* One multi-block WRITE(10)/READ(10) for a whole run, for the bulk
+ * mailbox commands: one SCSI command and one FTL commit for `count`
+ * sectors instead of one each. Buffer contract identical to the
+ * per-sector versions; one attempt, no internal fallback - the
+ * driver's per-sector path is the retry. Returns 1 on success. */
+uint8_t RawDisk_WriteSectorsBulk (uint32_t lba, uint16_t count,
+                                  const uint8_t *src);
+uint8_t RawDisk_ReadSectorsBulk (uint32_t lba, uint16_t count,
+                                 uint8_t *dst);
+
 #ifdef __cplusplus
 }
 #endif

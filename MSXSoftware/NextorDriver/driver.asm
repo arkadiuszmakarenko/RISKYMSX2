@@ -49,13 +49,13 @@
 ;   0x7FF4  ERR            0 none / 1 no medium / 2 I/O failed / 3 reserved
 ;   0x7FF5  VER            protocol revision byte
 ;
-; Protocol revision 3 ("RNX3"). Write the command byte to CMD, then its
+; Protocol revision 4 ("RNX4"). Write the command byte to CMD, then its
 ; arguments to DATA; when DONE appears in STATUS, read the answer by
 ; popping DATA the number of times the command produces. MB_POLL bounds
-; the wait, so a firmware that does not answer costs a timeout, never a
-; hang.
+; the wait (~2.9 s), so a firmware that does not answer costs a timeout,
+; never a hang.
 ;
-;   0x00 HANDSHAKE  ->      5 bytes: "RNX3" + revision
+;   0x00 HANDSHAKE  ->      5 bytes: "RNX4" + revision
 ;   0x01 CAPACITY   ->     12 bytes: the Nextor device parameter block
 ;   0x02 STATUS     <-      1 byte:  0 none / 1 ready / 2 changed
 ;   0x03 READ       <- LBA(4)              -> 512 bytes
@@ -63,6 +63,8 @@
 ;   0x05 ABORT      ->      nothing
 ;   0x06 STAPEEK    <-      1 byte, does NOT consume the changed latch
 ;   0x07 IDENT      ->     28 bytes: INQUIRY vendor(8) + product(20)
+;   0x08 WRITEM     <- LBA(4) + count(1) + count*512 -> nothing
+;   0x09 READM      <- LBA(4) + count(1) -> count*512 bytes
 ;
 ; No device byte on any command. There is one device, so the byte had
 ; nothing to select; dropping it is what makes revision 3 rather than 2,
@@ -70,14 +72,19 @@
 ; from driving this firmware (or the reverse) and silently decoding every
 ; argument in the wrong place.
 ;
-; ONE SECTOR PER COMMAND, and deliberately so. The cost of a mailbox
-; command is dominated by the per-BYTE cart-bus transfer, not by the
-; USB/SCSI command overhead it would amortise: 512 Z80 writes out and
-; 512 reads back is roughly 4 ms on the bus, against a CBW+CSW round trip
-; in the low hundreds of microseconds. Widening the command to 4 or 8
-; sectors would save the small part and complicate the firmware's IRQ
-; capture path for nothing, so the mailbox stays exactly one sector wide
-; and READ_WRITE loops.
+; Revision 3 was ONE SECTOR PER COMMAND, and deliberately so: the per-BYTE
+; cart-bus transfer (~4 ms per 512) dominated a CBW+CSW round trip
+; measured in hundreds of microseconds, so a wider command saved only the
+; small part. That arithmetic inverted on the test stick this firmware
+; was tuned against: its FTL charges its WRITE(10) commit 210-1075 ms PER
+; SCSI COMMAND (rare stalls past 4.5 s), so one commit per sector made a
+; file copy crawl at ~1 sector per second while the bus transfer was a
+; rounding error. Revision 4 adds the bulk pair: up to MB_BULK_MAX
+; sectors in ONE command, sized so the ~125 ms data push plus the
+; firmware's single ~2 s attempt answers inside the ~2.9 s MB_POLL
+; window. The one-sector commands remain as the FALLBACK - on any bulk
+; failure READ_WRITE retries the same range sector by sector, and they
+; are the whole protocol for a revision-3 pair.
 ;
 ;-----------------------------------------------------------------------------
 ; The ROM driver constraint
@@ -145,6 +152,8 @@ MB_CAPACITY	equ	01h
 MB_STATUS	equ	02h
 MB_READ		equ	03h
 MB_WRITE	equ	04h
+MB_WRITEM	equ	08h		;bulk: LBA(4)+count(1)+count*512 -> none
+MB_READM	equ	09h		;bulk: LBA(4)+count(1) -> count*512
 MB_ABORT	equ	05h
 MB_STAPEEK	equ	06h
 MB_IDENT	equ	07h
@@ -212,6 +221,8 @@ MB_MK_DQ3_DRIVES     equ 20h ; B = available drive count at driver query 3
 MB_MK_DQ3_FLAGS      equ 21h ; B = input flags at driver query 3
 MB_MK_DQ4_FLAGS      equ 22h ; B = input flags at driver query 4
 MB_MK_DQ5_MAXDEV     equ 23h ; B = maximum device count returned
+MB_MK_RW_BULKW       equ 24h ; B = sectors in the attempted bulk write
+MB_MK_RW_BULKR       equ 25h ; B = sectors in the attempted bulk read
 
 ;answer sizes. CAPACITY is the Nextor device parameter block verbatim;
 ; IDENT is INQUIRY vendor + product, both space-padded by the firmware so
@@ -226,6 +237,14 @@ MB_IDENT_LEN	equ	MB_IDENT_VENDOR_LEN + MB_IDENT_MODEL_LEN
 ;mailbox's transfer width; the firmware's READ CAPACITY handling rejects
 ;a stick whose block size is anything else, so the two cannot disagree.
 MB_SECTOR_SIZE	equ	200h	;512
+
+;The firmware's bulk cap (nextor.h NEXTOR_BULK_MAX_SECTORS). 32 sectors
+;= 16 KiB per bulk command: the data push is ~125 ms at ~8 us/byte and
+;the firmware's single WRITE(10) attempt is bounded at ~2 s, so the
+;answer always lands inside the ~2.9 s MB_POLL window even on the slow
+;test stick. Must match nextor.h - a mismatch means every bulk command
+;times out and falls back, which still works, but silently.
+MB_BULK_MAX	equ	20h		;32 sectors per bulk command
 
 ;Device numbers. Both the kernel and driver query 5 count up from 1, so
 ;MB_DEVICE_COUNT is a count AND a maximum, and it must equal
@@ -243,15 +262,17 @@ MBERR_IO	equ	02h
 MB_MAGIC0	equ	"R"
 MB_MAGIC1	equ	"N"
 MB_MAGIC2	equ	"X"
-MB_MAGIC3	equ	"3"
+MB_MAGIC3	equ	"4"		;the revision character - moves with the
+					;protocol revision below
 
 ;protocol revision this driver is written against. The firmware answers
 ;the handshake with ITS revision byte and MB_EXPECT compares it, so a
 ;driver built against one revision talking to a firmware built against
 ;another is rejected at boot - loudly, with the kernel skipping this
 ;driver - instead of answering every command for the wrong device.
-;Must equal NEXTOR_VERSION in firmware/User/nextor.h.
-MB_PROTOCOL_V3	equ	03h
+;Must equal NEXTOR_VERSION in firmware/User/nextor.h. Revision 4 adds
+;the bulk transfer pair (0x08 WRITEM / 0x09 READM).
+MB_PROTOCOL_V4	equ	04h
 
 ;-----------------------------------------------------------------------------
 ; ROM driver boilerplate
@@ -1441,9 +1462,19 @@ RW_DEV_OK:
 					;answer, and the answer was "present"
 
 RW_LOOP:
-	ld	a,(iy+2)		;sectors still to do
-	or	a
-	jp	z,RW_OUT_OK
+	ld	a,(iy+2)		;sectors still to do. Bit 7 is not a
+	and	7Fh			;count: it is the "bulk already failed
+	jp	z,RW_OUT_OK		;once this request" latch (see below)
+	cp	2			;bulk only pays for 2+ sectors
+	jr	c,RW_RW1
+	ld	a,(iy+2)		;the latch itself
+	and	80h
+	jr	nz,RW_RW1		;bulk failed once: per-sector from here
+	ld	a,(iy+0)		;Cy straight out of the caller's flags
+	and	1
+	jp	z,RW_MANY_READ		;the bulk pair; ONE mailbox command
+	jp	RW_MANY_WRITE		;covers up to MB_BULK_MAX sectors
+RW_RW1:
 	ld	a,(iy+0)		;Cy straight out of the caller's flags
 	and	1
 	or	a			;again: the frame holds no cached copy
@@ -1620,6 +1651,241 @@ IFDEF RW_PROBES
 	pop	de
 ENDIF
 
+;--- Bulk write. One WRITE-MULTI mailbox command covers up to MB_BULK_MAX
+;    sectors: the firmware runs ONE multi-block WRITE(10) for the whole
+;    chunk, and a flash stick charges its commit (measured 210-1075 ms on
+;    the test stick, rare stalls past 4.5 s) once per SCSI COMMAND, not
+;    per sector - so N sectors pay one commit instead of N.
+;
+;    The chunk is sized so the whole exchange - the ~125 ms data push plus
+;    the firmware's single ~2 s attempt - answers inside the ~2.9 s
+;    MB_POLL window: DONE or ERR lands while this driver is still
+;    polling. On any failure the fallback IS the retry: DE is restored
+;    to the chunk start, bit 7 of (iy+2) latches "no more bulk in this
+;    request" (the ROM driver has no statics, so the latch rides the one
+;    frame byte whose top bit a sector count can never need: the kernel's
+;    B is 8-bit), and the proven per-sector loop takes over from the same
+;    sector. A latched latch never retries bulk within the request - the
+;    only failure that repeats is a slow stick, and per-sector commands
+;    are exactly the slow stick's worst case, so one bulk failure per
+;    request is the right budget.
+;
+;    The chunk count rides the stack on top of the saved DE: a push af
+;    leaves A at SP+1, and that byte is both the count byte MB_PUSH
+;    reads back out of memory (a ROM driver has nowhere static to put
+;    it) and the count the success path pops back into A, while the
+;    saved DE underneath is the failure path's restore anchor.
+;
+;    Register discipline is the frame's throughout: IY = frame, IX = &the
+;    sector-number copy, DE = the live buffer pointer (the one pair every
+;    mailbox primitive preserves).
+
+RW_MANY_WRITE:
+	ld	a,(iy+2)
+	and	7Fh			;remaining, without the latch bit
+	cp	MB_BULK_MAX+1
+	jr	c,RW_MW_CNT
+	ld	a,MB_BULK_MAX		;cap the chunk at the firmware's bound
+RW_MW_CNT:
+	ld	b,a			;the marker payload: the driver's chunk
+	ld	a,MB_MK_RW_BULKW
+	call	MB_MARK_BULK		;REAL: the log must show the chunk the
+					;driver computed, next to the count
+					;the firmware captures
+	ld	a,(iy+2)			;MB_MARK_BULK trashed A: recompute
+	and	7Fh
+	cp	MB_BULK_MAX+1
+	jr	c,RW_MW_CNT2
+	ld	a,MB_BULK_MAX
+RW_MW_CNT2:
+	push	de			;the chunk start, for the fallback
+	push	af			;[chunk|F] on top of it: the count
+					;byte MB_PUSH reads back out of
+					;memory (a ROM driver has no statics)
+	push	ix
+	pop	hl			;HL = &our sector number copy
+	ld	a,MB_WRITEM
+	ld	b,4
+	call	MB_SEND			;command + LBA(4)
+	ld	hl,1
+	add	hl,sp			;HL = &the pushed chunk byte (push af
+					;leaves A at SP+1, F at SP)
+	ld	bc,1
+	call	MB_PUSH			;the count byte; the firmware now knows
+					;how much data follows and armed nothing
+	ld	hl,1
+	add	hl,sp
+	ld	a,(hl)			;the chunk count again
+	ld	l,a
+	ld	h,0
+	add	hl,hl			;x2
+	add	hl,hl			;x4
+	add	hl,hl			;x8
+	add	hl,hl			;x16
+	add	hl,hl			;x32
+	add	hl,hl			;x64
+	add	hl,hl			;x128
+	add	hl,hl			;x256
+	add	hl,hl			;x512
+	push	hl
+	pop	bc			;BC = chunk*512
+	push	de
+	pop	hl			;HL = the chunk's data source
+	call	MB_PUSH			;the data burst; HL ends one chunk on
+	push	hl
+	pop	de			;DE follows it (the success path)
+	call	MB_POLL			;Cy=1 timeout; A = status otherwise
+	jr	c,RW_MW_FAIL
+	and	MBST_ERR
+	jr	nz,RW_MW_FAIL
+	pop	af			;A = chunk
+	pop	hl			;discard the chunk-start DE; the
+					;success path needs neither back
+	ld	c,a			;C = chunk for the advance loop
+	jp	RW_ADV_BULK
+RW_MW_FAIL:
+	pop	bc			;discard [chunk|F] (BC scratch)
+	pop	de			;DE = the chunk start again
+	ld	a,(iy+2)
+	or	80h			;latch: no more bulk this request
+	ld	(iy+2),a
+	jp	RW_ONE_WRITE		;the fallback is the retry
+
+;--- Bulk read. One READ-MULTI mailbox command: the firmware answers with
+;    count*512 bytes staged whole, and the drain below moves them into
+;    the caller's buffer one 512-byte DI window at a time - the same
+;    window the single-sector path uses, just not interleaved with a
+;    per-sector command each time. On failure DE has not moved (nothing
+;    was drained), so no restore is needed and the fallback is per-sector
+;    reads from the same LBA.
+
+RW_MANY_READ:
+	ld	a,(iy+2)
+	and	7Fh
+	cp	MB_BULK_MAX+1
+	jr	c,RW_MR_CNT
+	ld	a,MB_BULK_MAX
+RW_MR_CNT:
+	ld	b,a
+	ld	a,MB_MK_RW_BULKR
+	call	MB_MARK_BULK		;REAL: as the write-side marker
+	ld	a,(iy+2)			;MB_MARK_BULK trashed A: recompute
+	and	7Fh
+	cp	MB_BULK_MAX+1
+	jr	c,RW_MR_CNT2
+	ld	a,MB_BULK_MAX
+RW_MR_CNT2:
+	push	af			;[chunk|F] (A at SP+1, F at SP)
+	push	ix
+	pop	hl			;HL = &our sector number copy
+	ld	a,MB_READM
+	ld	b,4
+	call	MB_SEND			;command + LBA(4)
+	ld	hl,1
+	add	hl,sp			;HL = &the pushed chunk byte
+	ld	bc,1
+	call	MB_PUSH			;the count byte
+	call	MB_POLL			;the whole answer is staged before
+					;DONE - the drain needs all of it
+	jr	c,RW_MR_FAIL
+	ld	a,(MBOX_STAT)
+	and	MBST_ERR
+	jr	nz,RW_MR_FAIL
+	pop	af			;A = chunk; stack balanced
+	ld	c,a			;C = the drain loop's sector counter
+RW_MR_DRAIN:
+	di
+	;The single-sector path's destination range check, every 512 bytes:
+	;the drain is a store loop, and a destination inside 4000h-7FFFh
+	;would write into the mailbox at 7FF0h and turn sector data into
+	;invalid commands.
+	ld	a,d
+	cp	40h
+	jr	c,RW_MR_BUF
+	cp	80h
+	jr	nc,RW_MR_BUF
+	ei
+	jr	RW_MR_BADBUF
+RW_MR_BUF:
+	ld	hl,MBOX_DATA
+	ld	b,64			;64 x 8 = 512 bytes
+RW_MR_DL:
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	djnz	RW_MR_DL
+	ei
+	dec	c
+	jr	nz,RW_MR_DRAIN
+	;The chunk count once more for the advance loop - recomputed, like
+	;everywhere in this driver, because no register is free to carry it
+	;across the drain.
+	ld	a,(iy+2)
+	and	7Fh
+	cp	MB_BULK_MAX+1
+	jr	c,RW_MR_AC
+	ld	a,MB_BULK_MAX
+RW_MR_AC:
+	ld	c,a
+	jr	RW_ADV_BULK
+RW_MR_FAIL:
+	pop	af			;stack balanced
+	ld	a,(iy+2)
+	or	80h
+	ld	(iy+2),a		;latch: no more bulk this request
+	jp	RW_ONE_READ
+RW_MR_BADBUF:
+	ld	b,e
+	ld	a,MB_MK_RW_BADBUFL
+	call	MB_MARK
+	ld	b,d
+	ld	a,MB_MK_RW_BADBUFH
+	call	MB_MARK
+	ld	a,.DISK
+	jp	RW_OUT
+
+;--- Advance the frame by C sectors after a successful bulk chunk: the
+;    32-bit sector-number ripple once per sector and the outstanding
+;    counter down once per sector. The latch bit is clear on every path
+;    that reaches this (bulk succeeded), so the plain decrement is exact.
+
+RW_ADV_BULK:
+	inc	(ix+0)
+	jr	nz,RW_AB2
+	inc	(ix+1)
+	jr	nz,RW_AB2
+	inc	(ix+2)
+	jr	nz,RW_AB2
+	inc	(ix+3)
+RW_AB2:
+	ld	a,(iy+2)
+	dec	a
+	ld	(iy+2),a
+	dec	c
+	jr	nz,RW_ADV_BULK
+	jp	RW_LOOP
+
 RW_SECTOR_OK:
 	;32-bit increment of the sector number through IX, little-endian, so
 	;the low byte first. IY is deliberately not touched: it is the frame.
@@ -1632,8 +1898,18 @@ RW_SECTOR_OK:
 	jr	nz,RW_ADV_DONE
 	inc	(ix+3)
 RW_ADV_DONE:
+	;The outstanding counter decrements with the latch bit preserved:
+	;bit 7 of (iy+2) is "bulk failed once this request", and dropping it
+	;here would re-arm bulk for the next sector and turn every later
+	;failure back into a ~2.9 s timeout.
 	ld	a,(iy+2)
-	dec	a
+	and	80h			;A = the latch, if set
+	ld	c,a			;C is scratch here: every primitive in
+					;the transfer paths trashes BC
+	ld	a,(iy+2)
+	and	7Fh
+	dec	a			;the count; was >= 1, cannot wrap
+	or	c			;recombine: (count-1) | latch
 	ld	(iy+2),a
 	jp	RW_LOOP
 
@@ -1692,9 +1968,11 @@ RW_OUT2:
 	;Stack: AF = the result code. A = sectors actually transferred, which
 	;is requested minus outstanding: the sector in flight when the error
 	;hit does not count, because its data never made it back to the caller.
+	ld	a,(iy+2)		;sectors still outstanding
+	and	7Fh			;mask the bulk latch out of it
+	ld	c,a
 	ld	a,(iy+3)		;the sector count as the caller gave it
-	ld	c,(iy+2)		;sectors still outstanding
-	or	a
+	or	a			;Cy=0 for the subtraction
 	sub	c
 	ld	b,a
 	pop	af
@@ -1842,6 +2120,26 @@ MB_FRAME_TRACE:
 	ld	(MBOX_DATA),a
 	ei
 	call	MB_POLL
+	ret
+
+;--- MB_MARK_BULK: a REAL fire-and-forget marker for the two bulk-chunk
+;    sites only. MB_MARK stays a no-op so the old per-sector breadcrumb
+;    storm cannot return, but the bulk chase needs the driver's own chunk
+;    count in the log next to the WRITEM the firmware captures: if the
+;    marker says 2 and the WRITEM arrives with count=1, the count byte
+;    corrupted between the Z80 push and the firmware's EXTI store, which
+;    no amount of ROM reading can prove or disprove from either side.
+;    Fire-and-forget on purpose: no MB_POLL, because the next real
+;    request is the bulk command itself and DONE for the marker would be
+;    overwritten by it anyway - the firmware logs the marker's argument
+;    when it dispatches it (log_request's marker branch).
+;    In: A = marker index, B = payload. Trashes AF only.
+
+MB_MARK_BULK:
+	add	a,20h
+	ld	(MBOX_CMD),a
+	ld	a,b
+	ld	(MBOX_DATA),a
 	ret
 
 ;--- MB_SEND: send a command byte plus B argument bytes copied from (HL).
@@ -2333,11 +2631,11 @@ MB_ZERO_LBA:
 ;callback in DE.
 MB_EXPECT:
 	db	MB_MAGIC0,MB_MAGIC1,MB_MAGIC2,MB_MAGIC3
-	db	MB_PROTOCOL_V3
+	db	MB_PROTOCOL_V4
 
 INIT_MSG:
 	db	13,10
-	db	"  RISKYMSX2 USB drive driver 1.0.1"
+	db	"  RISKYMSX2 USB drive driver 1.1.4"
 	db	13,10,13,10,0
 
 MSG_MBR_P1:

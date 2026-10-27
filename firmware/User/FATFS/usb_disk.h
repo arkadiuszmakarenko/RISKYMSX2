@@ -84,6 +84,17 @@ uint8_t usb_scsi_write_sector (uint32_t lba, const uint8_t *buf, uint32_t block_
 uint8_t usb_scsi_write_sector_timed (uint32_t lba, const uint8_t *buf,
                                      uint32_t block_size,
                                      uint32_t *commit_ms);
+
+/* One multi-block WRITE(10)/READ(10): a single CBW covering `count`
+ * blocks, one data stage, one CSW wait - one FTL commit for the whole
+ * run instead of one per sector. Single attempt: the caller's fallback
+ * (per-sector commands) is the retry. Used by the bulk mailbox
+ * commands; on failure they leave the BOT pipe clean (one MSC reset
+ * when the command never completed). Returns 0 on success. */
+uint8_t usb_scsi_write_blocks (uint32_t lba, const uint8_t *buf,
+                               uint32_t block_size, uint16_t count);
+uint8_t usb_scsi_read_blocks (uint32_t lba, uint8_t *buf,
+                              uint32_t block_size, uint16_t count);
 uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len);
 uint8_t usb_scsi_inquiry (uint8_t *buf, uint16_t len);
 uint8_t usb_scsi_test_unit_ready (void);

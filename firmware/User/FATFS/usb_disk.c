@@ -535,6 +535,29 @@ void ClearUSB (void) {
 /* SCSI commands (READ CAPACITY, READ, REQUEST SENSE)                        */
 /* ------------------------------------------------------------------------ */
 
+/* Probe staging buffer. The READ CAPACITY(10)/(16) responses are supposed
+ * to be 8 and 32 bytes respectively, but a misbehaving stick has been seen
+ * returning 12 or 18 bytes to CAP10 - the hardware happily copies the
+ * full hardware RX_LEN into the destination the caller passes, and a
+ * stack cap_buf[8] would be overrun into the caller's res, plen, and
+ * the next bytes of the stack frame (with a small-but-real chance that
+ * the clobber makes the function look like a SUCCESS with a bogus
+ * capacity). 512 bytes covers any single bulk IN packet and gives the
+ * probe a place to land the answer safely; the real cap_buf is then
+ * filled with a bounded copy. The buffer is static, not on the stack,
+ * precisely so no length a broken stick can send overruns the
+ * caller's frame. Do NOT move this to a local without re-checking the
+ * length discipline in USBHSH_GetEndpData. */
+static uint8_t s_probe_buf[512];
+
+/* Returned by the probe when a misbehaving stick gives a wrong-length
+ * CAPACITY(10) answer (12 or 18 bytes instead of 8). Distinct from
+ * "transient I/O failure" so the retrying loop in usb_scsi_read_capacity
+ * can break out instead of wasting the 5-retry budget on a permanent
+ * fault - a stick that gives the wrong length once will give the wrong
+ * length every time. */
+#define USB_PROBE_LEN_MISMATCH   4U
+
 static uint8_t scsi_read_capacity10_once (uint32_t *block_count,
                                          uint32_t *block_size) {
     CBW_t cbw;
@@ -560,17 +583,27 @@ static uint8_t scsi_read_capacity10_once (uint32_t *block_count,
 
     Delay_Ms (2);
     plen = 8;
-    res = bulk_in_read_retry (cap_buf, &plen, 40);
+    /* Read into the static staging buffer, not the 8-byte stack cap_buf:
+     * a broken stick that returns more than 8 bytes (12 or 18 observed
+     * in practice) would otherwise overrun the caller's frame via the
+     * uncapped memcpy inside USBHSH_GetEndpData. The copy below is
+     * explicitly bounded to the real buffer size. */
+    res = bulk_in_read_retry (s_probe_buf, &plen, 40);
     if (res != ERR_SUCCESS) {
         printf ("USB: CAP10 data stage failed r=%02x plen=%u\r\n",
                 (unsigned)res, (unsigned)plen);
         return 2;
     }
-    if (plen != 8) {
+    if (plen != 8U) {
         printf ("USB: CAP10 short read plen=%u (expected 8)\r\n",
                 (unsigned)plen);
-        return 2;
+        /* A misbehaving stick is giving the wrong length for every
+         * CAP10 attempt - do not waste the 5-retry budget, signal a
+         * permanent fault to the caller so it can break out and try
+         * CAP16 instead. */
+        return USB_PROBE_LEN_MISMATCH;
     }
+    memcpy (cap_buf, s_probe_buf, 8U);
     Delay_Ms (2);
     res = usb_recv_csw (&csw, cbw.dCBWTag);
     if (res != ERR_SUCCESS) {
@@ -615,8 +648,13 @@ static uint8_t scsi_read_capacity16_once (uint32_t *block_count,
     res = usb_send_cbw (&cbw);
     if (res != ERR_SUCCESS) return 1;
     Delay_Ms (1);
-    res = bulk_in_read_retry (cap_buf, &plen, 40);
+    /* Same staging-buffer discipline as the CAP10 path: USBHSH_GetEndpData
+     * does not cap the memcpy at the caller's buffer size, so a wrong-length
+     * reply (a CAP10 answer, padding, sense data) would overrun the
+     * stack 32-byte cap_buf. Read into s_probe_buf, then copy. */
+    res = bulk_in_read_retry (s_probe_buf, &plen, 40);
     if (res != ERR_SUCCESS || plen < 12) return 2;
+    memcpy (cap_buf, s_probe_buf, (plen > 32U) ? 32U : plen);
     Delay_Ms (1);
     /* A successful OUT only means the block reached the device. Cheap flash
      * sticks may spend hundreds of milliseconds programming it before the
@@ -683,6 +721,21 @@ uint8_t usb_scsi_read_capacity (uint32_t *block_count, uint32_t *block_size) {
     for (int attempt = 0; attempt < 5; attempt++) {
         uint8_t r = scsi_read_capacity10_once (block_count, block_size);
         if (r == 0) return 0;
+        if (r == USB_PROBE_LEN_MISMATCH) {
+            /* The stick answers CAP10 with the wrong length every time,
+             * which means its bulk pipe is in a confused state (a CAP10
+             * reply should be exactly 8 bytes; 12 or 18 is usually a
+             * stuck sense-data or padding reply). The proven fix is a
+             * BOT reset + settle delay: the terminal's USB manager,
+             * which runs the same probe code but later in boot when the
+             * stick has had time to wake up, succeeds for exactly this
+             * reason, and what unblocks it is the pipe being reset.
+             * Without the reset the CAP16 attempt below usually fails
+             * the same way. */
+            (void)msc_mass_storage_reset ();
+            Delay_Ms (200);
+            break;
+        }
         uint8_t sense[18] = {0};
         (void)usb_scsi_request_sense (sense, sizeof(sense));
         Delay_Ms (50);     /* let the stick finish settling */
@@ -1033,6 +1086,200 @@ uint8_t usb_scsi_write_sector_timed (uint32_t lba, const uint8_t *buf,
         *commit_ms = (uint32_t)tries;
     }
     return r;
+}
+
+/* One multi-block WRITE(10): a single CBW covering `count` blocks, the
+ * whole data stage in USBHS_BULK_MAX_PACKET chunks, one CSW wait. This
+ * is the firmware half of the bulk mailbox command: a flash stick
+ * charges its commit - measured 210 ms to 1075 ms on the test stick -
+ * once per SCSI COMMAND, not per sector, so `count` blocks in one
+ * command pay ONE commit instead of `count`.
+ *
+ * Deliberately ONE attempt with the write budget: the caller is the
+ * bulk mailbox command, whose DONE has to land inside the driver's
+ * ~2.9 s MB_POLL window; its retry is the driver's per-sector fallback.
+ * On a failure that leaves the BOT pipe mid-command (CBW sent but never
+ * answered, data stage refused) exactly one MSC reset runs before
+ * returning, because the per-sector fallback needs a clean pipe. After
+ * a clean CHECK CONDITION the pipe is already idle, so the reset is
+ * skipped and the sense data is read instead. Returns 0 on success. */
+uint8_t usb_scsi_write_blocks (uint32_t lba, const uint8_t *buf,
+                               uint32_t block_size, uint16_t count) {
+    CBW_t cbw;
+    CSW_t csw = {0};
+    uint8_t  res;
+    uint32_t total      = (uint32_t)count * block_size;
+    uint32_t bytes_sent = 0;
+    uint16_t tries      = 0U;
+
+    memset (&cbw, 0, sizeof (cbw));
+    cbw.dCBWSignature          = 0x43425355;
+    cbw.dCBWTag                = 0xCAFEBA5E;
+    cbw.dCBWDataTransferLength = total;
+    cbw.bmCBWFlags             = 0x00;  /* OUT - host to device */
+    cbw.bCBWLUN                = 0;
+    cbw.bCBWCBLength           = 10;
+    cbw.CBWCB[0] = 0x2A;  /* WRITE(10) */
+    cbw.CBWCB[2] = (lba >> 24) & 0xFF;
+    cbw.CBWCB[3] = (lba >> 16) & 0xFF;
+    cbw.CBWCB[4] = (lba >> 8)  & 0xFF;
+    cbw.CBWCB[5] = (lba)       & 0xFF;
+    cbw.CBWCB[7] = (uint8_t)(((uint32_t)count >> 8) & 0xFF);
+    cbw.CBWCB[8] = (uint8_t)((uint32_t)count & 0xFF);
+
+    res = usb_send_cbw (&cbw);
+    if (res != ERR_SUCCESS) {
+        printf ("USB: WRM lba=%lu+%u CBW FAIL r=%02x\r\n",
+                (unsigned long)lba, (unsigned)count, (unsigned)res);
+        return 1;
+    }
+
+    /* Data stage: the same chunk/stall-clear loop as the single-block
+     * path, just walked to `total` instead of one block. */
+    while (bytes_sent < total) {
+        uint16_t chunk = (uint16_t)((total - bytes_sent)
+                                    > USBHS_BULK_MAX_PACKET)
+                       ? (uint16_t)USBHS_BULK_MAX_PACKET
+                       : (uint16_t)(total - bytes_sent);
+        int out_retries = 0;
+        do {
+            res = USBHSH_SendEndpData (usb_out_ep, &out_tog,
+                                       buf + bytes_sent, chunk);
+            if (res == ERR_SUCCESS) break;
+            if (res == MSC_ERR_STALL) {
+                uint8_t ep0 = RootHubDev[DEF_USB_PORT].bEp0MaxPks;
+                (void)USBHSH_ClearEndpStall (ep0, usb_out_ep);
+                out_tog = 0;
+                Delay_Ms (2);
+            } else {
+                Delay_Ms (1);
+            }
+            if (++out_retries >= 20) break;
+        } while (res != ERR_SUCCESS);
+        if (res != ERR_SUCCESS) {
+            printf ("USB: WRM lba=%lu+%u off=%lu OUT FAIL r=%02x "
+                    "tries=%u\r\n",
+                    (unsigned long)lba, (unsigned)count,
+                    (unsigned long)bytes_sent, (unsigned)res,
+                    (unsigned)out_retries);
+            (void)msc_mass_storage_reset ();
+            return 2;
+        }
+        bytes_sent += chunk;
+    }
+
+    res = usb_recv_csw_wait (&csw, cbw.dCBWTag, WR10_CSW_MAX_TRIES,
+                             &tries);
+    if (res != ERR_SUCCESS) {
+        printf ("USB: WRM lba=%lu+%u CSW rc=%02x after ~%u polls\r\n",
+                (unsigned long)lba, (unsigned)count, (unsigned)res,
+                (unsigned)WR10_CSW_MAX_TRIES);
+        (void)msc_mass_storage_reset ();
+        return 3;
+    }
+    if (tries > 100U) {
+        printf ("USB: WRM lba=%lu+%u CSW after ~%u ms (FTL commit "
+                "delay)\r\n",
+                (unsigned long)lba, (unsigned)count, (unsigned)tries);
+    }
+    if (csw.bCSWStatus != 0) {
+        /* Clean CHECK CONDITION: the pipe is idle, so REQUEST SENSE is
+         * legal and is the diagnosis; no BOT reset needed. */
+        uint8_t sense[18] = {0};
+        (void)usb_scsi_request_sense (sense, sizeof(sense));
+        printf ("USB: WRM lba=%lu+%u CSW status=%u sense key=%02x "
+                "asc=%02x ascq=%02x\r\n",
+                (unsigned long)lba, (unsigned)count,
+                (unsigned)csw.bCSWStatus,
+                (unsigned)(sense[2] & 0x0FU),
+                (unsigned)sense[12], (unsigned)sense[13]);
+        return 4;
+    }
+    return 0;
+}
+
+/* One multi-block READ(10) into `buf`: single CBW, the data stage in
+ * USBHS_BULK_MAX_PACKET chunks, then the CSW wait with the read path's
+ * patience (a read can arrive while an orphaned write commit from a
+ * timed-out command is still grinding, so the same ~2 s budget as the
+ * single-sector read applies). One attempt; on a failure that leaves
+ * the pipe mid-command one MSC reset runs so the caller's fallback
+ * (per-sector commands) starts clean. Returns 0 on success. */
+uint8_t usb_scsi_read_blocks (uint32_t lba, uint8_t *buf,
+                              uint32_t block_size, uint16_t count) {
+    CBW_t cbw;
+    CSW_t csw;
+    uint8_t  res;
+    uint32_t transfer_len   = (uint32_t)count * block_size;
+    uint32_t bytes_received = 0;
+    int      cbw_send_retries = 0;
+    int      csw_retries = 0;
+
+    memset (&cbw, 0, sizeof (cbw));
+    cbw.dCBWSignature          = 0x43425355;
+    cbw.dCBWTag               = 0xCAFEBABE;
+    cbw.dCBWDataTransferLength = transfer_len;
+    cbw.bmCBWFlags            = 0x80;  /* IN */
+    cbw.bCBWLUN               = 0;
+    cbw.bCBWCBLength          = 10;
+    cbw.CBWCB[0] = 0x28;  /* READ(10) */
+    cbw.CBWCB[2] = (lba >> 24) & 0xFF;
+    cbw.CBWCB[3] = (lba >> 16) & 0xFF;
+    cbw.CBWCB[4] = (lba >> 8)  & 0xFF;
+    cbw.CBWCB[5] = (lba)       & 0xFF;
+    cbw.CBWCB[7] = (uint8_t)(((uint32_t)count >> 8) & 0xFF);
+    cbw.CBWCB[8] = (uint8_t)((uint32_t)count & 0xFF);
+
+    do {
+        res = usb_send_cbw (&cbw);
+        if (res == ERR_SUCCESS) break;
+        Delay_Ms (1);
+        cbw_send_retries++;
+    } while (cbw_send_retries < 20);
+    if (res != ERR_SUCCESS) {
+        printf ("USB: RDM lba=%lu+%u CBW FAIL r=%02x\r\n",
+                (unsigned long)lba, (unsigned)count, (unsigned)res);
+        return 1;
+    }
+
+    while (bytes_received < transfer_len) {
+        uint16_t plen = (uint16_t)((transfer_len - bytes_received)
+                                   > USBHS_BULK_MAX_PACKET)
+                      ? (uint16_t)USBHS_BULK_MAX_PACKET
+                      : (uint16_t)(transfer_len - bytes_received);
+        int nak_retries = 0;
+        do {
+            res = USBHSH_GetEndpData (usb_in_ep, &in_tog,
+                                      buf + bytes_received, &plen);
+            if (res == ERR_SUCCESS) break;
+            Delay_Ms (1);
+            if (++nak_retries >= 40) break;
+        } while (res != ERR_SUCCESS);
+        if (res != ERR_SUCCESS || plen == 0) {
+            printf ("USB: RDM lba=%lu+%u off=%lu NAK LIMIT r=%02x\r\n",
+                    (unsigned long)lba, (unsigned)count,
+                    (unsigned long)bytes_received, (unsigned)res);
+            (void)msc_mass_storage_reset ();
+            return 2;
+        }
+        bytes_received += plen;
+    }
+
+    do {
+        res = usb_recv_csw_wait (&csw, cbw.dCBWTag, 100U,
+                                 (uint16_t *)0);
+        if (res == ERR_SUCCESS && csw.bCSWStatus == 0) break;
+        Delay_Ms (1);
+        csw_retries++;
+    } while (csw_retries < 20);
+    if (res != ERR_SUCCESS || csw.bCSWStatus != 0) {
+        printf ("USB: RDM lba=%lu+%u CSW FAIL r=%02x st=%u tries=%u\r\n",
+                (unsigned long)lba, (unsigned)count, (unsigned)res,
+                (unsigned)csw.bCSWStatus, (unsigned)csw_retries);
+        (void)msc_mass_storage_reset ();
+        return 3;
+    }
+    return 0;
 }
 
 uint8_t usb_scsi_request_sense (uint8_t *buf, uint16_t len) {

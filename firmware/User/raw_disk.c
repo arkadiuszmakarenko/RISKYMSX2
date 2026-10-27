@@ -399,3 +399,57 @@ uint8_t RawDisk_WriteSectorTimed (uint32_t lba, const uint8_t *src,
     }
     return 1U;
 }
+
+/* Single multi-block WRITE(10) for a whole run, for the bulk mailbox
+ * command.  `src` must hold count * RAW_DISK_SECTOR_SIZE bytes, exactly
+ * like RawDisk_WriteSectors - only the SCSI shape differs (one command
+ * for the run, one FTL commit), not the buffer contract.  One attempt,
+ * no per-sector fallback: the driver's fallback is the retry. */
+uint8_t RawDisk_WriteSectorsBulk (uint32_t lba, uint16_t count,
+                                  const uint8_t *src) {
+    s_last_failure = "";
+
+    if (src == (const uint8_t *)0) {
+        s_last_failure = "null source buffer";
+        return 0U;
+    }
+    if (RawDisk_IsPresent () == 0U) {
+        s_last_failure = "no medium (stick not enumerated, or not probed yet)";
+        return 0U;
+    }
+    if (range_ok (lba, count) == 0U) {
+        s_last_failure = "LBA out of range (check the reported capacity)";
+        return 0U;
+    }
+    if (usb_scsi_write_blocks (lba, src, RAW_DISK_SECTOR_SIZE, count) != 0U) {
+        s_last_failure = "SCSI WRITE(10) failed (see the USB: lines above)";
+        return 0U;
+    }
+    return 1U;
+}
+
+/* Single multi-block READ(10) for a whole run, for the bulk mailbox
+ * command.  `dst` must have room for count * RAW_DISK_SECTOR_SIZE
+ * bytes.  One attempt; the driver's fallback is the retry. */
+uint8_t RawDisk_ReadSectorsBulk (uint32_t lba, uint16_t count,
+                                 uint8_t *dst) {
+    s_last_failure = "";
+
+    if (dst == (uint8_t *)0) {
+        s_last_failure = "null destination buffer";
+        return 0U;
+    }
+    if (RawDisk_IsPresent () == 0U) {
+        s_last_failure = "no medium (stick not enumerated, or not probed yet)";
+        return 0U;
+    }
+    if (range_ok (lba, count) == 0U) {
+        s_last_failure = "LBA out of range (check the reported capacity)";
+        return 0U;
+    }
+    if (usb_scsi_read_blocks (lba, dst, RAW_DISK_SECTOR_SIZE, count) != 0U) {
+        s_last_failure = "SCSI READ(10) failed (see the USB: lines above)";
+        return 0U;
+    }
+    return 1U;
+}
