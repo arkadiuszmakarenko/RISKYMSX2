@@ -88,36 +88,144 @@ extern const uint32_t terminal_rom_len;
 
 /* Expanded-slot state. The sub-slot register follows the MSX convention:
  * two bits select the sub-slot for each 16 KiB CPU page. Sub-slot 0 is
- * flash-backed/read-only, sub-slot 1 is the PSRAM mapper-RAM window, and
- * sub-slots 2/3 are electrically empty. */
+ * flash-backed/read-only, sub-slot 1 is mapper RAM, and sub-slots 2/3 are
+ * electrically empty. */
 volatile uint8_t g_subslot_reg = 0x00U;
-static volatile uint8_t s_slotted_psram_ready;
+static volatile uint8_t s_mapper_ram_ready;
+/* Mapper-RAM bank registers, one per CPU page (FCh..FFh).
+ *
+ * FCh/FDh/FEh/FFh select the 16 KiB bank windowed into pages 0/1/2/3.
+ * Only sub-slot 1 exposes the mapper RAM. Sub-slots 2 and 3 are
+ * electrically empty, so a slot checker sees RAM only at 1-1 and the four
+ * sub-slots are distinguishable (ROM / RAM / empty / empty). */
 static volatile uint8_t s_slotted_bank_regs[4] = { 0U, 0U, 0U, 0U };
 
-void Cart_SetSlottedPSRAMReady (uint8_t ready) {
-    s_slotted_psram_ready = (ready != 0U) ? 1U : 0U;
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+/* SRAM-backed mapper RAM. 128 KiB = 8 banks x 16 KiB. Volatile because
+ * accesses are shared between the MCU and the MSX bus interrupt. */
+static volatile uint8_t s_mapper_ram[CART_SLOTTED_SRAM_BANKS
+                                     * CART_SLOTTED_BANK_SIZE];
+#endif
+
+/* Diagnostics: count expanded-slot activity per page so a hang can be
+ * attributed to a specific sub-slot selection. */
+volatile uint32_t g_iorq_edges;        /* every ~IORQ falling edge seen */
+volatile uint32_t g_iorq_fc_edges;     /* those whose port is FC..FF */
+volatile uint8_t  g_iorq_last_port;    /* last port byte observed */
+volatile uint8_t  g_iorq_last_ctrl;    /* control snapshot at that edge */
+volatile uint32_t g_subslot_ssr_reads;
+volatile uint32_t g_subslot_ssr_writes;
+volatile uint8_t  g_subslot_last_ssr_wr;
+volatile uint32_t g_subslot_ram_reads[4];
+volatile uint32_t g_subslot_ram_writes[4];
+volatile uint8_t  g_subslot_last_bank[4];
+
+void Cart_SetMapperRamReady (uint8_t ready) {
+    s_mapper_ram_ready = (ready != 0U) ? 1U : 0U;
 }
 
 static inline __attribute__((always_inline))
-void Cart_DriveSlottedPSRAMByte (uint16_t address, unsigned page) {
+void Cart_DriveMapperRamByte (uint16_t address, unsigned page) {
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+    const uint32_t off = ((uint32_t)s_slotted_bank_regs[page]
+                          & (CART_SLOTTED_SRAM_BANKS - 1U))
+                       * CART_SLOTTED_BANK_SIZE
+                       + ((uint32_t)address & 0x3FFFU);
+    const uint8_t value = s_mapper_ram[off];
+#else
     const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
-                       + ((uint32_t)s_slotted_bank_regs[page]
+                       + (((uint32_t)s_slotted_bank_regs[page]
+                           & CART_SLOTTED_PSRAM_BANK_MASK)
                           * CART_SLOTTED_BANK_SIZE)
                        + ((uint32_t)address & 0x3FFFU);
     const uint8_t value = *(const volatile uint8_t *)(PSRAM_CART_BASE + off);
+#endif
     GPIOB->OUTDR = (uint32_t)value << 8;
     GPIOB->CFGHR = CART_BUS_ON;
 }
 
 static inline __attribute__((always_inline))
-void Cart_WriteSlottedPSRAMByte (uint16_t address, unsigned page,
-                                  uint8_t value) {
+void Cart_WriteMapperRamByte (uint16_t address, unsigned page,
+                              uint8_t value) {
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+    const uint32_t off = ((uint32_t)s_slotted_bank_regs[page]
+                          & (CART_SLOTTED_SRAM_BANKS - 1U))
+                       * CART_SLOTTED_BANK_SIZE
+                       + ((uint32_t)address & 0x3FFFU);
+    s_mapper_ram[off] = value;
+#else
     const uint32_t off = CART_SLOTTED_BANK_BASE_OFFSET
-                       + ((uint32_t)s_slotted_bank_regs[page]
+                       + (((uint32_t)s_slotted_bank_regs[page]
+                           & CART_SLOTTED_PSRAM_BANK_MASK)
                           * CART_SLOTTED_BANK_SIZE)
                        + ((uint32_t)address & 0x3FFFU);
     *(volatile uint8_t *)(PSRAM_CART_BASE + off) = value;
+#endif
     __asm__ volatile ("fence iorw, iorw" ::: "memory");
+}
+
+/* Expanded-slot layer shared by the Terminal and Nextor handlers. Both
+ * return nonzero when the cycle was fully handled (the caller must then
+ * skip its own ROM/mailbox decode); zero means sub-slot 0 is selected for
+ * the page and the caller serves its own ROM. */
+static inline __attribute__((always_inline))
+int Cart_SubslotRead (uint16_t address, uint32_t ctrl) {
+    const unsigned page = (unsigned)(address >> 14);
+
+    /* SSR is read inverted. M1 low is an opcode fetch from FFFF and must
+     * not be mistaken for a register read. */
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        g_subslot_ssr_reads++;
+        GPIOB->OUTDR = (uint32_t)(uint8_t)~g_subslot_reg << 8;
+        GPIOB->CFGHR = CART_BUS_ON;
+        return 1;
+    }
+    const unsigned subslot = (g_subslot_reg >> (page * 2U)) & 0x3U;
+#if !CART_SLOTTED_PAGE3_RAM
+    /* Optional compatibility mode: only answer the SSR in page 3. */
+    if (page == 3U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        return 1;
+    }
+#endif
+    if (subslot == 0U) return 0;
+    /* Only sub-slot 1 exposes mapper RAM; sub-slots 2 and 3 are electrically
+     * empty so slot probing can distinguish them. */
+    if (subslot == 1U && s_mapper_ram_ready != 0U) {
+        g_subslot_ram_reads[page]++;
+        g_subslot_last_bank[page] = s_slotted_bank_regs[page];
+        Cart_DriveMapperRamByte (address, page);
+    } else {
+        GPIOB->CFGHR = CART_BUS_OFF;
+    }
+    return 1;
+}
+
+static inline __attribute__((always_inline))
+int Cart_SubslotWrite (uint16_t address, uint32_t ctrl, uint8_t value) {
+    const unsigned page = (unsigned)(address >> 14);
+
+    if (address == 0xFFFFU && (ctrl & CART_M1_MASK) != 0U) {
+        g_subslot_ssr_writes++;
+        g_subslot_last_ssr_wr = value;
+        g_subslot_reg = value;
+        return 1;
+    }
+    const unsigned subslot = (g_subslot_reg >> (page * 2U)) & 0x3U;
+#if !CART_SLOTTED_PAGE3_RAM
+    /* Optional compatibility mode: leave page 3 host-owned. */
+    if (page == 3U) {
+        return 1;
+    }
+#endif
+    if (subslot == 0U) return 0;
+    /* Only sub-slot 1 exposes mapper RAM; sub-slots 2 and 3 are empty. */
+    if (subslot == 1U && s_mapper_ram_ready != 0U) {
+        g_subslot_ram_writes[page]++;
+        g_subslot_last_bank[page] = s_slotted_bank_regs[page];
+        Cart_WriteMapperRamByte (address, page, value);
+    }
+    return 1;
 }
 
 /* Flash mapper (CART_MAP_FLASH): decodes the mailbox window 0x7FF0..0x7FFF
@@ -320,15 +428,13 @@ int Cart_SetMapper (Cart_Mapper m) {
 
     g_mapper = m;
 
-#if 0 /* CART_MAP_SLOTTED removed in V3 - re-enable when ported */
-    if (m == CART_MAP_SLOTTED) {
+    if (m == CART_MAP_TERMINAL || m == CART_MAP_NEXTOR) {
         /* Never carry page or sub-slot selections across mapper swaps. */
         g_subslot_reg = 0x00U;
         for (unsigned page = 0U; page < 4U; page++) {
             s_slotted_bank_regs[page] = 0U;
         }
     }
-#endif
 
     /* Install the matching handler in VTF slot 0. SetVTFIRQ writes
      * VTFADDR[0] and VTFIDR[0] - the VTF dispatcher uses VTFADDR[0]
@@ -357,11 +463,11 @@ int Cart_SetMapper (Cart_Mapper m) {
     }
     SetVTFIRQ (h, EXTI0_IRQn, 0, ENABLE);
 
-#if 0 /* CART_MAP_SLOTTED removed in V3 - re-enable when ported */
-    /* Only the slotted mapper owns the PE8/~IORQ bank-register decoder.
-     * Keep EXTI9_5 disabled for Terminal/Nextor and all legacy mappers. */
+    /* Terminal and Nextor are expanded-slot mappers and own the
+     * PE8/~IORQ bank-register decoder (ports FC..FF). Every other mapper
+     * keeps EXTI9_5 disabled. */
     EXTI->INTFR = EXTI_INTENR_MR8;
-    if (m == CART_MAP_SLOTTED) {
+    if (m == CART_MAP_TERMINAL || m == CART_MAP_NEXTOR) {
         EXTI->INTENR |= EXTI_INTENR_MR8;
         NVIC_SetPriority (EXTI9_5_IRQn, 0x01);
         NVIC_EnableIRQ (EXTI9_5_IRQn);
@@ -369,7 +475,6 @@ int Cart_SetMapper (Cart_Mapper m) {
         EXTI->INTENR &= ~EXTI_INTENR_MR8;
         NVIC_DisableIRQ (EXTI9_5_IRQn);
     }
-#endif
 
     /* Flash selector mappers: reset the mailbox so the loader starts clean. */
     if (m == CART_MAP_ROM32k || m == CART_MAP_FLASH) {
@@ -529,10 +634,9 @@ void Init_Cart (void) {
     EXTI->FTENR = (EXTI->FTENR & ~EXTI_FTENR_TR0) | EXTI_FTENR_TR0;
     EXTI->INTFR = EXTI_INTENR_MR0;
 
-    /* PE8 (/IORQ) is reserved for the optional slotted mapper's bank
-     * registers at ports FC..FF. Configure the EXTI route now, but keep
-     * the line disabled until CART_MAP_SLOTTED is installed so Terminal
-     * and Nextor retain their existing interrupt behavior. */
+    /* PE8 (/IORQ) feeds the bank-register decoder for ports FC..FF used
+     * by the expanded-slot mappers. Configure the EXTI route now, but keep
+     * the line disabled until Cart_SetMapper installs Terminal or Nextor. */
     GPIOE->CFGHR = (GPIOE->CFGHR & ~0xFU) | 0x4U;
     AFIO->EXTICR[2] = (AFIO->EXTICR[2] & ~0xFU)
                     | (AFIO_EXTICR3_EXTI8_PE << 0);
@@ -624,6 +728,52 @@ void Cart_HoldMSXWait_End (void) {
 }
 
 /* ------------------------------------------------------------------ */
+/* MSX ~RESET (PE4) - opt-in cold-start pulse.                          */
+/* ------------------------------------------------------------------ */
+/* Open-drain output (CFGLR nibble 0x7 = 10 MHz alternate-function? No:
+ * 0x7 is AF push-pull, so open-drain is 0x6) with the latch held HIGH
+ * while released, so the pin is electrically floating and never fights
+ * the mainboard. Asserting clears the latch, which pulls the line low
+ * through the open-drain driver only.
+ *
+ * Only valid on hardware that wires ~RESET as drivable; see the
+ * CART_MSX_RESET_PULSE note in cart.h. */
+void Cart_MSXReset_Release (void) {
+    /* Latch HIGH first: with open-drain this is "released", so the pin
+     * floats and cannot hold the line low. */
+    GPIOE->OUTDR |= CART_RESET_MASK;
+    /* 0x6 nibble = 10 MHz open-drain output. */
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 16)) | (0x6U << 16);
+}
+
+void Cart_MSXReset_Assert (void) {
+    RCC_PB2PeriphClockCmd (RCC_PB2Periph_GPIOE, ENABLE);
+    /* Open-drain output with the latch LOW pulls the line low. Set the
+     * mode first, then drop the latch, so there is no push-pull glitch. */
+    GPIOE->OUTDR |= CART_RESET_MASK;
+    GPIOE->CFGLR = (GPIOE->CFGLR & ~(0xFU << 16)) | (0x6U << 16);
+    GPIOE->OUTDR &= ~CART_RESET_MASK;
+}
+
+#if CART_MSX_RESET_PULSE
+/* Hold the MSX in reset, give the operator time to arm the analyser, then
+ * release it so the machine cold-boots from a known instant. */
+void Cart_MSXReset_PulseForCapture (void) {
+    Cart_MSXReset_Assert ();
+    printf ("\r\n=== MSX held in RESET ===\r\n");
+    printf ("Arm the logic analyser now; releasing in %lu ms\r\n",
+            (unsigned long)CART_MSX_RESET_ARM_DELAY_MS);
+    for (uint32_t left = CART_MSX_RESET_ARM_DELAY_MS; left != 0U; left -= 1000U) {
+        printf ("  releasing in %lu s\r\n",
+                (unsigned long)((left + 999U) / 1000U));
+        Delay_Ms (left >= 1000U ? 1000U : left);
+    }
+    printf ("=== MSX RESET released - boot starts now ===\r\n");
+    Cart_MSXReset_Release ();
+}
+#endif
+
+/* ------------------------------------------------------------------ */
 /* Shared C-side helpers used by the bank-switching mappers.           */
 /* ------------------------------------------------------------------ */
 
@@ -694,16 +844,29 @@ uint8_t Cart_ReadWriteData (void) {
 /* MSX memory-mapper bank-register capture. OUT (0xFC..0xFF),A is an
  * I/O cycle and therefore never asserts ~SLTSL; PE8/~IORQ is its EXTI
  * trigger. Each port selects one 16 KiB bank for a CPU page. The handler
- * only samples the write and never drives the data bus.
- *
- * V3 cart.c removed CART_MAP_SLOTTED entirely; this handler is kept
- * as a stub that clears the EXTI edge but never reads a bank port,
- * so a stray IORQ-edge during Terminal/Nextor does nothing harmful. */
+ * only samples the write and never drives the data bus. Enabled only
+ * while the Terminal or Nextor mapper is installed. */
 void EXTI9_5_IRQHandler (void) {
     if ((EXTI->INTFR & EXTI_INTENR_MR8) == 0U) return;
     EXTI->INTFR = EXTI_INTENR_MR8;
 
-    return; /* CART_MAP_SLOTTED removed in V3 cart.c - no bank-register decoder */
+    /* Diagnostics: count every ~IORQ edge that reaches the cartridge and
+     * remember the port byte. This answers, without any analyser
+     * interpretation, whether the mapper bank ports (FC..FF) are visible
+     * to the cart at all. */
+    g_iorq_edges++;
+    {
+        /* OUT (n),A puts the port number n on A7..A0 and the accumulator
+         * A on A15..A8. The PORT (FC..FF) is therefore the LOW byte; the
+         * high byte is the bank value being written. */
+        const uint8_t port = (uint8_t)(GPIOD->INDR & 0x00FFU);
+        g_iorq_last_port = port;
+        g_iorq_last_ctrl = (uint8_t)GPIOE->INDR;
+        if (port >= CART_SLOTTED_BANK_PORT_BASE
+            && port < CART_SLOTTED_BANK_PORT_BASE + 4U) {
+            g_iorq_fc_edges++;
+        }
+    }
 
     uint32_t ctrl = GPIOE->INDR;
     if ((ctrl & CART_IORQ_MASK) != 0U) return;
@@ -718,6 +881,11 @@ void EXTI9_5_IRQHandler (void) {
     }
     if ((ctrl & CART_WR_MASK) != 0U) return;
 
+    /* OUT (n),A puts the port number n on A7..A0 (low byte) and the
+     * accumulator A on A15..A8 (high byte). The bank-select PORT is the
+     * low byte; the high byte is the bank VALUE, which must NOT be used
+     * to index the page register (doing so misroutes the latch and
+     * corrupts the bank registers - the boot hang). */
     const uint8_t port = (uint8_t)(GPIOD->INDR & 0x00FFU);
     if (port < CART_SLOTTED_BANK_PORT_BASE
         || port >= CART_SLOTTED_BANK_PORT_BASE + 4U) return;
@@ -1938,6 +2106,14 @@ void Cart_EXTI0_Terminal_Handler (void) {
     if ((ctrl & CART_RD_MASK) == 0U) {
         /* READ cycle. */
         uint8_t v;
+        if (Cart_SubslotRead (address, ctrl)) {
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            if (s_msx_wait_held == 0U) {
+                while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+            return;
+        }
         if (address == 0x7FFFU) {
             /* Output FIFO pop. Paired with Terminal_Service::out_push:
              * the producer does `fence w,w` between byte-write and
@@ -1997,6 +2173,14 @@ void Cart_EXTI0_Terminal_Handler (void) {
     /* WRITE cycle: WR is low now; data valid on PB8..15. */
     if ((ctrl & CART_WR_MASK) == 0U) {
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
+        if (Cart_SubslotWrite (address, ctrl, w)) {
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            if (s_msx_wait_held == 0U) {
+                while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+                GPIOB->CFGHR = CART_BUS_OFF;
+            }
+            return;
+        }
         if (address == 0x7FFDU) {
             /* Keyboard FIFO push. Drop on overflow - the terminal
              * never sends faster than human typing, so overflow is a
@@ -2073,17 +2257,55 @@ void Cart_EXTI0_Terminal_Handler (void) {
 /* ------------------------------------------------------------------ */
 
 void Cart_EXTI0_Nextor_Handler (void) {
-    /* EXTI0 fires when SLTSL changes. Capture the address and control bus
-     * immediately; the Z80 is waiting for the cartridge response. */
-    const uint16_t address = (uint16_t)GPIOD->INDR;
+    /* EXTI0 fires on the falling edge of ~SLTSL. ~RD and ~WR lag ~SLTSL by
+     * a gate delay, so sampling them at entry would classify EVERY cycle as
+     * a write (both still high) and the read path would never run - that is
+     * exactly the rr=0/rw=huge signature seen on hardware. Wait for one of
+     * the strobes to settle first, bailing out if ~SLTSL already rose. */
+    const uint16_t entry_address = (uint16_t)GPIOD->INDR;
     uint32_t ctrl = GPIOE->INDR;
 
+    if ((ctrl & CART_SLTSL_MASK) != 0U) {
+        GPIOB->CFGHR = CART_BUS_OFF;
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        return;
+    }
+    while ((ctrl & (CART_RD_MASK | CART_WR_MASK)) ==
+           (CART_RD_MASK | CART_WR_MASK)) {
+        ctrl = GPIOE->INDR;
+        if ((ctrl & CART_SLTSL_MASK) != 0U) {
+            GPIOB->CFGHR = CART_BUS_OFF;
+            EXTI->INTFR = EXTI_INTENR_MR0;
+            return;
+        }
+    }
 
+    uint16_t address = (uint16_t)GPIOD->INDR;
+    /* Preserve a write to the SSR if the address bus changes while the
+     * write strobe settles (observed on some MSX bus timings). */
+    if ((ctrl & CART_WR_MASK) == 0U
+        && entry_address == 0xFFFFU
+        && address != 0xFFFFU) {
+        address = 0xFFFFU;
+    }
+
+    /* Only memory requests belong to the expanded-slot/ROM handler. The
+     * mapper's FC..FF bank ports are I/O requests and use EXTI8 instead. */
+    if ((ctrl & CART_MREQ_MASK) != 0U) {
+        EXTI->INTFR = EXTI_INTENR_MR0;
+        GPIOB->CFGHR = CART_BUS_OFF;
+        if (s_msx_wait_held == 0U) {
+            while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
+        }
+        return;
+    }
 
     if ((ctrl & CART_RD_MASK) == 0U) {
         /* READ cycle: mailbox reads come from the live FIFO/status state;
          * every other address is a normal ROM read from the selected bank. */
-        if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+        if (Cart_SubslotRead (address, ctrl)) {
+            /* Expanded-slot register or sub-slot 1+ driven the bus. */
+        } else if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
             /* nextor.c owns FIFO advancement and status bits. This handler
              * only routes the bus cycle and drives the returned byte. */
             const uint8_t v = Nextor_ReadByte (address);
@@ -2103,32 +2325,24 @@ void Cart_EXTI0_Nextor_Handler (void) {
         /* Acknowledge EXTI before waiting for SLTSL where possible, then
          * turn the cartridge data bus off after the Z80 releases the cycle. */
         EXTI->INTFR = EXTI_INTENR_MR0;
-
+        if (s_msx_wait_held == 0U) {
             while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
-
-        GPIOB->CFGHR = CART_BUS_OFF;
+            GPIOB->CFGHR = CART_BUS_OFF;
+        }
+        /* During startup the held bus cycle is completed by
+         * Cart_HoldMSXWait_End(); keep read data driven until then. */
         return;
     }
 
-   /* WR lag SLTSL by a gate delay. Wait for either control signal to
-     * settle, but abandon the cycle if SLTSL rises while waiting. */
-    while ((ctrl & (CART_WR_MASK)) ==
-           (CART_WR_MASK)) {
-        ctrl = GPIOE->INDR;
-        if ((ctrl & CART_SLTSL_MASK) != 0U) {
-            GPIOB->CFGHR = CART_BUS_OFF;
-            EXTI->INTFR = EXTI_INTENR_MR0;
-            return;
-        }
-    }
-        
-
     /* WRITE cycle: WR is low and the Z80's data byte is valid on PB8..15.
+     * The strobes were already settled by the entry wait above.
      * Mailbox writes feed the command/argument collector; bank writes update
      * the ASCII16K page offsets. Other writes are intentionally ignored. */
     if ((ctrl & CART_WR_MASK) == 0U) {
         const uint8_t w = (uint8_t)(GPIOB->INDR >> 8);
-        if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
+        if (Cart_SubslotWrite (address, ctrl, w)) {
+            /* Expanded-slot register or sub-slot 1+ mapper RAM write. */
+        } else if ((address & 0xFFF0U) == NEXTOR_MBOX_BASE) {
             /* Mailbox command byte or argument byte. Nextor_WriteByte keeps
              * this path bounded because it runs inside the bus interrupt. */
             Nextor_WriteByte (address, w);
@@ -2145,20 +2359,23 @@ void Cart_EXTI0_Nextor_Handler (void) {
          * read path's off < nextor_rom_len test then floats those
          * addresses to 0xFF instead of indexing out of bounds. */
         EXTI->INTFR = EXTI_INTENR_MR0;
-
+        if (s_msx_wait_held == 0U) {
             while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
             GPIOB->CFGHR = CART_BUS_OFF;
+        }
         return;
     }
 
     /* Neither RD nor WR - spurious; release. */
-        EXTI->INTFR = EXTI_INTENR_MR0;
+    EXTI->INTFR = EXTI_INTENR_MR0;
+    if (s_msx_wait_held == 0U) {
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
         GPIOB->CFGHR = CART_BUS_OFF;
+    }
 }
 
 /* ------------------------------------------------------------------ */
-/* Slotted mapper: expanded slot plus 4 MiB PSRAM mapper RAM.          */
+/* Slotted mapper: expanded slot plus the selected mapper-RAM backend. */
 /* ------------------------------------------------------------------ */
 
 void Cart_EXTI0_Slotted_Handler (void) {
@@ -2208,6 +2425,10 @@ void Cart_EXTI0_Slotted_Handler (void) {
                 value = (uint8_t)~g_subslot_reg;
                 GPIOB->OUTDR = (uint32_t)value << 8;
                 GPIOB->CFGHR = CART_BUS_ON;
+#if !CART_SLOTTED_PAGE3_RAM
+            } else if (page == 3U) {
+                GPIOB->CFGHR = CART_BUS_OFF;
+#endif
             } else if (subslot == 0U) {
                 /* Temporary sub-slot-0 ROM source. The dedicated
                  * Subslots tiny ROM can replace this image later. */
@@ -2217,8 +2438,8 @@ void Cart_EXTI0_Slotted_Handler (void) {
                 }
                 GPIOB->OUTDR = (uint32_t)value << 8;
                 GPIOB->CFGHR = CART_BUS_ON;
-            } else if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                Cart_DriveSlottedPSRAMByte (address, page);
+            } else if (subslot == 1U && s_mapper_ram_ready != 0U) {
+                Cart_DriveMapperRamByte (address, page);
             } else {
                 /* Empty sub-slot: leave the data bus floating. */
                 GPIOB->CFGHR = CART_BUS_OFF;
@@ -2232,9 +2453,16 @@ void Cart_EXTI0_Slotted_Handler (void) {
             } else {
                 const unsigned subslot =
                     (g_subslot_reg >> (page * 2U)) & 0x3U;
-                if (subslot == 1U && s_slotted_psram_ready != 0U) {
-                    Cart_WriteSlottedPSRAMByte (address, page, value);
+#if CART_SLOTTED_PAGE3_RAM
+                if (subslot == 1U && s_mapper_ram_ready != 0U) {
+                    Cart_WriteMapperRamByte (address, page, value);
                 }
+#else
+                if (page != 3U && subslot == 1U
+                    && s_mapper_ram_ready != 0U) {
+                    Cart_WriteMapperRamByte (address, page, value);
+                }
+#endif
             }
             /* The Z80 owns the data bus during writes. */
             GPIOB->CFGHR = CART_BUS_OFF;

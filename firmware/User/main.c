@@ -5,23 +5,9 @@
  * Date               : 2025/06/06
  * Description        : Main program body.
  *
- * Migration notes (NextorV3 merge): the V3 version of this file added
- * Cart_HoldMSXWait_Begin/End around the boot path (to coordinate with the
- * startup asm's PE3 assert), Cart_HardReset* and g_cart_* instrumented
- * counters used by the V3 cart.c. Those V3 cart.c internals are NOT
- * migrated (per request), so this file is adapted:
- *
- *   - The Cart_HoldMSXWait_Begin/End calls around the boot path are kept
- *     because the new startup asm asserts ~WAIT during reset and the
- *     primitives exist in the NextorOnly cart.c.
- *   - The V3 g_cart_* report blocks and the CART_MAPPER_RAM_BACKEND / CART_TIMING_STATS
- *     branches are guarded with #if 0 - they are dead code until the
- *     matching V3 cart.c changes land. Flipping the guard back is the
- *     one-line change needed to reactivate them.
- *   - Cart_HardReset_* references were inside CART_TFMSX_HARD_RESET
- *     guards that default to 0 (see cart.h), so they don't compile in.
- *   - The Loader module was deleted in V3; its only references in this
- *     file (Loader_Service in the service loop) are dropped.
+ * The cartridge boots directly into the Nextor kernel mapper. The startup
+ * ~WAIT hold keeps the MSX idle while the mapper RAM and USB disk backend
+ * are initialized; no terminal-ROM boot or mapper swap is required.
  *********************************************************************************
  * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
  * Attention: This software (modified or not) and binary are used for
@@ -30,19 +16,16 @@
 
 #include "debug.h"
 #include "cart.h"
-#include "psram.h"
-#include "scc.h"
 #include "nextor.h"
+#include "psram.h"
 #include "raw_disk.h"
-#include "terminal.h"
 #include "usb_disk.h"
-#include "usb_tests.h"
 
 int main (void) {
 
     /* Synchronize the C-side hold flag with the low PE3 output asserted
-     * by startup_ch32v4x7.S. The MSX is held while the terminal mapper
-     * and the USB backend are brought up. */
+     * by startup_ch32v4x7.S. Keep the MSX held until Nextor and its disk
+     * backend are ready. */
     Cart_HoldMSXWait_Begin ();
 
     /* Heartbeat: toggle the LED in a tight loop so we can confirm
@@ -63,72 +46,125 @@ int main (void) {
     USART_Printf_Init (921600);
     PWR_VDD18LevelConfig(PWR_VDD18_Level1);
 
-    /* Init_Cart configures PE4 as a floating input - the firmware
-     * never drives MSX ~RESET (read-only on most MSX2+ machines;
-     * driving it can damage the mainboard). The MSX is therefore
-     * running while we boot; its BIOS will probe 0x4000 as soon as
-     * we enable GPIO clocks. Init_Cart -> Cart_SetMapper(TERMINAL)
-     * below gets the terminal cart armed before any cart access
-     * can land, so the BIOS reads the terminal ROM and runs the
-     * MSX-side terminal program (which copies itself to RAM and
-     * polls the firmware's output FIFO).
-     *
-     * NOTE: the firmware owns ~WAIT (asserted by startup_ch32v4x7.S,
-     * cleared by Cart_HoldMSXWait_End() below) while the terminal ROM
-     * is installed and the mailbox FIFOs are NOT drained. Terminal and
-     * Nextor are flash-ROM mappers and cannot serve a cycle from a held
-     * bus (the IRQ needs the cycle to start), so the terminal boot relies
-     * on the BIOS either re-reading from a held cycle once we let go or
-     * skipping its slot probe of the cart. */
-    Init_Cart ();
-    SCC_Init ();
-    USB_Initialization ();
+#if CART_MSX_RESET_PULSE
+    /* Optional: cold-start the MSX from a known instant so a logic
+     * analyser sees the boot from its first Z80 cycle. Holds ~RESET,
+     * prompts for CART_MSX_RESET_ARM_DELAY_MS so the capture can be
+     * armed, then releases it. Off by default - only safe on hardware
+     * where the cart edge ~RESET is drivable (see cart.h). */
+    Cart_MSXReset_PulseForCapture ();
+#endif
 
-    /* Reset the terminal mailbox before installing the mapper so the
-     * EXTI0 handler starts with empty FIFOs. */
-    Terminal_Reset ();
+    /* Install the expanded Nextor mapper before releasing the startup
+     * ~WAIT hold. Sub-slot 0 serves the flash-resident kernel; with the
+     * default backend sub-slot 1 exposes 128 KiB of SRAM as eight 16 KiB
+     * banks through FC..FF. Each port selects the bank for its matching
+     * 16 KiB CPU page, including page 3. */
+    Init_Cart ();
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
+    Cart_SetMapperRamReady (1U);
+#else
+    {
+        const uint8_t psram_rc = PSRAM_Init ();
+        if (psram_rc == PSRAM_OK) {
+            Cart_SetMapperRamReady (1U);
+        } else {
+            printf ("PSRAM mapper RAM disabled (init rc=0x%02x)\r\n",
+                    (unsigned)psram_rc);
+        }
+    }
+#endif
+    Cart_SetMapper_Safe (CART_MAP_NEXTOR);
 
     printf ("SystemClk:%d\r\n", SystemCoreClock);
     printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
-    /* Bring up PSRAM. It backs game-image loads. The V3 cart.c adds a
-     * "set the slotted mapper RAM ready here" hook gated on
-     * CART_MAPPER_RAM_BACKEND - that branch is V3-only and is guarded
-     * out below because the matching cart.c code is not migrated. */
-    PSRAM_Init();
-
-    /* RawDisk_Init() is a power-on call. Cart_SetMapper(NEXTOR) already
-     * initialized the Nextor mailbox before the BIOS started executing;
-     * do NOT call Nextor_Init() again here, because the kernel may already
-     * have queued its first command and a second reset would discard it.
-     * A mapper swap later from the terminal menu performs its own single
-     * Nextor_Init() at the swap point. */
+    /* The mapper's mailbox is initialized by Cart_SetMapper above.
+     * Initialize the media state before USB callbacks can invalidate it. */
     RawDisk_Init ();
+    USB_Initialization ();
 
-#if 0 /* V3 cart.c internals not migrated - re-enable when ported */
-#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
-    Cart_SetSlottedPSRAMReady (1U);
-#endif
-#endif
-
-    Cart_SetMapper_Safe (CART_MAP_TERMINAL);
-    Delay_Ms(500);
-
-    /* USB and the disk backend are now ready for the first Nextor
-     * mailbox request. Release WAIT and let the held BIOS cycle finish. */
+    /* USB and the disk backend are ready before the BIOS probes the cart.
+     * Release WAIT; the Nextor handler now serves the first ROM cycle. */
     Cart_HoldMSXWait_End ();
 
-    printf ("\r\n=== boot complete (terminal mapper active) ===\r\n");
+    printf ("\r\n=== boot complete (Nextor mapper active) ===\r\n");
 
-    /* Idle loop: service both mailboxes. */
-    /* The Nextor engine is always live in the background: it drives
+    /* Service Nextor's mailbox and USB lifecycle. The engine drives
      * the USB enumeration, INQUIRY, READ CAPACITY and IDENTIFY state
      * machine once after boot, then idles until the kernel needs a
-     * READ/WRITE. Calling Nextor_Service() unconditionally is
-     * cheap and harmless outside the NEXTOR mapper. */
+     * READ/WRITE. */
     for (;;) {
         Nextor_Service ();
-        Terminal_Service ();
+
+        /* Expanded-slot diagnostics: report when activity changes so a
+         * hang can be attributed to the SSR value and per-page banks. */
+        {
+            extern volatile uint32_t g_subslot_ssr_reads;
+            extern volatile uint32_t g_subslot_ssr_writes;
+            extern volatile uint8_t  g_subslot_last_ssr_wr;
+            extern volatile uint32_t g_subslot_ram_reads[4];
+            extern volatile uint32_t g_subslot_ram_writes[4];
+            extern volatile uint8_t  g_subslot_last_bank[4];
+            static uint32_t s_prev_ssr_rd, s_prev_ssr_wr;
+            static uint32_t s_prev_rr[4], s_prev_rw[4];
+            static uint32_t s_loops = 0U;
+            if (++s_loops >= 2000000U) {
+                s_loops = 0U;
+                const uint8_t changed =
+                    (g_subslot_ssr_reads != s_prev_ssr_rd)
+                 || (g_subslot_ssr_writes != s_prev_ssr_wr)
+                 || (g_subslot_ram_reads[0] != s_prev_rr[0])
+                 || (g_subslot_ram_reads[1] != s_prev_rr[1])
+                 || (g_subslot_ram_reads[2] != s_prev_rr[2])
+                 || (g_subslot_ram_reads[3] != s_prev_rr[3])
+                 || (g_subslot_ram_writes[0] != s_prev_rw[0])
+                 || (g_subslot_ram_writes[1] != s_prev_rw[1])
+                 || (g_subslot_ram_writes[2] != s_prev_rw[2])
+                 || (g_subslot_ram_writes[3] != s_prev_rw[3]);
+                {
+                    extern volatile uint32_t g_iorq_edges;
+                    extern volatile uint32_t g_iorq_fc_edges;
+                    extern volatile uint8_t  g_iorq_last_port;
+                    static uint32_t s_prev_edges = 0xFFFFFFFFU;
+                    if (g_iorq_edges != s_prev_edges) {
+                        s_prev_edges = g_iorq_edges;
+                        if (g_iorq_edges > 0U) {
+                            printf ("IORQ: edges=%lu fc..ff=%lu lastport=%02x\r\n",
+                                    (unsigned long)g_iorq_edges,
+                                    (unsigned long)g_iorq_fc_edges,
+                                    (unsigned)g_iorq_last_port);
+                        }
+                    }
+                }
+                if (changed) {
+                    printf ("SSR: rd=%lu wr=%lu last=%02x "
+                            "bank[0..3]=%02x,%02x,%02x,%02x "
+                            "rr=%lu,%lu,%lu,%lu rw=%lu,%lu,%lu,%lu\r\n",
+                            (unsigned long)g_subslot_ssr_reads,
+                            (unsigned long)g_subslot_ssr_writes,
+                            (unsigned)g_subslot_last_ssr_wr,
+                            (unsigned)g_subslot_last_bank[0],
+                            (unsigned)g_subslot_last_bank[1],
+                            (unsigned)g_subslot_last_bank[2],
+                            (unsigned)g_subslot_last_bank[3],
+                            (unsigned long)g_subslot_ram_reads[0],
+                            (unsigned long)g_subslot_ram_reads[1],
+                            (unsigned long)g_subslot_ram_reads[2],
+                            (unsigned long)g_subslot_ram_reads[3],
+                            (unsigned long)g_subslot_ram_writes[0],
+                            (unsigned long)g_subslot_ram_writes[1],
+                            (unsigned long)g_subslot_ram_writes[2],
+                            (unsigned long)g_subslot_ram_writes[3]);
+                    s_prev_ssr_rd = g_subslot_ssr_reads;
+                    s_prev_ssr_wr = g_subslot_ssr_writes;
+                    for (int i = 0; i < 4; i++) {
+                        s_prev_rr[i] = g_subslot_ram_reads[i];
+                        s_prev_rw[i] = g_subslot_ram_writes[i];
+                    }
+                }
+            }
+        }
 
 #if 0 /* V3 cart.c internals not migrated */
         /* Cycle-end spin timeouts: the cart ISR's ~SLTSL release and

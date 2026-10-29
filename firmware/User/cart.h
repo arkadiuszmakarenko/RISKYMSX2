@@ -3,19 +3,18 @@
 
 #include "ch32v4x7.h"
 
-/* V3 cart.c internals not migrated: the CART_MAPPER_RAM_PSRAM /
- * CART_MAPPER_RAM_SRAM / CART_MAPPER_RAM_BACKEND trio selects between
- * an SRAM-backed mapper RAM array (the isolation build) and the
- * PSRAM-backed hardware path. The matching cart.c code that consumes
- * these macros is intentionally absent from the merged build because
- * cart.c is not migrated. main.c guards its CART_MAPPER_RAM_BACKEND
- * branches with #if 0. */
-
-/* Migration note: the CART_SLOTTED_BANKS_PRESENT / CART_SLOTTED_BANK_MASK
- * pair is also V3-only; it is kept here because (a) the layout tripwire
- * _Static_assert on the sub-slot 1 region size is genuinely useful and
- * (b) usb_disk.c computes its game-window bounds from
- * CART_GAME_MAX_BYTES which itself depends on the sub-slot 1 offset. */
+/* Mapper-RAM backing-store selector. The default mapper RAM is the
+ * 128 KiB internal-SRAM array (8 x 16 KiB banks). PSRAM remains available
+ * as an optional backend, but Nextor startup does not depend on PSRAM. */
+#define CART_MAPPER_RAM_PSRAM  0
+#define CART_MAPPER_RAM_SRAM   1
+#ifndef CART_MAPPER_RAM_BACKEND
+#define CART_MAPPER_RAM_BACKEND CART_MAPPER_RAM_SRAM
+#endif
+#if (CART_MAPPER_RAM_BACKEND != CART_MAPPER_RAM_PSRAM) \
+    && (CART_MAPPER_RAM_BACKEND != CART_MAPPER_RAM_SRAM)
+#error "CART_MAPPER_RAM_BACKEND must select PSRAM (0) or SRAM (1)"
+#endif
 
 /*
  * CH32V407VET6 (RISKYMSX2) MSX cartridge bus pinout.
@@ -65,37 +64,78 @@
 #define CART_TFMSX_HARD_RESET 0
 #endif
 
-/* PSRAM mapper window used by the Nextor expanded-slot path: 256 x 16 KiB
- * banks = 4 MiB.
- * Keep this region separate from the normal game-image area. */
+/* Force a cold MSX start from the firmware itself.
+ *
+ * When enabled, main() holds the MSX in reset, prints a prompt, waits
+ * CART_MSX_RESET_ARM_DELAY_MS so a logic analyser can be armed, then
+ * releases ~RESET. That makes the boot sequence reproducible and lets a
+ * capture start from the first Z80 cycle instead of being armed against a
+ * hand-pressed reset button.
+ *
+ * PE4 is ALWAYS driven open-drain: the pin can only pull the line low and
+ * never drives it high, so it cannot fight the mainboard's own reset
+ * driver. Even so, this is only safe on boards that actually wire ~RESET
+ * as drivable (TFMSX-style development hardware). On a production
+ * cartridge the line is an output from the mainboard and is read-only -
+ * driving it there may damage the machine, which is why the default is 0.
+ *
+ * Enable with:  make rebuild CART_MSX_RESET_PULSE=1
+ */
+#ifndef CART_MSX_RESET_PULSE
+#define CART_MSX_RESET_PULSE 0
+#endif
+
+/* How long to hold reset with the prompt displayed, so the analyser can be
+ * armed before the machine starts. */
+#ifndef CART_MSX_RESET_ARM_DELAY_MS
+#define CART_MSX_RESET_ARM_DELAY_MS 20000U
+#endif
+
+/* Drive MSX ~RESET (PE4) low / release it. Release returns the pin to a
+ * floating input, never a driven high level. */
+void Cart_MSXReset_Assert (void);
+void Cart_MSXReset_Release (void);
+
+#if CART_MSX_RESET_PULSE
+/* Hold the MSX in reset, prompt for CART_MSX_RESET_ARM_DELAY_MS, release. */
+void Cart_MSXReset_PulseForCapture (void);
+#endif
+
+/* Optional PSRAM mapper window. The default mapper-RAM backend is the
+ * internal SRAM array below; this PSRAM region is used only when
+ * CART_MAPPER_RAM_BACKEND selects PSRAM. Keep it separate from game images. */
 #define CART_SLOTTED_BANK_PORT_BASE   0xFCU
 #define CART_SLOTTED_BANK_COUNT       256U
 #define CART_SLOTTED_BANK_SIZE        (16U * 1024U)
+
+/* SRAM-backed mapper RAM: 8 banks x 16 KiB = 128 KiB. Only used when
+ * CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM. */
+#define CART_SLOTTED_SRAM_BANKS       8U
+_Static_assert ((CART_SLOTTED_SRAM_BANKS
+                 & (CART_SLOTTED_SRAM_BANKS - 1U)) == 0U,
+                "CART_SLOTTED_SRAM_BANKS must be a power of two");
+
+/* Allow mapper RAM in every CPU page by default. The SSR selects whether
+ * page 3 uses this cartridge's sub-slot 1; until software selects it,
+ * the reset value leaves all pages in sub-slot 0. Set to 0 only for a
+ * diagnostic build that must keep page 3 host-owned. */
+#ifndef CART_SLOTTED_PAGE3_RAM
+#define CART_SLOTTED_PAGE3_RAM 1
+#endif
 #define CART_SLOTTED_BANK_BASE_OFFSET (4U * 1024U * 1024U)
 
-/* Mapper-RAM size PRESENTED to the machine: how many of the physical
- * banks are actually selectable. The FC..FF bank registers latch the
- * full 0..255 byte (see the EXTI9_5 handler), but Cart_SlottedPSRAMPtr
- * masks it into this range, so a bank number past the limit aliases
- * back onto bank 0.
- *
- * EMPIRICAL: 16 (256 KiB) HUNG the boot on real hardware even with
- * the timing instrumentation fully off - the aliasing presentation
- * is NOT tolerated by this BIOS/Nextor combination despite matching
- * how real small mappers ignore the high bank bits. 256 = full 4 MiB
- * = the last empirically working configuration. The memory test then
- * walks all 256 banks (slow). If a shorter test is needed, bisect
- * from here: try 128 / 64 / 32 (powers of two only) one build at a
- * time and verify the boot before keeping it. */
-#define CART_SLOTTED_BANKS_PRESENT    256U
-#define CART_SLOTTED_BANK_MASK        (CART_SLOTTED_BANKS_PRESENT - 1U)
+/* Optional PSRAM backend capacity. The default SRAM backend exposes all
+ * eight SRAM banks (128 KiB); this limit applies only to the PSRAM path. */
+#define CART_SLOTTED_PSRAM_BANKS_PRESENT 16U
+#define CART_SLOTTED_PSRAM_BANK_MASK \
+    (CART_SLOTTED_PSRAM_BANKS_PRESENT - 1U)
 
-_Static_assert ((CART_SLOTTED_BANKS_PRESENT
-                 & (CART_SLOTTED_BANKS_PRESENT - 1U)) == 0U,
-                "CART_SLOTTED_BANKS_PRESENT must be a power of two "
+_Static_assert ((CART_SLOTTED_PSRAM_BANKS_PRESENT
+                 & (CART_SLOTTED_PSRAM_BANKS_PRESENT - 1U)) == 0U,
+                "CART_SLOTTED_PSRAM_BANKS_PRESENT must be a power of two "
                 "(mask-based aliasing)");
-_Static_assert (CART_SLOTTED_BANKS_PRESENT <= CART_SLOTTED_BANK_COUNT,
-                "CART_SLOTTED_BANKS_PRESENT exceeds the physical region");
+_Static_assert (CART_SLOTTED_PSRAM_BANKS_PRESENT <= CART_SLOTTED_BANK_COUNT,
+                "CART_SLOTTED_PSRAM_BANKS_PRESENT exceeds the physical region");
 
 /* Cart image lives entirely in PSRAM. The 64 Mbit device is mapped at
  * 0x80000000..0x80800000 (8 MiB); we reserve the whole thing as the cart
@@ -235,33 +275,25 @@ typedef enum {
                                   * screen + keyboard; the firmware hosts
                                   * the menu logic. Expanded-slot mapper,
                                   * same protocol as CART_MAP_NEXTOR:
-                                  * secondary-slot register at FFFF
-                                  * (inverted read, M1-qualified latches),
-                                  * 0xFC..0xFF I/O bank registers latched
-                                  * by the EXTI9_5 handler, sub-slot 0 =
-                                  * terminal ROM, sub-slot 1 = the
-                                  * 256 x 16 KiB (4 MiB) PSRAM mapper-RAM
-                                  * window, sub-slots 2/3 empty. This is
-                                  * what makes MSX-DOS see the mapper RAM
-                                  * while the terminal is the boot cart.
-                                  * Reached from the menu to boot game
-                                  * ROMs; N swaps to the Nextor kernel,
-                                  * T re-arms this mapper, F swaps to the
-                                  * FLASH loader. */
+                                   * secondary-slot register at FFFF
+                                   * (inverted read, M1-qualified latches),
+                                   * 0xFC..0xFF I/O bank registers latched
+                                   * by the EXTI9_5 handler, sub-slot 0 =
+                                   * terminal ROM, sub-slot 1 = the 128 KiB
+                                   * SRAM mapper-RAM window (8 x 16 KiB
+                                   * banks), sub-slots 2/3 empty. Retained
+                                   * for compatibility; normal startup
+                                   * installs CART_MAP_NEXTOR. */
     CART_MAP_NEXTOR     = 13,  /* Nextor kernel mapper: ASCII16K over the
- * embedded Nextor 3.0 kernel ROM (nextor_rom[],
- * flash-resident). The 16 KiB bank visible at 0x4000..0x7FFF
- * is selected by writing the bank number to 0x6000;
- * 0x7000/0x77FF do the same for the page-2 window at
- * 0x8000..0xBFFF. The mailbox window at 0x7FF0..0x7FF5 is
- * punched out of page 1 in every bank - it is the only path
- * the kernel's driver (MSXSoftware/NextorDriver/driver.asm)
- * has to the disk. Bank decode + ROM read path live in
- * Cart_EXTI0_Nextor_Handler; the mailbox command dispatch
- * and result FIFO live in nextor.c. Flash served: no PSRAM
- * image. Reached via the terminal menu's N key
- * (handle_list_key -> soft_reset_into_cart
- * (CART_MAP_NEXTOR)). */
+                                   * embedded Nextor 3.0 kernel ROM
+                                   * (nextor_rom[], flash-resident). The
+                                   * 16 KiB bank visible at 0x4000..0x7FFF
+                                   * is selected by writing the bank number
+                                   * to 0x6000; 0x7000/0x77FF do the same for
+                                   * page 2. The 0x7FF0..0x7FF5 mailbox is
+                                   * the kernel driver's only disk path.
+                                   * The ROM is flash-served and installed
+                                   * directly during firmware startup. */
     CART_MAP_MAX        = 14,
 } Cart_Mapper;
 
@@ -269,8 +301,8 @@ typedef enum {
 extern const char *const Cart_MapperNames[CART_MAP_MAX];
 
 /* Set the active mapper. Installs the corresponding EXTI0 handler in the
- * PFIC VTF slot. Returns 0 on success, -1 on invalid mapper or if PSRAM
- * is not initialised yet (PSRAM_Init() must have run). */
+ * PFIC VTF slot. Returns 0 on success, -1 on invalid mapper or if a mapper
+ * that reads its image from PSRAM is selected before PSRAM_Init(). */
 int  Cart_SetMapper (Cart_Mapper m);
 Cart_Mapper Cart_GetMapper (void);
 
@@ -363,9 +395,10 @@ void Cart_HoldMSXWait_End (void);
  * that defaults to 0, so the merged build does not link against
  * them. */
 
-/* Mark the PSRAM-backed slotted mapper available after PSRAM_Init(). The
- * mapper remains inactive until Cart_SetMapper(CART_MAP_NEXTOR) is called. */
-void Cart_SetSlottedPSRAMReady (uint8_t ready);
+/* Enable/disable sub-slot 1 mapper RAM after its backing store is ready.
+ * With the default SRAM backend it is ready from startup; the mapper remains
+ * inactive until CART_MAP_NEXTOR is installed. */
+void Cart_SetMapperRamReady (uint8_t ready);
 
 /* Legacy SCC read path: return the emulator's view of a SCC-I read at
  * `address` (0x9800..0x98FF), or -1 if the address is outside that

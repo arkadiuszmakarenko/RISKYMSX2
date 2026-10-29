@@ -170,17 +170,15 @@ CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
 
 # Mapper-RAM (sub-slot 1) backing-store selector - see the block above
 # s_mapper_ram in User/cart.c and the CART_MAPPER_RAM_* values in
-# User/cart.h. Default 1 = the in-MCU SRAM array (128 KiB, 8 banks, no
-# external bus latency - the isolation build that proves handler
-# logic). Set to 0 = the PSRAM mapper RAM at PSRAM+CART_SLOTTED_BANK_
-# BASE_OFFSET (4 MiB, 256 banks, the original hardware path with the
-# memory-controller store latency on the sub-slot 1 write path).
+# User/cart.h. Default 1 = 128 KiB of internal SRAM (8 banks), used by
+# the Nextor-only boot workflow. Set to 0 only to test the optional PSRAM
+# backing store; that configuration runs PSRAM_Init before releasing WAIT.
 #
-#     make rebuild                         # default: SRAM backend
-#     make rebuild MAPPER_RAM_BACKEND=0    # PSRAM backend (hardware path)
+#     make rebuild                         # default: 128 KiB SRAM backend
+#     make rebuild MAPPER_RAM_BACKEND=0    # optional PSRAM backend
 #
-# NOTE: changing this only affects User/cart.c, but the .o does not
-# track the flag - use `make rebuild`, not `make`.
+# NOTE: changing this affects User/cart.c and User/main.c, but their .o
+# files do not track the flag - use `make rebuild`, not `make`.
 MAPPER_RAM_BACKEND ?= 1
 CFLAGS_COMMON += -DCART_MAPPER_RAM_BACKEND=$(MAPPER_RAM_BACKEND)
 
@@ -200,6 +198,21 @@ CFLAGS_COMMON += -DCART_MAPPER_RAM_BACKEND=$(MAPPER_RAM_BACKEND)
 # OFF build for real timing-sensitive work (BIOS memory test etc.).
 CART_TIMING_STATS ?= 1
 CFLAGS_COMMON += -DCART_TIMING_STATS=$(CART_TIMING_STATS)
+
+# MSX cold-start pulse. Set to 1 to have main() hold the MSX in ~RESET,
+# prompt on the UART, and release it after CART_MSX_RESET_ARM_DELAY_MS so a
+# logic analyser can be armed before the boot begins:
+#
+#     make rebuild CART_MSX_RESET_PULSE=1
+#     make rebuild CART_MSX_RESET_PULSE=1 CART_MSX_RESET_ARM_DELAY_MS=30000
+#
+# DANGER: only on hardware where the cart-edge ~RESET is drivable. On a
+# production cartridge that line is an output from the mainboard and is
+# read-only; see the note in User/cart.h. Default 0 = never drive it.
+CART_MSX_RESET_PULSE ?= 0
+CFLAGS_COMMON += -DCART_MSX_RESET_PULSE=$(CART_MSX_RESET_PULSE)
+CART_MSX_RESET_ARM_DELAY_MS ?= 20000
+CFLAGS_COMMON += -DCART_MSX_RESET_ARM_DELAY_MS=$(CART_MSX_RESET_ARM_DELAY_MS)
 
 # Nextor engine diagnostics (mailbox command names, trace ring, gap
 # timings). nextor.c silences every printf when RISKY_DEBUG=0 (the
