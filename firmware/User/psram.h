@@ -3,11 +3,10 @@
  * Description        : PSRAM bring-up, self-test, and ROM-image mirror
  *                      for the RISKYMSX2 cartridge handler.
  *
- *                      After PSRAM_Init() returns nonzero (PASS), the
- *                      32 KiB selector_rom[] image has been DMA-equivalent-copied
- *                      into PSRAM at PSRAM_BASE (0x80000000). The application
- *                      can then point cartpnt at PSRAM_BASE for zero-wait-state
- *                      read access from the .ramfunc cartridge handler.
+ *                      PSRAM_Init() initializes the peripheral/device and
+ *                      runs a small self-test. It does not clear PSRAM or
+ *                      mirror a ROM; mapper RAM is ready after a successful
+ *                      return without a full-window startup write.
  *
  *                      The self-test uses a deterministic 1 KiB pattern and
  *                      runs CPU-side read/write checks at three PSRAM offsets

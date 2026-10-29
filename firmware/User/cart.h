@@ -3,13 +3,13 @@
 
 #include "ch32v4x7.h"
 
-/* Mapper-RAM backing-store selector. The default mapper RAM is the
- * 128 KiB internal-SRAM array (8 x 16 KiB banks). PSRAM remains available
- * as an optional backend, but Nextor startup does not depend on PSRAM. */
+/* Mapper-RAM backing-store selector. The default is 1024 KiB of external
+ * PSRAM (64 x 16 KiB banks). The 128 KiB internal-SRAM backend remains
+ * available as a diagnostic/low-memory alternative. */
 #define CART_MAPPER_RAM_PSRAM  0
 #define CART_MAPPER_RAM_SRAM   1
 #ifndef CART_MAPPER_RAM_BACKEND
-#define CART_MAPPER_RAM_BACKEND CART_MAPPER_RAM_SRAM
+#define CART_MAPPER_RAM_BACKEND CART_MAPPER_RAM_PSRAM
 #endif
 #if (CART_MAPPER_RAM_BACKEND != CART_MAPPER_RAM_PSRAM) \
     && (CART_MAPPER_RAM_BACKEND != CART_MAPPER_RAM_SRAM)
@@ -101,14 +101,12 @@ void Cart_MSXReset_Release (void);
 void Cart_MSXReset_PulseForCapture (void);
 #endif
 
-/* Optional PSRAM mapper window. The default mapper-RAM backend is the
- * internal SRAM array below; this PSRAM region is used only when
- * CART_MAPPER_RAM_BACKEND selects PSRAM. Keep it separate from game images. */
+/* PSRAM mapper window. Keep it separate from game images. */
 #define CART_SLOTTED_BANK_PORT_BASE   0xFCU
 #define CART_SLOTTED_BANK_COUNT       256U
 #define CART_SLOTTED_BANK_SIZE        (16U * 1024U)
 
-/* SRAM-backed mapper RAM: 8 banks x 16 KiB = 128 KiB. Only used when
+/* Optional SRAM-backed mapper RAM: 8 banks x 16 KiB = 128 KiB. Only used when
  * CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM. */
 #define CART_SLOTTED_SRAM_BANKS       8U
 _Static_assert ((CART_SLOTTED_SRAM_BANKS
@@ -124,9 +122,10 @@ _Static_assert ((CART_SLOTTED_SRAM_BANKS
 #endif
 #define CART_SLOTTED_BANK_BASE_OFFSET (4U * 1024U * 1024U)
 
-/* Optional PSRAM backend capacity. The default SRAM backend exposes all
- * eight SRAM banks (128 KiB); this limit applies only to the PSRAM path. */
-#define CART_SLOTTED_PSRAM_BANKS_PRESENT 16U
+/* PSRAM mapper capacity: 64 banks x 16 KiB = 1024 KiB. The optional SRAM
+ * backend exposes eight banks (128 KiB). Bank numbers above 63 alias in the
+ * same way as on a 1 MiB physical MSX memory mapper. */
+#define CART_SLOTTED_PSRAM_BANKS_PRESENT 64U
 #define CART_SLOTTED_PSRAM_BANK_MASK \
     (CART_SLOTTED_PSRAM_BANKS_PRESENT - 1U)
 
@@ -279,9 +278,9 @@ typedef enum {
                                    * (inverted read, M1-qualified latches),
                                    * 0xFC..0xFF I/O bank registers latched
                                    * by the EXTI9_5 handler, sub-slot 0 =
-                                   * terminal ROM, sub-slot 1 = the 128 KiB
-                                   * SRAM mapper-RAM window (8 x 16 KiB
-                                   * banks), sub-slots 2/3 empty. Retained
+                                   * terminal ROM, sub-slot 1 = mapper RAM
+                                   * (1024 KiB PSRAM by default), sub-slots
+                                   * 2/3 empty. Retained
                                    * for compatibility; normal startup
                                    * installs CART_MAP_NEXTOR. */
     CART_MAP_NEXTOR     = 13,  /* Nextor kernel mapper: ASCII16K over the
@@ -361,9 +360,9 @@ uint32_t Cart_GetGameBase (void);
 /* Total cart-image window size (bytes). */
 uint32_t Cart_GetImageSize (void);
 
-/* Initialise GPIO + EXTI for the cartridge bus and install a default
- * mapper handler. PSRAM_Init() must have been called first (or the
- * handler reads from an unmapped address and hangs the MSX).
+/* Initialise GPIO + EXTI for the cartridge bus and install the no-mapper
+ * handler. The caller then installs Nextor; its kernel ROM is flash-served,
+ * while the mapper-RAM sub-slot is enabled after PSRAM initialization.
  *
  * NOTE: PE4 (MSX ~RESET) is configured here as a floating input only.
  * The firmware never drives it (read-only on most MSX2+ machines;
@@ -372,19 +371,12 @@ uint32_t Cart_GetImageSize (void);
  * race window without touching PE4, and loader.c::cmd_softreset for
  * the CMD_SOFTRESET reboot path.
  *
- * PE3 (~WAIT) is preserved as a low output when the startup wait hold
- * is active (see Cart_HoldMSXWait_Begin); Init_Cart returns PE3 to a
- * floating input otherwise. The bus-cycle handler also reads s_msx_wait_held
- * to know it can short-circuit its post-cycle SLTSL spin. */
+ * PE3 (~WAIT) is configured as a floating input during normal startup; this
+ * firmware does not hold the MSX while peripherals initialize. */
 void Init_Cart (void);
 
-/* Hold/release the Z80 using the standard cartridge ~WAIT input around
- * cart startup. Begin drives PE3 low; End returns PE3 to a floating
- * input and waits for the held bus cycle to finish. Must be called
- * with global IRQs disabled around the End sequence so the held cycle
- * is served exactly once. The startup assembler in startup_ch32v4x7.S
- * synchronizes to SLOTCLK and asserts ~WAIT before peripheral setup runs;
- * main() calls End after the slotted/flash handler is installed. */
+/* Optional bus-hold helpers for diagnostics only. The normal boot path does
+ * not call these; startup.S leaves ~WAIT untouched. */
 void Cart_HoldMSXWait_Begin (void);
 void Cart_HoldMSXWait_End (void);
 
@@ -396,7 +388,7 @@ void Cart_HoldMSXWait_End (void);
  * them. */
 
 /* Enable/disable sub-slot 1 mapper RAM after its backing store is ready.
- * With the default SRAM backend it is ready from startup; the mapper remains
+ * PSRAM is marked ready only after PSRAM_Init succeeds; the mapper remains
  * inactive until CART_MAP_NEXTOR is installed. */
 void Cart_SetMapperRamReady (uint8_t ready);
 

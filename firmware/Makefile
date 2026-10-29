@@ -168,18 +168,17 @@ CFLAGS_COMMON += -DCART_GAME_BASE_MB=$(GAME_BASE_MB)
 KONAMISCC_SCC_QUEUE ?= 1
 CFLAGS_COMMON += -DKONAMISCC_SCC_QUEUE=$(KONAMISCC_SCC_QUEUE)
 
-# Mapper-RAM (sub-slot 1) backing-store selector - see the block above
-# s_mapper_ram in User/cart.c and the CART_MAPPER_RAM_* values in
-# User/cart.h. Default 1 = 128 KiB of internal SRAM (8 banks), used by
-# the Nextor-only boot workflow. Set to 0 only to test the optional PSRAM
-# backing store; that configuration runs PSRAM_Init before releasing WAIT.
+# Mapper-RAM (sub-slot 1) backing-store selector - see s_mapper_ram in
+# User/cart.c and the CART_MAPPER_RAM_* values in User/cart.h. Default 0 =
+# 1024 KiB PSRAM (64 banks), initialized during startup. Set to 1 for the
+# optional 128 KiB internal SRAM backend.
 #
-#     make rebuild                         # default: 128 KiB SRAM backend
-#     make rebuild MAPPER_RAM_BACKEND=0    # optional PSRAM backend
+#     make rebuild                         # default: 1024 KiB PSRAM backend
+#     make rebuild MAPPER_RAM_BACKEND=1    # optional 128 KiB SRAM backend
 #
 # NOTE: changing this affects User/cart.c and User/main.c, but their .o
 # files do not track the flag - use `make rebuild`, not `make`.
-MAPPER_RAM_BACKEND ?= 1
+MAPPER_RAM_BACKEND ?= 0
 CFLAGS_COMMON += -DCART_MAPPER_RAM_BACKEND=$(MAPPER_RAM_BACKEND)
 
 # Cart timing instrumentation switch. Default 1 = the extended-stats

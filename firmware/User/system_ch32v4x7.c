@@ -596,14 +596,16 @@ static void SetSYSCLK_350MHz_HCLK_175MHz_HSE (void) {
 static void SetSYSCLK_400MHz_HCLK_200MHz_HSE (void) {
     __IO uint32_t StartUpCounter = 0, HSEStatus = 0, FLASH_Temp = 0;
 
-    /* HSE in BYPASS mode: external 25 MHz active oscillator drives OSC_IN. */
+    /* Passive 25 MHz crystal on OSC_IN/OSC_OUT, so HSEBYP stays clear.
+     * Cold startup needs a longer allowance than WCH's short HSE timeout.
+     * On failure SystemInit remains on HSI and main() can still install
+     * the flash-served Nextor mapper instead of leaving the MSX unserved. */
     RCC->CTLR |= (uint32_t)(RCC_HSEON);
 
-    /* Wait till HSE is ready and if Time out is reached exit */
     do {
         HSEStatus = RCC->CTLR & RCC_HSERDY;
         StartUpCounter++;
-    } while ((HSEStatus == 0) && (StartUpCounter != HSE_STARTUP_TIMEOUT));
+    } while ((HSEStatus == 0) && (StartUpCounter != 0x100000U));
 
     if ((RCC->CTLR & RCC_HSERDY) != RESET) {
         HSEStatus = (uint32_t)0x01;
@@ -622,15 +624,18 @@ static void SetSYSCLK_400MHz_HCLK_200MHz_HSE (void) {
         /* PLL configuration: HCLK = (HSE * 16) / 2 = 200 MHz */
         RCC->CFGR0 |= (uint32_t)(RCC_PLLSRC_HSE | RCC_PLLMULL16);
 
-        /* Enable PLL */
+        /* Enable PLL. Never leave the cart handler uninstalled forever if
+         * the crystal or PLL fails to lock during a cold power-on. */
         RCC->CTLR |= RCC_PLLON;
-        /* Wait till PLL is ready */
+        StartUpCounter = 0U;
         while ((RCC->CTLR & RCC_PLLRDY) == 0) {
+            if (++StartUpCounter >= 0x100000U) return;
         }
 
         RCC->CFGR2 |= (uint32_t)(RCC_SYSPLLSRC_PLL | RCC_SYSPLLDIV1);
-        /* Wait till PLL clock is used as SYSPLLSRC clock source */
+        StartUpCounter = 0U;
         while ((RCC->CFGR2 & (uint32_t)RCC_SYSPLLSRC) != (uint32_t)RCC_SYSPLLSRC_PLL) {
+            if (++StartUpCounter >= 0x100000U) return;
         }
 
         /* Select FLASH clock frequency*/
@@ -648,14 +653,17 @@ static void SetSYSCLK_400MHz_HCLK_200MHz_HSE (void) {
         /* Select PLL as system clock source */
         RCC->CFGR2 |= (uint32_t)RCC_SYSPLL_GATE;
         RCC->CFGR0 |= (uint32_t)RCC_SW_PLL;
-        /* Wait till PLL is used as system clock source */
+        StartUpCounter = 0U;
         while ((RCC->CFGR0 & (uint32_t)RCC_SWS) != (uint32_t)0x08) {
+            if (++StartUpCounter >= 0x100000U) {
+                /* Do not leave a requested-but-never-confirmed PLL switch
+                 * latched; continue on HSI so the cart handler can start. */
+                RCC->CFGR0 &= ~(uint32_t)RCC_SW;
+                return;
+            }
         }
     } else {
-        /*
-         * If HSE fails to start-up, the application will have wrong clock
-         * configuration. User can add here some code to deal with this error
-         */
+        /* Continue on HSI if HSE did not become ready. */
     }
 }
 

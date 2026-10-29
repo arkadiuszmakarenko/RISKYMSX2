@@ -20,9 +20,9 @@ volatile Cart_Mapper g_mapper = CART_MAP_NONE;
 
 static struct MSXState *const g_state = &s_state;
 
-/* ~WAIT hold flag. Set by the startup asm in startup_ch32v4x7.S
- * (reset vector) and by Cart_HoldMSXWait_Begin(), cleared by
- * Cart_HoldMSXWait_End(). While set, every bus-cycle handler MUST skip
+/* Optional diagnostic ~WAIT hold flag. Normal startup leaves it clear;
+ * only Cart_HoldMSXWait_Begin/End modify it. While set, every bus-cycle
+ * handler MUST skip
  * the post-cycle SLTSL spin (the cycle never finishes until End() releases
  * ~WAIT), and Cart_SetMapper_Safe MUST NOT clear INTFR (the pending edge
  * is the held cycle itself). The flag is also a public peek through the
@@ -369,7 +369,7 @@ int Cart_SetMapper_Safe (Cart_Mapper m) {
     /* Phase 2: wait for ~SLTSL to go high (no in-flight Z80 cycle).
      * Bounded loop so a stuck-low ~SLTSL doesn't wedge the firmware;
      * we still drive the bus off and proceed after the timeout.
-     * Skipped while the startup ~WAIT hold is active: the held cycle
+     * Skipped during an optional ~WAIT hold: the held cycle
      * never completes until Cart_HoldMSXWait_End() releases ~WAIT,
      * so spinning for ~SLTSL would deadlock the boot sequence. */
     if (s_msx_wait_held == 0U) {
@@ -601,16 +601,15 @@ void Init_Cart (void) {
     GPIOD->CFGHR = 0x44444444U;
 
     /* Control bus PE0(SLTSL) PE1(RD) PE2(WR) PE5(MREQ) as floating
-     * inputs. PE3 = WAIT: if the startup asm asserted ~WAIT before this
-     * function ran, preserve the low-output hold (otherwise the MSX's
-     * first probe cycle would slip past us during init). PE4 = MSX
+     * inputs. PE3 = WAIT: preserve an explicit diagnostic hold, but normal
+     * startup leaves PE3 floating. PE4 = MSX
      * ~RESET stays a floating input - the firmware never drives it
      * (see the cart.h note near Init_Cart). */
     {
         uint32_t control_cfg = 0x44444444U;
         if (s_msx_wait_held != 0U) {
-            /* OUTDR bit 3 was already cleared by the startup asm; the
-             * push-pull output mode keeps it low. */
+            /* The diagnostic helper cleared the latch before changing the
+             * mode; keep the output low while that optional hold is active. */
             control_cfg = (control_cfg & ~(0xFU << 12)) | (0x3U << 12);
         }
         GPIOE->CFGLR = control_cfg;
@@ -646,52 +645,30 @@ void Init_Cart (void) {
     EXTI->INTFR = EXTI_INTENR_MR8;
     NVIC_DisableIRQ (EXTI9_5_IRQn);
 
-    /* Install the no-mapper handler by default. main()/CLI installs the
-     * real mapper via Cart_SetMapper() once PSRAM_Init() has succeeded.
+    /* Install the no-mapper handler briefly. main() installs Nextor
+     * immediately; its kernel ROM is flash-served and does not require
+     * PSRAM initialization. The mapper-RAM sub-slot stays disabled until
+     * PSRAM_Init() succeeds.
      * SetVTFIRQ writes VTFADDR[0]; NVIC_EnableIRQ sets the per-IRQ
      * enable bit in PFIC->IENR. Both must be done for VTF dispatch to
      * fire. */
     SetVTFIRQ ((uint32_t)Cart_EXTI0_None_Handler, EXTI0_IRQn, 0, ENABLE);
-    /* EXTI0 IRQ is ALWAYS enabled here, including during the startup
-     * ~WAIT hold. The held cycle needs to be served by the active VTF
-     * handler before Cart_HoldMSXWait_End() releases ~WAIT - otherwise
-     * the BIOS's probe cycle completes with floating data bus and
-     * reads 0xFF ("no cart present"). The None handler short-circuits
-     * its SLTSL spin on s_msx_wait_held so it returns immediately and
-     * leaves the data bus off; the terminal/flash/nextor handlers
-     * honour the same flag and serve the byte before returning. */
+    /* EXTI0 is enabled for normal cart cycles. main() installs Nextor
+     * immediately after Init_Cart returns. */
     NVIC_EnableIRQ (EXTI0_IRQn);
     NVIC_SetPriority (EXTI0_IRQn, 0x00);
     __enable_irq();
 }
 
 /* ------------------------------------------------------------------ */
-/* MSX ~WAIT line (PE3) - startup low-output hold.                      */
+/* MSX ~WAIT line (PE3) - optional diagnostic hold.                      */
 /* ------------------------------------------------------------------ */
-/* ~WAIT is a cartridge-defined active-low input to the Z80, so unlike the
- * optional cart-edge reset signal it is intended to be driven by a cart.
- * The startup asm in startup_ch32v4x7.S drives ~WAIT low before any
- * clock/peripheral setup, guaranteeing the bus is held from the very
- * first Z80 cycle. main() calls Cart_HoldMSXWait_End() once the cart
- * handler is installed and ready to serve the held cycle.
- *
- * Why a hold during boot: the MSX BIOS may already be leaving its own
- * reset while the MCU is still coming up. Without a hold, the BIOS
- * probes the cart slot before the mapper is armed and reads open bus
- * (0xFF) at 0x4000 - which the BIOS interprets as "no cartridge
- * present" and the boot falls through to BASIC without ever entering
- * our terminal code. Holding ~WAIT stalls the BIOS's first probe
- * cycle until the terminal/nextor mapper is fully wired up.
- *
- * Release contract: PMBH. Cart_HoldMSXWait_End() returns PE3 to a
- * floating input. The firmware NEVER drives ~WAIT high (the bus is
- * wired-OR on the cart edge; driving it high would fight any future
- * secondary cart that wants to assert wait). */
+/* Normal startup never drives ~WAIT. These helpers are retained only for
+ * explicit diagnostics; a long hold can stop the MSX, so never wrap the
+ * PSRAM/USB initialization with them. The release path returns PE3 to a
+ * floating input and never drives the shared line high. */
 
-/* Assert cartridge ~WAIT (PE3) from C code. The startup asm already
- * does this before any clock setup; this entry point exists so a
- * secondary hold can be installed later (e.g. around a mapper swap
- * that needs to span a cart cycle). Idempotent. */
+/* Assert cartridge ~WAIT (PE3) for a diagnostic. Idempotent. */
 void Cart_HoldMSXWait_Begin (void) {
     RCC_PB2PeriphClockCmd (RCC_PB2Periph_GPIOE, ENABLE);
     /* Drop the output latch LOW before flipping PE3 to an output - any
@@ -812,7 +789,7 @@ static inline __attribute__((always_inline))
 void Cart_EndCycle (void) {
     EXTI->INTFR = EXTI_INTENR_MR0;
     /* Release spin: poll GPIOE->INDR bit 0 until SLTSL goes high.
-     * Skipped while the startup ~WAIT hold is active - Cart_HoldMSXWait_End()
+     * Skipped during an optional ~WAIT hold - Cart_HoldMSXWait_End()
      * owns the bus-off after the held cycle completes. */
     if (s_msx_wait_held == 0U) {
         while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }
@@ -1790,7 +1767,7 @@ void Cart_EXTI0_ROM16k_Handler (void) {
     }
 
     EXTI->INTFR = EXTI_INTENR_MR0;
-    /* Skip the SLTSL spin while the startup ~WAIT hold is active -
+    /* Skip the SLTSL spin during an optional ~WAIT hold -
      * Cart_HoldMSXWait_End() owns the bus-off after the cycle
      * completes. */
     if (s_msx_wait_held == 0U) {
@@ -2476,8 +2453,8 @@ void Cart_EXTI0_Slotted_Handler (void) {
 
     EXTI->INTFR = EXTI_INTENR_MR0;
     if (s_msx_wait_held != 0U) {
-        /* The caller owns the final bus-off while a startup hold is
-         * active; never wait for SLTSL here or the hold deadlocks. */
+        /* The caller owns the final bus-off during an optional diagnostic
+         * hold; never wait for SLTSL or that hold would deadlock. */
         return;
     }
     while ((GPIOE->INDR & CART_SLTSL_MASK) == 0U) { }

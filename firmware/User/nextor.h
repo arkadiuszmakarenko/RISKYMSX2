@@ -279,8 +279,13 @@ extern "C" {
  * ====================================================================== */
 
 /* Initialise the mapper + mailbox to power-on state. Called from main()
- * and from Cart_SetMapper() on every swap to CART_MAP_NEXTOR. */
+ * and from Cart_SetMapper() on every swap to CART_MAP_NEXTOR. This is a
+ * non-blocking reset; it must not delay cart-bus interrupt setup. */
 void Nextor_Init (void);
+
+/* Complete the time-base calibration from main-loop context after startup.
+ * Kept separate from Nextor_Init so installing a mapper never stalls the Z80. */
+void Nextor_ClockInit (void);
 
 /* Main-loop service hook: drains the command in flight into the result
  * FIFO. Must be called from main(), never from IRQ context - it is the

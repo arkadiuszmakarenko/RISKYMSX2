@@ -1,6 +1,6 @@
 /********************************** (C) COPYRIGHT *******************************
  * File Name          : psram.c
- * Description        : PSRAM init + self-test + selector_rom mirror for RISKYMSX2.
+ * Description        : PSRAM initialization and self-test for RISKYMSX2.
  *
  *                      The init sequence is a near-byte-for-byte port of the
  *                      WCH reference example at PSRAM/PSRAM/User/main.c
@@ -13,8 +13,8 @@
  *                        - Self-test runs a 1 KiB walking-byte pattern at
  *                          three different PSRAM offsets so multi-row
  *                          addressing gets exercised.
- *                        - After the test, selector_rom[32768] is mirrored to
- *                          PSRAM_BUS_BASE and byte-compared.
+ *                        - No ROM mirror or full-window erase is performed;
+ *                          mapper RAM may be exposed after the self-test.
  *                        - On any failure, the cart handler keeps using the
  *                          flash image (g_psram_mirror_base stays 0).
  *
@@ -179,25 +179,11 @@ static void psram_set_rd_latency(uint32_t mr0_freq, uint32_t latency,
     }
 }
 
-/* Fill the entire cart image window with 0xFF (the MSX "open bus"
- * pattern for an unpopulated slot). NO embedded ROM is mirrored at
- * boot any more: with the mapper left at NONE the MSX drops to BASIC;
- * a cart image is expected via XLOAD. (The selector_rom[] mirror + verify
- * this replaces was the boot-time "initial tests" the diagnostic ROM
- * ran on every reset.)
- *
- * Clear the CPU lockup watchdog so this 2M-word bulk write cannot
- * hang the core if a transient PSRAM hiccup stalls the bus. The
- * default WCH init leaves EXTEN_LKUPEN set on this chip. */
-static uint8_t psram_copy_rom(void)
-{
-    EXTEN->EXTEN_CTR &= ~EXTEN_LKUPEN;
-
-    volatile uint32_t *dst32 = (volatile uint32_t *)PSRAM_BUS_BASE;
-    uint32_t words = PSRAM_CART_SIZE / 4U;
-    for (uint32_t i = 0; i < words; i++) dst32[i] = 0xFFFFFFFFU;
-    return PSRAM_OK;
-}
+/* The mapper is an ordinary RAM device: its initial contents are undefined,
+ * just as on physical MSX memory mappers. Do not clear the whole PSRAM during
+ * startup. That obsolete game-image initialization delayed mapper-RAM
+ * availability and extended the period in which the Nextor ROM could execute
+ * while its memory mapper was still hidden. */
 
 /* Self-test: write/read a known pattern at `offset`, return PSRAM_OK on match.
  * On mismatch, prints a one-line diagnostic via printf so the UART log shows
@@ -265,7 +251,7 @@ uint8_t PSRAM_FullTest (void)
 
     /* Clear the CPU lockup watchdog - a hard PSRAM bus stall must
      * surface as a mismatch printout, not a silent core hang
-     * (same precaution as psram_copy_rom). */
+     * (same precaution for any long-running PSRAM test). */
     EXTEN->EXTEN_CTR &= ~EXTEN_LKUPEN;
 
     /* Pass 1: write the address-encoded pattern. */
@@ -432,12 +418,8 @@ uint8_t PSRAM_Init(void)
         return err;
     }
 
-    /* 6. Mirror selector_rom[] into PSRAM and verify byte-for-byte. */
-    err = psram_copy_rom();
-    if (err != PSRAM_OK) {
-        return err;
-    }
-
+    /* No full-window erase or ROM mirror: only the peripheral and device
+     * need initialization before mapper RAM can be exposed to the MSX. */
     g_psram_mirror_base = PSRAM_BUS_BASE;
     return PSRAM_OK;
 }

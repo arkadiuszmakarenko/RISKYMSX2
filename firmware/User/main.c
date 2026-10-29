@@ -5,9 +5,9 @@
  * Date               : 2025/06/06
  * Description        : Main program body.
  *
- * The cartridge boots directly into the Nextor kernel mapper. The startup
- * ~WAIT hold keeps the MSX idle while the mapper RAM and USB disk backend
- * are initialized; no terminal-ROM boot or mapper swap is required.
+ * The cartridge boots directly into the Nextor kernel mapper. Startup never
+ * asserts the MSX ~WAIT line: the cart handler is installed early and the
+ * MSX keeps running while PSRAM and USB initialize.
  *********************************************************************************
  * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
  * Attention: This software (modified or not) and binary are used for
@@ -23,28 +23,22 @@
 
 int main (void) {
 
-    /* Synchronize the C-side hold flag with the low PE3 output asserted
-     * by startup_ch32v4x7.S. Keep the MSX held until Nextor and its disk
-     * backend are ready. */
-    Cart_HoldMSXWait_Begin ();
-
-    /* Heartbeat: toggle the LED in a tight loop so we can confirm
-     * main() is reached even if USART is dead. PA0 = LEDFLASH. */
-    {
-        RCC_PB2PeriphClockCmd(RCC_PB2Periph_GPIOA, ENABLE);
-        GPIOA->CFGLR &= ~(0xFu << 0);
-        GPIOA->CFGLR |=  (0x3u << 0);
-        for (volatile int i = 0; i < 200000; i++) {
-            GPIOA->OUTDR ^= (1u << 0);
-        }
-    }
-
     SystemCoreClockUpdate();
     Delay_Init();
 
+    /* Keep the unserved-bus window as short as possible: install the
+     * flash-served Nextor ROM before UART setup or external-memory init. */
+    RawDisk_Init ();
+    Cart_SetMapperRamReady (CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM);
+    Init_Cart ();
+    const int mapper_rc = Cart_SetMapper (CART_MAP_NEXTOR);
 
     USART_Printf_Init (921600);
     PWR_VDD18LevelConfig(PWR_VDD18_Level1);
+
+    if (mapper_rc != 0) {
+        printf ("ERROR: could not install Nextor mapper\r\n");
+    }
 
 #if CART_MSX_RESET_PULSE
     /* Optional: cold-start the MSX from a known instant so a logic
@@ -55,15 +49,12 @@ int main (void) {
     Cart_MSXReset_PulseForCapture ();
 #endif
 
-    /* Install the expanded Nextor mapper before releasing the startup
-     * ~WAIT hold. Sub-slot 0 serves the flash-resident kernel; with the
-     * default backend sub-slot 1 exposes 128 KiB of SRAM as eight 16 KiB
-     * banks through FC..FF. Each port selects the bank for its matching
-     * 16 KiB CPU page, including page 3. */
-    Init_Cart ();
-#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_SRAM
-    Cart_SetMapperRamReady (1U);
-#else
+    printf ("SystemClk:%d\r\n", SystemCoreClock);
+    printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
+
+    /* Initialize PSRAM while the Nextor ROM handler remains live. No WAIT
+     * is asserted; mapper RAM stays hidden until initialization passes. */
+#if CART_MAPPER_RAM_BACKEND == CART_MAPPER_RAM_PSRAM
     {
         const uint8_t psram_rc = PSRAM_Init ();
         if (psram_rc == PSRAM_OK) {
@@ -74,21 +65,10 @@ int main (void) {
         }
     }
 #endif
-    Cart_SetMapper_Safe (CART_MAP_NEXTOR);
-
-    printf ("SystemClk:%d\r\n", SystemCoreClock);
-    printf ("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
-
-    /* The mapper's mailbox is initialized by Cart_SetMapper above.
-     * Initialize the media state before USB callbacks can invalidate it. */
-    RawDisk_Init ();
+    Nextor_ClockInit ();
     USB_Initialization ();
 
-    /* USB and the disk backend are ready before the BIOS probes the cart.
-     * Release WAIT; the Nextor handler now serves the first ROM cycle. */
-    Cart_HoldMSXWait_End ();
-
-    printf ("\r\n=== boot complete (Nextor mapper active) ===\r\n");
+    printf ("\r\n=== startup complete (Nextor mapper active; MSX was not held) ===\r\n");
 
     /* Service Nextor's mailbox and USB lifecycle. The engine drives
      * the USB enumeration, INQUIRY, READ CAPACITY and IDENTIFY state

@@ -486,9 +486,9 @@ static uint32_t ms_since_prev (void) {
 }
 #endif
 
-/* ms_now() reading taken in Nextor_Init, used by raw_probe's boot
- * delay. 0 until then (so a host-side unit test that never calls
- * Nextor_Init is not delayed). */
+/* ms_now() reading taken in Nextor_ClockInit, used by raw_probe's boot
+ * delay. 0 until then (so a host-side unit test that never initializes
+ * the clock is not delayed). */
 static uint32_t s_boot_start_ms;
 
 /* ========================================================================
@@ -679,16 +679,11 @@ void Nextor_Init (void) {
      * been re-probed. */
     s_mb.mbr_dumped    = 0U;
     s_mb.params_dumped = 0U;
-    /* Calibrate the log's millisecond scale before the first request can
-     * be timed. See the "Request timestamps" section. This is the only
-     * place that costs a known 4 ms, and it is safe there: the Nextor
-     * mapper is installed once per boot (or per soft reset into the cart,
-     * terminal.c's soft_reset_into_cart), not per driver query - the Z80
-     * reaches its own banks by writing the bank registers, not by asking
-     * for a mapper swap. */
+    /* Do not spend the 4 ms clock calibration here. Cart_SetMapper runs
+     * with the cart IRQ enabled during cold boot; a delay in this function
+     * leaves the Z80's next ROM/mailbox cycle unanswered. */
     s_cyc_per_ms = 0U;
-    cyc_calibrate ();
-    s_boot_start_ms = ms_now ();
+    s_boot_start_ms = 0U;
     /* Start the probe-idle window CLOSED. The Z80 starts talking the
      * instant the mapper swap completes, and the window has to already be
      * shut when it does - otherwise the window is "250 ms since
@@ -722,6 +717,17 @@ void Nextor_Init (void) {
      * RawDisk_Init() is a power-on call and now lives in main(). The
      * invalidation path for a stick that really does go away is
      * Nextor_CacheInvalidate(), which the USB disconnect path calls. */
+}
+
+/* Complete startup calibration in main-loop context. No cart mapper state
+ * changes here, so the bus handler can continue serving ROM and mailbox
+ * accesses while the short delay runs. Nextor_Service also calibrates
+ * lazily for compatibility with later mapper swaps. */
+void Nextor_ClockInit (void) {
+    if (s_cyc_per_ms == 0U) {
+        cyc_calibrate ();
+    }
+    s_boot_start_ms = ms_now ();
 }
 
 /* LBA argument, little-endian - MB_SEND pushes the driver's (DE) block
@@ -1191,6 +1197,13 @@ static void ident_pad (uint8_t *out, const char *src, uint8_t width) {
  * happen - the driver is spinning in MB_POLL on the DONE bit for the
  * whole of this function. */
 void Nextor_Service (void) {
+    /* Mapper installation deliberately leaves calibration out of the
+     * cart-handler setup path. Complete it here for both direct startup
+     * and compatibility callers that switch mappers later. */
+    if (s_cyc_per_ms == 0U) {
+        cyc_calibrate ();
+    }
+
     /* Nothing to answer, so use the time to get the medium ready. The
      * only slow work outside a command is enumeration + READ CAPACITY +
      * INQUIRY in RawDisk_Probe (driven from raw_probe); READs and
