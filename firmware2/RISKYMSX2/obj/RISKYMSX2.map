@@ -1,0 +1,1937 @@
+Archive member included to satisfy reference by file (symbol)
+
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+                              obj/Peripheral/src/ch32v4x7_usart.o (__udivdi3)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+                              obj/User/FATFS/usb_disk.o (__riscv_save_12)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o) (__clz_tab)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+                              obj/User/FATFS/usb_disk.o (puts)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o) (__swbuf_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o) (__swsetup_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o) (_impure_ptr)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-memset.o)
+                              obj/Debug/debug.o (memset)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o) (_free_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o) (__malloc_free_list)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o) (__malloc_lock)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o) (_fflush_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o) (__sglue)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o) (_fwalk_sglue)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o) (__smakebuf_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o) (__sread)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o) (_close_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o) (errno)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o) (_fstat_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o) (_isatty_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o) (_lseek_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o) (_read_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o) (_sbrk_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o) (_write_r)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o) (_close)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o) (_fstat)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o) (_isatty)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o) (_lseek)
+/opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+                              /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o) (_read)
+
+Discarded input sections
+
+ .text          0x00000000        0x0 obj/Core/core_riscv.o
+ .data          0x00000000        0x0 obj/Core/core_riscv.o
+ .bss           0x00000000        0x0 obj/Core/core_riscv.o
+ .text.__get_MSTATUS
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_MSTATUS
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MISA
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_MISA
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MTVEC
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_MTVEC
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MSCRATCH
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_MSCRATCH
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MEPC
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_MEPC
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MCAUSE
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_MCAUSE
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MTVAL
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_MTVAL
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MVENDORID
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MARCHID
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MIMPID
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_MHARTID
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_SP
+                0x00000000        0x4 obj/Core/core_riscv.o
+ .text.__get_VXRM
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_VXRM
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VXSAT
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_VXSAT
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VCSR
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_VCSR
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VL
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VTYPE
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VLENB
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VCONTROL
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_VCONTROL
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VPPADDR
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__set_VPPADDR
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VCAUSE
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .text.__get_VTVAL
+                0x00000000        0x6 obj/Core/core_riscv.o
+ .debug_info    0x00000000      0x66a obj/Core/core_riscv.o
+ .debug_abbrev  0x00000000      0x113 obj/Core/core_riscv.o
+ .debug_loc     0x00000000      0x1ce obj/Core/core_riscv.o
+ .debug_aranges
+                0x00000000      0x128 obj/Core/core_riscv.o
+ .debug_ranges  0x00000000      0x118 obj/Core/core_riscv.o
+ .debug_line    0x00000000      0x68c obj/Core/core_riscv.o
+ .debug_str     0x00000000      0x3be obj/Core/core_riscv.o
+ .comment       0x00000000       0x20 obj/Core/core_riscv.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/Core/core_riscv.o
+ .debug_frame   0x00000000      0x230 obj/Core/core_riscv.o
+ .riscv.attributes
+                0x00000000       0xad obj/Core/core_riscv.o
+ .text          0x00000000        0x0 obj/Debug/debug.o
+ .data          0x00000000        0x0 obj/Debug/debug.o
+ .bss           0x00000000        0x0 obj/Debug/debug.o
+ .text.USART_Printf_Init
+                0x00000000       0xb0 obj/Debug/debug.o
+ .text.SDI_Printf_Enable
+                0x00000000       0x68 obj/Debug/debug.o
+ .srodata.cst8  0x00000000        0x8 obj/Debug/debug.o
+ .text          0x00000000        0x0 obj/Debug/quiet_printf.o
+ .data          0x00000000        0x0 obj/Debug/quiet_printf.o
+ .bss           0x00000000        0x0 obj/Debug/quiet_printf.o
+ .text          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_gpio.o
+ .data          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_gpio.o
+ .bss           0x00000000        0x0 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_DeInit
+                0x00000000       0xe4 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_AFIODeInit
+                0x00000000       0x28 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_Init
+                0x00000000      0x498 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_StructInit
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_ReadInputDataBit
+                0x00000000        0xc obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_ReadInputData
+                0x00000000        0x8 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_ReadOutputDataBit
+                0x00000000        0xc obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_ReadOutputData
+                0x00000000        0x8 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_SetBits
+                0x00000000        0x4 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_ResetBits
+                0x00000000        0x4 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_WriteBit
+                0x00000000        0xa obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_Write
+                0x00000000        0x4 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_PinLockConfig
+                0x00000000       0x10 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_EventOutputConfig
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_EventOutputCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_PinRemapConfig
+                0x00000000      0x136 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text.GPIO_EXTILineConfig
+                0x00000000       0x28 obj/Peripheral/src/ch32v4x7_gpio.o
+ .text          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_psram.o
+ .data          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_psram.o
+ .bss           0x00000000        0x0 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_StructInit
+                0x00000000       0x2c obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAMGetData
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAMDMASet
+                0x00000000       0x2c obj/Peripheral/src/ch32v4x7_psram.o
+ .text.ClearFifoMode
+                0x00000000       0x1a obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_DMA_Cmd
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_DMA_CFIFO
+                0x00000000       0x22 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_DMA_DIR
+                0x00000000       0x28 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_CEPW_Cmd
+                0x00000000       0x1e obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_Exti_LP
+                0x00000000       0x1e obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_GetFlagStatus
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_ITConfig
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_GetTranFlagStatus
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_ClearITPendingBit
+                0x00000000        0xa obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_SyncBur_write_Cmd_Set
+                0x00000000       0x1e obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_SyncBur_Read_Cmd_Set
+                0x00000000       0x22 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_Sync_write_Cmd_Set
+                0x00000000       0x22 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_Sync_Read_Cmd_Set
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_Refresh_Cmd_Set
+                0x00000000       0x1e obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_Global_RST_Cmd_Set
+                0x00000000       0x22 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_WRReg_Cmd_Set
+                0x00000000       0x22 obj/Peripheral/src/ch32v4x7_psram.o
+ .text.PSRAM_RDReg_Cmd_Set
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_psram.o
+ .text          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_pwr.o
+ .data          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_pwr.o
+ .bss           0x00000000        0x0 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_DeInit
+                0x00000000       0x2c obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_BackupAccessCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_PVDCmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_PVDLevelConfig
+                0x00000000       0x10 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_WakeUpPinCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_EnterSTOPMode
+                0x00000000       0x78 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_EnterSTANDBYMode
+                0x00000000       0x34 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_GetFlagStatus
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_ClearFlag
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_EnterSTANDBYMode_RAM
+                0x00000000       0x30 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_EnterSTANDBYMode_RAM_LV
+                0x00000000       0x30 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_EnterSTANDBYMode_RAM_VBAT_EN
+                0x00000000       0x30 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_EnterSTANDBYMode_RAM_LV_VBAT_EN
+                0x00000000       0x30 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_EnterSTOPMode_RAM_LV
+                0x00000000       0x7c obj/Peripheral/src/ch32v4x7_pwr.o
+ .text.PWR_VDD18Cmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_pwr.o
+ .text          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_rcc.o
+ .data          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_rcc.o
+ .bss           0x00000000        0x0 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_DeInit
+                0x00000000       0x66 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_HSEConfig
+                0x00000000       0x3c obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_WaitForHSEStartUp
+                0x00000000       0x3c obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_AdjustHSICalibrationValue
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_HSICmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_PLLConfig
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_PLLCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_SYSCLKConfig
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_GetSYSCLKSource
+                0x00000000        0xa obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_HCLKConfig
+                0x00000000       0x10 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_PCLK1Config
+                0x00000000       0x10 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_PCLK2Config
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ITConfig
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ADCCLKConfig
+                0x00000000       0x14 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_LSEConfig
+                0x00000000       0x28 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_LSICmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_RTCCLKConfig
+                0x00000000        0xc obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_RTCCLKCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_GetClocksFreq
+                0x00000000      0x162 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_PB1PeriphClockCmd
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_PB2PeriphResetCmd
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_PB1PeriphResetCmd
+                0x00000000       0x1c obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_BackupResetCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ClockSecuritySystemCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_MCOConfig
+                0x00000000        0x8 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_GetFlagStatus
+                0x00000000       0x3a obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ClearFlag
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_GetITStatus
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ClearITPendingBit
+                0x00000000        0x8 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_I2S2CLKConfig
+                0x00000000       0x48 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_I2S3CLKConfig
+                0x00000000       0x48 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_RNGCLKConfig
+                0x00000000       0x48 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_UTMI2cmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ADCClockSourceUSBHSConfig
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_SYSPLLConfig
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_SYSPLLGATEcmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ADCCLKSourceConfig
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_ADCCLKDutyCycleConfig
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_LTDCCLKConfig
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text.RCC_LTDCClockSourceDivConfig
+                0x00000000       0x14 obj/Peripheral/src/ch32v4x7_rcc.o
+ .srodata.ADCPrescTable
+                0x00000000        0x4 obj/Peripheral/src/ch32v4x7_rcc.o
+ .rodata.PLLMULTB
+                0x00000000       0x20 obj/Peripheral/src/ch32v4x7_rcc.o
+ .srodata.PBPrescTable
+                0x00000000        0x8 obj/Peripheral/src/ch32v4x7_rcc.o
+ .rodata.HBPrescTable
+                0x00000000       0x10 obj/Peripheral/src/ch32v4x7_rcc.o
+ .text          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_usart.o
+ .data          0x00000000        0x0 obj/Peripheral/src/ch32v4x7_usart.o
+ .bss           0x00000000        0x0 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_DeInit
+                0x00000000      0x1ba obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_Init
+                0x00000000      0x100 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_StructInit
+                0x00000000       0x26 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_ClockInit
+                0x00000000       0x22 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_ClockStructInit
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_Cmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_ITConfig
+                0x00000000       0x42 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_DMACmd
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_SetAddress
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_WakeUpConfig
+                0x00000000       0x14 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_ReceiverWakeUpCmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_LINBreakDetectLengthConfig
+                0x00000000       0x14 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_LINCmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_ReceiveData
+                0x00000000        0x8 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_SendBreak
+                0x00000000        0xa obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_SetGuardTime
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_SetPrescaler
+                0x00000000       0x14 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_SmartCardCmd
+                0x00000000       0x18 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_SmartCardNACKCmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_HalfDuplexCmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_IrDAConfig
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_IrDACmd
+                0x00000000       0x16 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_ClearFlag
+                0x00000000        0x8 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_GetITStatus
+                0x00000000       0x68 obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_ClearITPendingBit
+                0x00000000        0xe obj/Peripheral/src/ch32v4x7_usart.o
+ .text.USART_MARKorSPACE_Config
+                0x00000000       0x12 obj/Peripheral/src/ch32v4x7_usart.o
+ .srodata.cst8  0x00000000        0x8 obj/Peripheral/src/ch32v4x7_usart.o
+ .text          0x00000000        0x0 obj/Startup/startup_ch32v4x7.o
+ .data          0x00000000        0x0 obj/Startup/startup_ch32v4x7.o
+ .bss           0x00000000        0x0 obj/Startup/startup_ch32v4x7.o
+ .text          0x00000000        0x0 obj/User/FATFS/usb_disk.o
+ .data          0x00000000        0x0 obj/User/FATFS/usb_disk.o
+ .bss           0x00000000        0x0 obj/User/FATFS/usb_disk.o
+ .rodata.USB_TryEnsureMounted.part.0.str1.4
+                0x00000000       0xc0 obj/User/FATFS/usb_disk.o
+ .text.USB_TryEnsureMounted.part.0
+                0x00000000       0xda obj/User/FATFS/usb_disk.o
+ .text.USBH_PreDeal
+                0x00000000       0xa8 obj/User/FATFS/usb_disk.o
+ .text.ClearUSB
+                0x00000000       0x50 obj/User/FATFS/usb_disk.o
+ .text.USB_ScsiReadCapacityOnce
+                0x00000000        0x8 obj/User/FATFS/usb_disk.o
+ .text.USB_ScsiReadCapacity16Once
+                0x00000000        0x8 obj/User/FATFS/usb_disk.o
+ .text.USB_PublishEndpoints
+                0x00000000       0x22 obj/User/FATFS/usb_disk.o
+ .text.usb_scsi_write_sector_timed
+                0x00000000       0x2c obj/User/FATFS/usb_disk.o
+ .text.usb_scsi_test_unit_ready
+                0x00000000       0xea obj/User/FATFS/usb_disk.o
+ .text.USB_InvalidateMount
+                0x00000000       0x3c obj/User/FATFS/usb_disk.o
+ .text.USB_TryEnsureMounted
+                0x00000000       0x22 obj/User/FATFS/usb_disk.o
+ .rodata.USB_FileToPSRAM.str1.4
+                0x00000000      0x4ad obj/User/FATFS/usb_disk.o
+ .text.USB_FileToPSRAM
+                0x00000000      0x452 obj/User/FATFS/usb_disk.o
+ .rodata.USB_ListDir.str1.4
+                0x00000000       0x7c obj/User/FATFS/usb_disk.o
+ .text.USB_ListDir
+                0x00000000       0xe4 obj/User/FATFS/usb_disk.o
+ .sbss.s_fatfs_mounted
+                0x00000000        0x1 obj/User/FATFS/usb_disk.o
+ .sbss.USB_ProgressCB
+                0x00000000        0x4 obj/User/FATFS/usb_disk.o
+ .bss.s_sector_buf
+                0x00000000      0x200 obj/User/FATFS/usb_disk.o
+ .sbss.s_chunk_dbg
+                0x00000000        0x4 obj/User/FATFS/usb_disk.o
+ .sbss.s_dbg_count
+                0x00000000        0x4 obj/User/FATFS/usb_disk.o
+ .bss.g_fatfs   0x00000000      0x23c obj/User/FATFS/usb_disk.o
+ .text          0x00000000        0x0 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .data          0x00000000        0x0 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .bss           0x00000000        0x0 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text.USBHS_RCC_Init
+                0x00000000       0x44 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text.USBHSH_CheckRootHubPortEnable
+                0x00000000        0xe obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text.USBHSH_CheckRootHubPortSpeed
+                0x00000000       0x2c obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text.USBHSH_SetSelfAddr
+                0x00000000        0xe obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text.USBHSH_GetStrDescr
+                0x00000000       0xce obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text          0x00000000        0x0 obj/User/cart.o
+ .data          0x00000000        0x0 obj/User/cart.o
+ .bss           0x00000000        0x0 obj/User/cart.o
+ .text.Cart_GetMapper
+                0x00000000        0xa obj/User/cart.o
+ .text.Cart_HoldMSXWait_Begin
+                0x00000000       0x4c obj/User/cart.o
+ .text.Cart_HoldMSXWait_End
+                0x00000000       0x52 obj/User/cart.o
+ .text          0x00000000        0x0 obj/User/ch32v4x7_it.o
+ .data          0x00000000        0x0 obj/User/ch32v4x7_it.o
+ .bss           0x00000000        0x0 obj/User/ch32v4x7_it.o
+ .text          0x00000000        0x0 obj/User/main.o
+ .data          0x00000000        0x0 obj/User/main.o
+ .bss           0x00000000        0x0 obj/User/main.o
+ .text          0x00000000        0x0 obj/User/nextor.o
+ .data          0x00000000        0x0 obj/User/nextor.o
+ .bss           0x00000000        0x0 obj/User/nextor.o
+ .text.Nextor_ForceProbe
+                0x00000000       0x14 obj/User/nextor.o
+ .text          0x00000000        0x0 obj/User/nextor_rom.o
+ .data          0x00000000        0x0 obj/User/nextor_rom.o
+ .bss           0x00000000        0x0 obj/User/nextor_rom.o
+ .text          0x00000000        0x0 obj/User/psram.o
+ .data          0x00000000        0x0 obj/User/psram.o
+ .bss           0x00000000        0x0 obj/User/psram.o
+ .text          0x00000000        0x0 obj/User/raw_disk.o
+ .data          0x00000000        0x0 obj/User/raw_disk.o
+ .bss           0x00000000        0x0 obj/User/raw_disk.o
+ .text.RawDisk_LastFailure
+                0x00000000        0xa obj/User/raw_disk.o
+ .text.RawDisk_WriteSectorTimed
+                0x00000000       0x8e obj/User/raw_disk.o
+ .text          0x00000000        0x0 obj/User/system_ch32v4x7.o
+ .data          0x00000000        0x0 obj/User/system_ch32v4x7.o
+ .bss           0x00000000        0x0 obj/User/system_ch32v4x7.o
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .eh_frame      0x00000000       0x28 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+ .eh_frame      0x00000000       0xf8 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+ .text.__swbuf  0x00000000       0x14 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-memset.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-memset.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+ .text.fflush   0x00000000       0x34 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__fp_lock
+                0x00000000        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__fp_unlock
+                0x00000000        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__sfp    0x00000000       0xce /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__sfp_lock_acquire
+                0x00000000        0x2 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__sfp_lock_release
+                0x00000000        0x2 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__fp_lock_all
+                0x00000000       0x1a /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__fp_unlock_all
+                0x00000000       0x1a /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+ .text.__seofread
+                0x00000000        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+ .text._reclaim_reent
+                0x00000000      0x112 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+ .text          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+ .data          0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+ .bss           0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+FLASH            0x00000000         0x00080000         xr
+RAM              0x20000400         0x00031c00         xrw
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+LOAD obj/Core/core_riscv.o
+LOAD obj/Debug/debug.o
+LOAD obj/Debug/quiet_printf.o
+LOAD obj/Peripheral/src/ch32v4x7_gpio.o
+LOAD obj/Peripheral/src/ch32v4x7_psram.o
+LOAD obj/Peripheral/src/ch32v4x7_pwr.o
+LOAD obj/Peripheral/src/ch32v4x7_rcc.o
+LOAD obj/Peripheral/src/ch32v4x7_usart.o
+LOAD obj/Startup/startup_ch32v4x7.o
+LOAD obj/User/FATFS/usb_disk.o
+LOAD obj/User/USB_Host/ch32v407_usbhs_host.o
+LOAD obj/User/cart.o
+LOAD obj/User/ch32v4x7_it.o
+LOAD obj/User/main.o
+LOAD obj/User/nextor.o
+LOAD obj/User/nextor_rom.o
+LOAD obj/User/psram.o
+LOAD obj/User/raw_disk.o
+LOAD obj/User/system_ch32v4x7.o
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libm_nano.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libc_nano.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a
+START GROUP
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libc_nano.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a
+END GROUP
+START GROUP
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libc_nano.a
+LOAD /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a
+END GROUP
+                0x00000800                        __stack_size = 0x800
+                [!provide]                        PROVIDE (_stack_size = __stack_size)
+
+.init           0x00000000      0x1a0
+                0x00000000                        _sinit = .
+                0x00000000                        . = ALIGN (0x4)
+ *(SORT_NONE(.init))
+ .init          0x00000000      0x1a0 obj/Startup/startup_ch32v4x7.o
+                0x00000000                _start
+                0x000001a0                        . = ALIGN (0x4)
+                0x000001a0                        _einit = .
+
+.text           0x000001a0     0x59ec
+                0x000001a0                        . = ALIGN (0x4)
+ *(.text)
+ .text          0x000001a0       0x68 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+                0x000001a0                __riscv_save_12
+                0x000001a8                __riscv_save_8
+                0x000001a8                __riscv_save_11
+                0x000001a8                __riscv_save_9
+                0x000001a8                __riscv_save_10
+                0x000001b8                __riscv_save_7
+                0x000001b8                __riscv_save_4
+                0x000001b8                __riscv_save_6
+                0x000001b8                __riscv_save_5
+                0x000001d4                __riscv_save_1
+                0x000001d4                __riscv_save_3
+                0x000001d4                __riscv_save_2
+                0x000001d4                __riscv_save_0
+                0x000001e0                __riscv_restore_12
+                0x000001e4                __riscv_restore_10
+                0x000001e4                __riscv_restore_11
+                0x000001e4                __riscv_restore_8
+                0x000001e4                __riscv_restore_9
+                0x000001f0                __riscv_restore_5
+                0x000001f0                __riscv_restore_6
+                0x000001f0                __riscv_restore_4
+                0x000001f0                __riscv_restore_7
+                0x000001fc                __riscv_restore_3
+                0x000001fc                __riscv_restore_2
+                0x000001fc                __riscv_restore_0
+                0x000001fc                __riscv_restore_1
+ .text          0x00000208       0x10 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-memset.o)
+                0x00000208                memset
+ *(.text.*)
+ .text.Delay_Init
+                0x00000218       0x28 obj/Debug/debug.o
+                0x00000218                Delay_Init
+ .text.Delay_Us
+                0x00000240       0x32 obj/Debug/debug.o
+                0x00000240                Delay_Us
+ .text.Delay_Ms
+                0x00000272       0x32 obj/Debug/debug.o
+                0x00000272                Delay_Ms
+ .text._write   0x000002a4       0x3c obj/Debug/debug.o
+                0x000002a4                _write
+ .text._sbrk    0x000002e0       0x30 obj/Debug/debug.o
+                0x000002e0                _sbrk
+ .text.__wrap_printf
+                0x00000310       0x16 obj/Debug/quiet_printf.o
+                0x00000310                __wrap_printf
+ .text.GPIO_IPD_Unused
+                0x00000326      0x460 obj/Peripheral/src/ch32v4x7_gpio.o
+                0x00000326                GPIO_IPD_Unused
+ .text.PSRAMDeInit
+                0x00000786       0x12 obj/Peripheral/src/ch32v4x7_psram.o
+                0x00000786                PSRAMDeInit
+ .text.PSRAMInit
+                0x00000798       0x28 obj/Peripheral/src/ch32v4x7_psram.o
+                0x00000798                PSRAMInit
+ .text.PSRAMSetWrLatency
+                0x000007c0       0x1a obj/Peripheral/src/ch32v4x7_psram.o
+                0x000007c0                PSRAMSetWrLatency
+ .text.PSRAMSetRdLatency
+                0x000007da       0x14 obj/Peripheral/src/ch32v4x7_psram.o
+                0x000007da                PSRAMSetRdLatency
+ .text.PSRAMSetData
+                0x000007ee        0xa obj/Peripheral/src/ch32v4x7_psram.o
+                0x000007ee                PSRAMSetData
+ .text.PSRAM_Set_Busy
+                0x000007f8       0x1c obj/Peripheral/src/ch32v4x7_psram.o
+                0x000007f8                PSRAM_Set_Busy
+ .text.PSRAM_Set_MW
+                0x00000814       0x1c obj/Peripheral/src/ch32v4x7_psram.o
+                0x00000814                PSRAM_Set_MW
+ .text.PSRAM_Set_CMD
+                0x00000830       0x22 obj/Peripheral/src/ch32v4x7_psram.o
+                0x00000830                PSRAM_Set_CMD
+ .text.PSRAM_Set_MR_ADDR
+                0x00000852       0x22 obj/Peripheral/src/ch32v4x7_psram.o
+                0x00000852                PSRAM_Set_MR_ADDR
+ .text.PWR_VDD18LevelConfig
+                0x00000874       0x1c obj/Peripheral/src/ch32v4x7_pwr.o
+                0x00000874                PWR_VDD18LevelConfig
+ .text.RCC_HBPeriphClockCmd
+                0x00000890       0x1c obj/Peripheral/src/ch32v4x7_rcc.o
+                0x00000890                RCC_HBPeriphClockCmd
+ .text.RCC_PB2PeriphClockCmd
+                0x000008ac       0x1c obj/Peripheral/src/ch32v4x7_rcc.o
+                0x000008ac                RCC_PB2PeriphClockCmd
+ .text.RCC_HBPeriphResetCmd
+                0x000008c8       0x1c obj/Peripheral/src/ch32v4x7_rcc.o
+                0x000008c8                RCC_HBPeriphResetCmd
+ .text.RCC_USBHSPLLCLKConfig
+                0x000008e4       0x1a obj/Peripheral/src/ch32v4x7_rcc.o
+                0x000008e4                RCC_USBHSPLLCLKConfig
+ .text.RCC_USBHSPLLReferConfig
+                0x000008fe       0x1a obj/Peripheral/src/ch32v4x7_rcc.o
+                0x000008fe                RCC_USBHSPLLReferConfig
+ .text.RCC_UTMI1cmd
+                0x00000918       0x18 obj/Peripheral/src/ch32v4x7_rcc.o
+                0x00000918                RCC_UTMI1cmd
+ .text.USART_SendData
+                0x00000930        0x8 obj/Peripheral/src/ch32v4x7_usart.o
+                0x00000930                USART_SendData
+ .text.USART_GetFlagStatus
+                0x00000938        0xa obj/Peripheral/src/ch32v4x7_usart.o
+                0x00000938                USART_GetFlagStatus
+ .text.vector_handler
+                0x00000942        0x2 obj/Startup/startup_ch32v4x7.o
+                0x00000942                EXTI2_IRQHandler
+                0x00000942                TIM8_TRG_COM_IRQHandler
+                0x00000942                TIM8_CC_IRQHandler
+                0x00000942                DMA1_Channel12_IRQHandler
+                0x00000942                USART9_IRQHandler
+                0x00000942                TIM1_CC_IRQHandler
+                0x00000942                TIM6_IRQHandler
+                0x00000942                SysTick_Handler
+                0x00000942                I3C_ER_IRQHandler
+                0x00000942                PVD_IRQHandler
+                0x00000942                SDIO_IRQHandler
+                0x00000942                DMA2_Channel8_IRQHandler
+                0x00000942                EXTI3_IRQHandler
+                0x00000942                DMA2_Channel9_IRQHandler
+                0x00000942                USART10_IRQHandler
+                0x00000942                USART8_IRQHandler
+                0x00000942                EXTI0_IRQHandler
+                0x00000942                CAN1_RX0_IRQHandler
+                0x00000942                ADC1_2_IRQHandler
+                0x00000942                Break_Point_Handler
+                0x00000942                SPI1_IRQHandler
+                0x00000942                USART5_IRQHandler
+                0x00000942                TAMPER_IRQHandler
+                0x00000942                TIM8_UP_IRQHandler
+                0x00000942                Ecall_M_Mode_Handler
+                0x00000942                USART7_IRQHandler
+                0x00000942                DMA2_Channel2_IRQHandler
+                0x00000942                DMA1_Channel4_IRQHandler
+                0x00000942                USART6_IRQHandler
+                0x00000942                USART3_IRQHandler
+                0x00000942                RTC_IRQHandler
+                0x00000942                DMA1_Channel7_IRQHandler
+                0x00000942                CAN1_RX1_IRQHandler
+                0x00000942                USBHS2WakeUp_IRQHandler
+                0x00000942                DVP_IRQHandler
+                0x00000942                TIM4_IRQHandler
+                0x00000942                DMA2_Channel1_IRQHandler
+                0x00000942                USBHS1_IRQHandler
+                0x00000942                I2C1_EV_IRQHandler
+                0x00000942                USART4_IRQHandler
+                0x00000942                DMA1_Channel6_IRQHandler
+                0x00000942                DMA2_Channel4_IRQHandler
+                0x00000942                TIM3_IRQHandler
+                0x00000942                RCC_IRQHandler
+                0x00000942                TIM1_TRG_COM_IRQHandler
+                0x00000942                DMA1_Channel1_IRQHandler
+                0x00000942                DMA2_Channel7_IRQHandler
+                0x00000942                EXTI15_10_IRQHandler
+                0x00000942                DMA1_Channel8_IRQHandler
+                0x00000942                I3C_EV_IRQHandler
+                0x00000942                TIM7_IRQHandler
+                0x00000942                TIM5_IRQHandler
+                0x00000942                LTDC_IRQHandler
+                0x00000942                ETH_WKUP_IRQHandler
+                0x00000942                SPI2_IRQHandler
+                0x00000942                I3CWakeup_IRQHandler
+                0x00000942                CAN1_TX_IRQHandler
+                0x00000942                DMA2_Channel5_IRQHandler
+                0x00000942                USBHS2_IRQHandler
+                0x00000942                DMA1_Channel5_IRQHandler
+                0x00000942                EXTI4_IRQHandler
+                0x00000942                RNG_IRQHandler
+                0x00000942                DMA1_Channel9_IRQHandler
+                0x00000942                DMA1_Channel3_IRQHandler
+                0x00000942                ETH_IRQHandler
+                0x00000942                TIM1_UP_IRQHandler
+                0x00000942                WWDG_IRQHandler
+                0x00000942                DMA2_Channel11_IRQHandler
+                0x00000942                Ecall_U_Mode_Handler
+                0x00000942                DMA2_Channel6_IRQHandler
+                0x00000942                TIM2_IRQHandler
+                0x00000942                SW_Handler
+                0x00000942                ARGB_IRQHandler
+                0x00000942                TIM1_BRK_IRQHandler
+                0x00000942                DMA2_Channel10_IRQHandler
+                0x00000942                PSRAM_IRQHandler
+                0x00000942                EXTI1_IRQHandler
+                0x00000942                RTCAlarm_IRQHandler
+                0x00000942                DMA1_Channel13_IRQHandler
+                0x00000942                USBHS1Wakeup_IRQHandler
+                0x00000942                USART2_IRQHandler
+                0x00000942                DMA1_Channel2_IRQHandler
+                0x00000942                TIM8_BRK_IRQHandler
+                0x00000942                DMA1_Channel10_IRQHandler
+                0x00000942                CAN1_SCE_IRQHandler
+                0x00000942                FLASH_IRQHandler
+                0x00000942                USART1_IRQHandler
+                0x00000942                SPI3_IRQHandler
+                0x00000942                I2C1_ER_IRQHandler
+                0x00000942                DMA1_Channel11_IRQHandler
+                0x00000942                DMA2_Channel3_IRQHandler
+ .text.handle_reset
+                0x00000944       0x9e obj/Startup/startup_ch32v4x7.o
+                0x00000944                handle_reset
+ .text.usb_recv_csw_wait.constprop.0
+                0x000009e2       0xde obj/User/FATFS/usb_disk.o
+ .text.usb_recv_csw_wait.constprop.1
+                0x00000ac0       0xde obj/User/FATFS/usb_disk.o
+ .text.usb_recv_csw_wait.constprop.2
+                0x00000b9e       0xe2 obj/User/FATFS/usb_disk.o
+ .text.scsi_read_capacity16_once
+                0x00000c80      0x242 obj/User/FATFS/usb_disk.o
+ .text.scsi_write_sector_once.constprop.0
+                0x00000ec2      0x1ce obj/User/FATFS/usb_disk.o
+ .text.scsi_read_capacity10_once
+                0x00001090      0x1da obj/User/FATFS/usb_disk.o
+ .text.msc_mass_storage_reset
+                0x0000126a       0x82 obj/User/FATFS/usb_disk.o
+                0x0000126a                msc_mass_storage_reset
+ .text.USB_Initialization
+                0x000012ec       0x28 obj/User/FATFS/usb_disk.o
+                0x000012ec                USB_Initialization
+ .text.USBH_EnumRootDevice
+                0x00001314      0x1a0 obj/User/FATFS/usb_disk.o
+                0x00001314                USBH_EnumRootDevice
+ .text.usb_scsi_read_blocks
+                0x000014b4      0x1d8 obj/User/FATFS/usb_disk.o
+                0x000014b4                usb_scsi_read_blocks
+ .text.usb_scsi_request_sense
+                0x0000168c      0x162 obj/User/FATFS/usb_disk.o
+                0x0000168c                usb_scsi_request_sense
+ .text.usb_scsi_read_capacity
+                0x000017ee       0x6c obj/User/FATFS/usb_disk.o
+                0x000017ee                usb_scsi_read_capacity
+ .text.usb_scsi_read_sectors
+                0x0000185a      0x25c obj/User/FATFS/usb_disk.o
+                0x0000185a                usb_scsi_read_sectors
+ .text.usb_scsi_read_sector
+                0x00001ab6        0x6 obj/User/FATFS/usb_disk.o
+                0x00001ab6                usb_scsi_read_sector
+ .text.usb_scsi_write_sector
+                0x00001abc       0xa8 obj/User/FATFS/usb_disk.o
+                0x00001abc                usb_scsi_write_sector
+ .text.usb_scsi_write_blocks
+                0x00001b64      0x218 obj/User/FATFS/usb_disk.o
+                0x00001b64                usb_scsi_write_blocks
+ .text.usb_scsi_inquiry
+                0x00001d7c      0x162 obj/User/FATFS/usb_disk.o
+                0x00001d7c                usb_scsi_inquiry
+ .text.USB_TryEnsureEnumerated
+                0x00001ede       0xbe obj/User/FATFS/usb_disk.o
+                0x00001ede                USB_TryEnsureEnumerated
+ .text.USBHS_RCC_Init.part.0
+                0x00001f9c       0x82 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text.USBHS_Host_Init
+                0x0000201e       0x72 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x0000201e                USBHS_Host_Init
+ .text.USBHSH_CheckRootHubPortStatus
+                0x00002090       0x3c obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x00002090                USBHSH_CheckRootHubPortStatus
+ .text.USBHSH_ResetRootHubPort
+                0x000020cc       0x3e obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x000020cc                USBHSH_ResetRootHubPort
+ .text.USBHSH_EnableRootHubPort
+                0x0000210a       0x52 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x0000210a                USBHSH_EnableRootHubPort
+ .text.USBHSH_Transact
+                0x0000215c      0x15c obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x0000215c                USBHSH_Transact
+ .text.USBHSH_CtrlTransfer.part.0
+                0x000022b8      0x39e obj/User/USB_Host/ch32v407_usbhs_host.o
+ .text.USBHSH_CtrlTransfer
+                0x00002656       0x40 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x00002656                USBHSH_CtrlTransfer
+ .text.USBHSH_GetDeviceDescr
+                0x00002696       0x74 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x00002696                USBHSH_GetDeviceDescr
+ .text.USBHSH_GetConfigDescr
+                0x0000270a       0xbc obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x0000270a                USBHSH_GetConfigDescr
+ .text.USBHSH_SetUsbAddress
+                0x000027c6       0x68 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x000027c6                USBHSH_SetUsbAddress
+ .text.USBHSH_SetUsbConfig
+                0x0000282e       0x48 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x0000282e                USBHSH_SetUsbConfig
+ .text.USBHSH_ClearEndpStall
+                0x00002876       0x46 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x00002876                USBHSH_ClearEndpStall
+ .text.USBHSH_GetEndpData
+                0x000028bc       0x66 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x000028bc                USBHSH_GetEndpData
+ .text.USBHSH_SendEndpData
+                0x00002922       0x56 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x00002922                USBHSH_SendEndpData
+ .text.Cart_EXTI0_None_Handler
+                0x00002978       0x22 obj/User/cart.o
+                0x00002978                Cart_EXTI0_None_Handler
+ .text.Cart_EXTI0_Nextor_Handler
+                0x0000299a      0x332 obj/User/cart.o
+                0x0000299a                Cart_EXTI0_Nextor_Handler
+ .text.Cart_SetMapperRamReady
+                0x00002ccc        0xa obj/User/cart.o
+                0x00002ccc                Cart_SetMapperRamReady
+ .text.Cart_SetMapper
+                0x00002cd6       0x84 obj/User/cart.o
+                0x00002cd6                Cart_SetMapper
+ .text.Init_Cart
+                0x00002d5a      0x118 obj/User/cart.o
+                0x00002d5a                Init_Cart
+ .text.NMI_Handler
+                0x00002e72        0x2 obj/User/ch32v4x7_it.o
+                0x00002e72                NMI_Handler
+ .text.HardFault_Handler
+                0x00002e74       0x10 obj/User/ch32v4x7_it.o
+                0x00002e74                HardFault_Handler
+ .text.startup.main
+                0x00002e84       0x40 obj/User/main.o
+                0x00002e84                main
+ .text.Nextor_RequestPending
+                0x00002ec4       0x18 obj/User/nextor.o
+                0x00002ec4                Nextor_RequestPending
+ .text.Nextor_CacheInvalidate
+                0x00002edc        0x4 obj/User/nextor.o
+                0x00002edc                Nextor_CacheInvalidate
+ .text.Nextor_Init
+                0x00002ee0       0x56 obj/User/nextor.o
+                0x00002ee0                Nextor_Init
+ .text.Nextor_ClockInit
+                0x00002f36       0x8c obj/User/nextor.o
+                0x00002f36                Nextor_ClockInit
+ .text.Nextor_Service
+                0x00002fc2      0x868 obj/User/nextor.o
+                0x00002fc2                Nextor_Service
+ .text.Nextor_WriteByte
+                0x0000382a      0x10e obj/User/nextor.o
+                0x0000382a                Nextor_WriteByte
+ .text.Nextor_ReadByte
+                0x00003938       0x7c obj/User/nextor.o
+                0x00003938                Nextor_ReadByte
+ .text.PSRAM_Init
+                0x000039b4      0x3f6 obj/User/psram.o
+                0x000039b4                PSRAM_Init
+ .text.RawDisk_Init
+                0x00003daa       0x2c obj/User/raw_disk.o
+                0x00003daa                RawDisk_Init
+ .text.RawDisk_Invalidate
+                0x00003dd6       0x28 obj/User/raw_disk.o
+                0x00003dd6                RawDisk_Invalidate
+ .text.RawDisk_HasProbed
+                0x00003dfe        0xa obj/User/raw_disk.o
+                0x00003dfe                RawDisk_HasProbed
+ .text.RawDisk_Probe
+                0x00003e08      0x314 obj/User/raw_disk.o
+                0x00003e08                RawDisk_Probe
+ .text.RawDisk_IsPresent
+                0x0000411c       0x14 obj/User/raw_disk.o
+                0x0000411c                RawDisk_IsPresent
+ .text.RawDisk_SectorCount
+                0x00004130        0xa obj/User/raw_disk.o
+                0x00004130                RawDisk_SectorCount
+ .text.RawDisk_SectorSize
+                0x0000413a        0xa obj/User/raw_disk.o
+                0x0000413a                RawDisk_SectorSize
+ .text.RawDisk_Geometry
+                0x00004144       0x48 obj/User/raw_disk.o
+                0x00004144                RawDisk_Geometry
+ .text.RawDisk_MediaState
+                0x0000418c       0x1c obj/User/raw_disk.o
+                0x0000418c                RawDisk_MediaState
+ .text.RawDisk_MediaLatchConsume
+                0x000041a8        0xa obj/User/raw_disk.o
+                0x000041a8                RawDisk_MediaLatchConsume
+ .text.RawDisk_Manufacturer
+                0x000041b2        0xa obj/User/raw_disk.o
+                0x000041b2                RawDisk_Manufacturer
+ .text.RawDisk_Model
+                0x000041bc        0xa obj/User/raw_disk.o
+                0x000041bc                RawDisk_Model
+ .text.RawDisk_ReadSectors
+                0x000041c6       0x80 obj/User/raw_disk.o
+                0x000041c6                RawDisk_ReadSectors
+ .text.RawDisk_WriteSectors
+                0x00004246       0x80 obj/User/raw_disk.o
+                0x00004246                RawDisk_WriteSectors
+ .text.RawDisk_WriteSectorsBulk
+                0x000042c6       0x7e obj/User/raw_disk.o
+                0x000042c6                RawDisk_WriteSectorsBulk
+ .text.RawDisk_ReadSectorsBulk
+                0x00004344       0x7e obj/User/raw_disk.o
+                0x00004344                RawDisk_ReadSectorsBulk
+ .text.SystemInit
+                0x000043c2      0x1b4 obj/User/system_ch32v4x7.o
+                0x000043c2                SystemInit
+ .text.SystemCoreClockUpdate
+                0x00004576      0x108 obj/User/system_ch32v4x7.o
+                0x00004576                SystemCoreClockUpdate
+ .text.__udivdi3
+                0x0000467e      0x2ee /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+                0x0000467e                __udivdi3
+ .text._puts_r  0x0000496c       0x96 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+                0x0000496c                _puts_r
+ .text.puts     0x00004a02        0xa /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+                0x00004a02                puts
+ .text.__swbuf_r
+                0x00004a0c       0x8a /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+                0x00004a0c                __swbuf_r
+ .text.__swsetup_r
+                0x00004a96       0xb6 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+                0x00004a96                __swsetup_r
+ .text._free_r  0x00004b4c       0x9e /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+                0x00004b4c                _free_r
+ .text.sbrk_aligned
+                0x00004bea       0x50 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+ .text._malloc_r
+                0x00004c3a      0x114 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+                0x00004c3a                _malloc_r
+ .text.__malloc_lock
+                0x00004d4e        0x2 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+                0x00004d4e                __malloc_lock
+ .text.__malloc_unlock
+                0x00004d50        0x2 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+                0x00004d50                __malloc_unlock
+ .text.__sflush_r
+                0x00004d52      0x11e /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+                0x00004d52                __sflush_r
+ .text._fflush_r
+                0x00004e70       0x38 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+                0x00004e70                _fflush_r
+ .text.std      0x00004ea8       0x5e /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.stdio_exit_handler
+                0x00004f06       0x18 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.cleanup_stdio
+                0x00004f1e       0x50 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.global_stdio_init.part.0
+                0x00004f6e       0x42 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .text.__sinit  0x00004fb0       0x18 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+                0x00004fb0                __sinit
+ .text._fwalk_sglue
+                0x00004fc8       0x5e /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+                0x00004fc8                _fwalk_sglue
+ .text.__swhatbuf_r
+                0x00005026       0x54 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+                0x00005026                __swhatbuf_r
+ .text.__smakebuf_r
+                0x0000507a       0x78 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+                0x0000507a                __smakebuf_r
+ .text.__sread  0x000050f2       0x2a /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+                0x000050f2                __sread
+ .text.__swrite
+                0x0000511c       0x46 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+                0x0000511c                __swrite
+ .text.__sseek  0x00005162       0x30 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+                0x00005162                __sseek
+ .text.__sclose
+                0x00005192        0x6 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+                0x00005192                __sclose
+ .text._close_r
+                0x00005198       0x2a /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+                0x00005198                _close_r
+ .text._fstat_r
+                0x000051c2       0x2c /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+                0x000051c2                _fstat_r
+ .text._isatty_r
+                0x000051ee       0x2a /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+                0x000051ee                _isatty_r
+ .text._lseek_r
+                0x00005218       0x2e /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+                0x00005218                _lseek_r
+ .text._read_r  0x00005246       0x2e /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+                0x00005246                _read_r
+ .text._sbrk_r  0x00005274       0x2c /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+                0x00005274                _sbrk_r
+ .text._write_r
+                0x000052a0       0x30 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+                0x000052a0                _write_r
+ .text._close   0x000052d0        0xc /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+                0x000052d0                _close
+ .text._fstat   0x000052dc        0xc /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+                0x000052dc                _fstat
+ .text._isatty  0x000052e8        0xc /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+                0x000052e8                _isatty
+ .text._lseek   0x000052f4        0xc /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+                0x000052f4                _lseek
+ .text._read    0x00005300        0xc /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+                0x00005300                _read
+ *(.rodata)
+ *(.rodata*)
+ .rodata.scsi_write_sector_once.constprop.0.str1.4
+                0x0000530c      0x6d1 obj/User/FATFS/usb_disk.o
+                                 0xe2 (size before relaxing)
+ .rodata.scsi_read_capacity10_once.str1.4
+                0x000059dd        0x0 obj/User/FATFS/usb_disk.o
+                                 0xd7 (size before relaxing)
+ .rodata.msc_mass_storage_reset.str1.4
+                0x000059dd        0x0 obj/User/FATFS/usb_disk.o
+                                 0x23 (size before relaxing)
+ .rodata.usb_scsi_read_blocks.str1.4
+                0x000059dd        0x0 obj/User/FATFS/usb_disk.o
+                                 0x8d (size before relaxing)
+ .rodata.usb_scsi_read_sectors.str1.4
+                0x000059dd        0x0 obj/User/FATFS/usb_disk.o
+                                 0xff (size before relaxing)
+ .rodata.usb_scsi_write_sector.str1.4
+                0x000059dd        0x0 obj/User/FATFS/usb_disk.o
+                                 0xd5 (size before relaxing)
+ .rodata.usb_scsi_write_blocks.str1.4
+                0x000059dd        0x0 obj/User/FATFS/usb_disk.o
+                                0x117 (size before relaxing)
+ .rodata.USB_TryEnsureEnumerated.str1.4
+                0x000059dd        0x0 obj/User/FATFS/usb_disk.o
+                                 0x46 (size before relaxing)
+ *fill*         0x000059dd        0x3 
+ .rodata.Nextor_Service
+                0x000059e0       0x50 obj/User/nextor.o
+ .rodata.Nextor_ReadByte
+                0x00005a30       0x18 obj/User/nextor.o
+ .rodata.s_cmd_args
+                0x00005a48       0x14 obj/User/nextor.o
+ .rodata.PSRAM_Init.str1.4
+                0x00005a5c        0x0 obj/User/psram.o
+                                 0x37 (size before relaxing)
+ .rodata.RawDisk_ReadSectors.str1.4
+                0x00005a5c        0x0 obj/User/raw_disk.o
+                                 0xad (size before relaxing)
+ .rodata.RawDisk_WriteSectors.str1.4
+                0x00005a5c        0x0 obj/User/raw_disk.o
+                                 0x45 (size before relaxing)
+ .rodata.PLLMULTB
+                0x00005a5c       0x20 obj/User/system_ch32v4x7.o
+ .rodata.HBPrescTable
+                0x00005a7c       0x10 obj/User/system_ch32v4x7.o
+ .rodata.__clz_tab
+                0x00005a8c      0x100 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+                0x00005a8c                __clz_tab
+ *(.gnu.linkonce.t.*)
+                0x00005b8c                        . = ALIGN (0x4)
+
+.ramfunc        0x00005b8c       0x80
+ .ramfunc       0x00005b8c       0x80 obj/User/cart.o
+                0x00005b8c                EXTI9_5_IRQHandler
+
+.cartrom        0x00005c0c    0x20000
+ .cartrom       0x00005c0c    0x20000 obj/User/nextor_rom.o
+                0x00005c0c                nextor_rom
+
+.rela.dyn       0x00025c0c        0x0
+ .rela.text._sbrk
+                0x00025c0c        0x0 obj/Debug/debug.o
+ .rela.sdata.curbrk.0
+                0x00025c0c        0x0 obj/Debug/debug.o
+ .rela.init     0x00025c0c        0x0 obj/Debug/debug.o
+ .rela.text.handle_reset
+                0x00025c0c        0x0 obj/Debug/debug.o
+
+.fini           0x00025c0c        0x0
+ *(SORT_NONE(.fini))
+                0x00025c0c                        . = ALIGN (0x4)
+                [!provide]                        PROVIDE (_etext = .)
+                [!provide]                        PROVIDE (_eitcm = .)
+
+.preinit_array  0x00025c0c        0x0
+                [!provide]                        PROVIDE (__preinit_array_start = .)
+ *(.preinit_array)
+                [!provide]                        PROVIDE (__preinit_array_end = .)
+
+.init_array     0x00025c0c        0x0
+                [!provide]                        PROVIDE (__init_array_start = .)
+ *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))
+ *(.init_array EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .ctors)
+                [!provide]                        PROVIDE (__init_array_end = .)
+
+.fini_array     0x00025c0c        0x0
+                [!provide]                        PROVIDE (__fini_array_start = .)
+ *(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*))
+ *(.fini_array EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .dtors)
+                [!provide]                        PROVIDE (__fini_array_end = .)
+
+.ctors
+ *crtbegin.o(.ctors)
+ *crtbegin?.o(.ctors)
+ *(EXCLUDE_FILE(*crtend?.o *crtend.o) .ctors)
+ *(SORT_BY_NAME(.ctors.*))
+ *(.ctors)
+
+.dtors
+ *crtbegin.o(.dtors)
+ *crtbegin?.o(.dtors)
+ *(EXCLUDE_FILE(*crtend?.o *crtend.o) .dtors)
+ *(SORT_BY_NAME(.dtors.*))
+ *(.dtors)
+
+.dalign         0x20000400        0x0 load address 0x00025c0c
+                0x20000400                        . = ALIGN (0x4)
+                0x20000400                        PROVIDE (_data_vma = .)
+
+.dlalign        0x00025c0c        0x0
+                0x00025c0c                        . = ALIGN (0x4)
+                0x00025c0c                        PROVIDE (_data_lma = .)
+
+.data           0x20000400       0x78 load address 0x00025c0c
+ *(.gnu.linkonce.r.*)
+ *(.data .data.*)
+ .data._impure_data
+                0x20000400       0x4c /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+                0x20000400                _impure_data
+ .data.__sglue  0x2000044c        0xc /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+                0x2000044c                __sglue
+ *(.gnu.linkonce.d.*)
+                0x20000458                        . = ALIGN (0x8)
+                0x20000c58                        PROVIDE (__global_pointer$ = (. + 0x800))
+ *(.sdata .sdata.*)
+ .sdata.curbrk.0
+                0x20000458        0x4 obj/Debug/debug.o
+ .sdata.s_last_failure
+                0x2000045c        0x4 obj/User/raw_disk.o
+ .sdata.SystemCoreClock
+                0x20000460        0x4 obj/User/system_ch32v4x7.o
+                0x20000460                SystemCoreClock
+ .sdata.SystemClock
+                0x20000464        0x4 obj/User/system_ch32v4x7.o
+                0x20000464                SystemClock
+ .sdata._impure_ptr
+                0x20000468        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+                0x20000468                _impure_ptr
+ *(.sdata2.*)
+ *(.gnu.linkonce.s.*)
+                0x20000470                        . = ALIGN (0x8)
+ *fill*         0x2000046c        0x4 
+ *(.srodata.cst16)
+ *(.srodata.cst8)
+ *(.srodata.cst4)
+ .srodata.cst4  0x20000470        0x4 obj/User/nextor.o
+ *(.srodata.cst2)
+ *(.srodata .srodata.*)
+ .srodata.nextor_rom_len
+                0x20000474        0x4 obj/User/nextor_rom.o
+                0x20000474                nextor_rom_len
+                0x20000478                        . = ALIGN (0x4)
+                0x20000478                        PROVIDE (_edata = .)
+
+.bss            0x20000478     0x5298 load address 0x00025c84
+                0x20000478                        . = ALIGN (0x4)
+                0x20000478                        PROVIDE (_sbss = .)
+ *(.sbss*)
+ .sbss.p_ms     0x20000478        0x2 obj/Debug/debug.o
+ .sbss.p_us     0x2000047a        0x1 obj/Debug/debug.o
+ .sbss.msc_interface_number
+                0x2000047b        0x1 obj/User/FATFS/usb_disk.o
+ .sbss.in_tog   0x2000047c        0x2 obj/User/FATFS/usb_disk.o
+                0x2000047c                in_tog
+ .sbss.usb_in_ep
+                0x2000047e        0x1 obj/User/FATFS/usb_disk.o
+                0x2000047e                usb_in_ep
+ *fill*         0x2000047f        0x1 
+ .sbss.out_tog  0x20000480        0x2 obj/User/FATFS/usb_disk.o
+                0x20000480                out_tog
+ .sbss.usb_out_ep
+                0x20000482        0x1 obj/User/FATFS/usb_disk.o
+                0x20000482                usb_out_ep
+ *fill*         0x20000483        0x1 
+ .sbss.s_slotted_bank_regs
+                0x20000484        0x4 obj/User/cart.o
+ .sbss.s_mapper_ram_ready
+                0x20000488        0x1 obj/User/cart.o
+ .sbss.g_subslot_reg
+                0x20000489        0x1 obj/User/cart.o
+ .sbss.s_msx_wait_held
+                0x2000048a        0x1 obj/User/cart.o
+ *fill*         0x2000048b        0x1 
+ .sbss.g_mapper
+                0x2000048c        0x4 obj/User/cart.o
+                0x2000048c                g_mapper
+ .sbss.acc.1    0x20000490        0x4 obj/User/nextor.o
+ .sbss.last_cyc.2
+                0x20000494        0x4 obj/User/nextor.o
+ .sbss.primed.3
+                0x20000498        0x1 obj/User/nextor.o
+ .sbss.s_answer_guard_seq
+                0x20000499        0x1 obj/User/nextor.o
+ .sbss.s_answer_guard_active
+                0x2000049a        0x1 obj/User/nextor.o
+ .sbss.s_probe_forced
+                0x2000049b        0x1 obj/User/nextor.o
+ .sbss.s_next_probe
+                0x2000049c        0x4 obj/User/nextor.o
+ .sbss.s_boot_start_ms
+                0x200004a0        0x4 obj/User/nextor.o
+ .sbss.s_last_cmd_cyc
+                0x200004a4        0x4 obj/User/nextor.o
+ .sbss.s_cyc_per_ms
+                0x200004a8        0x4 obj/User/nextor.o
+ .sbss.HCLKClock
+                0x200004ac        0x4 obj/User/system_ch32v4x7.o
+                0x200004ac                HCLKClock
+ .sbss.__malloc_sbrk_start
+                0x200004b0        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+                0x200004b0                __malloc_sbrk_start
+ .sbss.__malloc_free_list
+                0x200004b4        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+                0x200004b4                __malloc_free_list
+ .sbss.__stdio_exit_handler
+                0x200004b8        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+                0x200004b8                __stdio_exit_handler
+ .sbss.errno    0x200004bc        0x4 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+                0x200004bc                errno
+ *(.gnu.linkonce.sb.*)
+ *(.bss*)
+ .bss.s_probe_buf
+                0x200004c0      0x200 obj/User/FATFS/usb_disk.o
+ .bss.HostCtl   0x200006c0      0x10a obj/User/FATFS/usb_disk.o
+                0x200006c0                HostCtl
+ *fill*         0x200007ca        0x2 
+ .bss.RootHubDev
+                0x200007cc       0x1f obj/User/FATFS/usb_disk.o
+                0x200007cc                RootHubDev
+ *fill*         0x200007eb        0x1 
+ .bss.DevDesc_Buf
+                0x200007ec       0x12 obj/User/FATFS/usb_disk.o
+                0x200007ec                DevDesc_Buf
+ *fill*         0x200007fe        0x2 
+ .bss.Com_Buffer
+                0x20000800       0xff obj/User/FATFS/usb_disk.o
+                0x20000800                Com_Buffer
+ *fill*         0x200008ff        0x1 
+ .bss.TxBuffer  0x20000900      0x200 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x20000900                TxBuffer
+ .bss.RxBuffer  0x20000b00      0x200 obj/User/USB_Host/ch32v407_usbhs_host.o
+                0x20000b00                RxBuffer
+ .bss.s_state   0x20000d00       0x40 obj/User/cart.o
+                0x20000d00                s_state
+ .bss.s_mb      0x20000d40      0x468 obj/User/nextor.o
+ .bss.s_bulk_buf
+                0x200011a8     0x4005 obj/User/nextor.o
+ *fill*         0x200051ad        0x3 
+ .bss.pattern.0
+                0x200051b0      0x400 obj/User/psram.o
+ .bss.s         0x200055b0       0x28 obj/User/raw_disk.o
+ .bss.__sf      0x200055d8      0x138 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+                0x200055d8                __sf
+ *(.gnu.linkonce.b.*)
+ *(COMMON*)
+                0x20005710                        . = ALIGN (0x4)
+                0x20005710                        PROVIDE (_ebss = .)
+                0x20005710                        PROVIDE (_end = _ebss)
+                [!provide]                        PROVIDE (end = .)
+
+.stack          0x20031800      0x800
+                0x20031800                        PROVIDE (_heap_end = .)
+                0x20031800                        . = ALIGN (0x4)
+                [!provide]                        PROVIDE (_susrstack = .)
+                0x20032000                        . = (. + __stack_size)
+ *fill*         0x20031800      0x800 
+                0x20032000                        PROVIDE (_eusrstack = .)
+OUTPUT(obj/RISKYMSX2.elf elf32-littleriscv)
+
+.debug_info     0x00000000     0xf50b
+ .debug_info    0x00000000      0x7c9 obj/Debug/debug.o
+ .debug_info    0x000007c9       0x7d obj/Debug/quiet_printf.o
+ .debug_info    0x00000846     0x1046 obj/Peripheral/src/ch32v4x7_gpio.o
+ .debug_info    0x0000188c      0x8a2 obj/Peripheral/src/ch32v4x7_psram.o
+ .debug_info    0x0000212e      0x8af obj/Peripheral/src/ch32v4x7_pwr.o
+ .debug_info    0x000029dd      0xd28 obj/Peripheral/src/ch32v4x7_rcc.o
+ .debug_info    0x00003705      0xd39 obj/Peripheral/src/ch32v4x7_usart.o
+ .debug_info    0x0000443e       0x22 obj/Startup/startup_ch32v4x7.o
+ .debug_info    0x00004460     0x49dc obj/User/FATFS/usb_disk.o
+ .debug_info    0x00008e3c     0x1830 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .debug_info    0x0000a66c     0x104c obj/User/cart.o
+ .debug_info    0x0000b6b8      0x3b3 obj/User/ch32v4x7_it.o
+ .debug_info    0x0000ba6b      0x22d obj/User/main.o
+ .debug_info    0x0000bc98     0x12ca obj/User/nextor.o
+ .debug_info    0x0000cf62       0xdb obj/User/nextor_rom.o
+ .debug_info    0x0000d03d      0xb7d obj/User/psram.o
+ .debug_info    0x0000dbba      0xa84 obj/User/raw_disk.o
+ .debug_info    0x0000e63e      0x42c obj/User/system_ch32v4x7.o
+ .debug_info    0x0000ea6a      0x850 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .debug_info    0x0000f2ba      0x15f /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+ .debug_info    0x0000f419       0xf2 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+
+.debug_abbrev   0x00000000     0x3180
+ .debug_abbrev  0x00000000      0x2ef obj/Debug/debug.o
+ .debug_abbrev  0x000002ef       0x71 obj/Debug/quiet_printf.o
+ .debug_abbrev  0x00000360      0x2b9 obj/Peripheral/src/ch32v4x7_gpio.o
+ .debug_abbrev  0x00000619      0x252 obj/Peripheral/src/ch32v4x7_psram.o
+ .debug_abbrev  0x0000086b      0x29f obj/Peripheral/src/ch32v4x7_pwr.o
+ .debug_abbrev  0x00000b0a      0x2d8 obj/Peripheral/src/ch32v4x7_rcc.o
+ .debug_abbrev  0x00000de2      0x1ff obj/Peripheral/src/ch32v4x7_usart.o
+ .debug_abbrev  0x00000fe1       0x12 obj/Startup/startup_ch32v4x7.o
+ .debug_abbrev  0x00000ff3      0x619 obj/User/FATFS/usb_disk.o
+ .debug_abbrev  0x0000160c      0x463 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .debug_abbrev  0x00001a6f      0x44c obj/User/cart.o
+ .debug_abbrev  0x00001ebb      0x112 obj/User/ch32v4x7_it.o
+ .debug_abbrev  0x00001fcd      0x141 obj/User/main.o
+ .debug_abbrev  0x0000210e      0x482 obj/User/nextor.o
+ .debug_abbrev  0x00002590       0x74 obj/User/nextor_rom.o
+ .debug_abbrev  0x00002604      0x386 obj/User/psram.o
+ .debug_abbrev  0x0000298a      0x3d8 obj/User/raw_disk.o
+ .debug_abbrev  0x00002d62      0x1d3 obj/User/system_ch32v4x7.o
+ .debug_abbrev  0x00002f35      0x1ad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .debug_abbrev  0x000030e2       0x28 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+ .debug_abbrev  0x0000310a       0x76 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+
+.debug_loc      0x00000000     0xe548
+ .debug_loc     0x00000000      0x13b obj/Debug/debug.o
+ .debug_loc     0x0000013b       0x2b obj/Debug/quiet_printf.o
+ .debug_loc     0x00000166     0x510e obj/Peripheral/src/ch32v4x7_gpio.o
+ .debug_loc     0x00005274      0x3be obj/Peripheral/src/ch32v4x7_psram.o
+ .debug_loc     0x00005632      0x258 obj/Peripheral/src/ch32v4x7_pwr.o
+ .debug_loc     0x0000588a      0xb05 obj/Peripheral/src/ch32v4x7_rcc.o
+ .debug_loc     0x0000638f      0xbbd obj/Peripheral/src/ch32v4x7_usart.o
+ .debug_loc     0x00006f4c     0x321a obj/User/FATFS/usb_disk.o
+ .debug_loc     0x0000a166     0x134d obj/User/USB_Host/ch32v407_usbhs_host.o
+ .debug_loc     0x0000b4b3      0x6ee obj/User/cart.o
+ .debug_loc     0x0000bba1       0x22 obj/User/main.o
+ .debug_loc     0x0000bbc3     0x17cf obj/User/nextor.o
+ .debug_loc     0x0000d392      0x397 obj/User/psram.o
+ .debug_loc     0x0000d729      0xb74 obj/User/raw_disk.o
+ .debug_loc     0x0000e29d      0x2ab obj/User/system_ch32v4x7.o
+
+.debug_aranges  0x00000000      0x988
+ .debug_aranges
+                0x00000000       0x50 obj/Debug/debug.o
+ .debug_aranges
+                0x00000050       0x20 obj/Debug/quiet_printf.o
+ .debug_aranges
+                0x00000070       0xa8 obj/Peripheral/src/ch32v4x7_gpio.o
+ .debug_aranges
+                0x00000118      0x108 obj/Peripheral/src/ch32v4x7_psram.o
+ .debug_aranges
+                0x00000220       0x98 obj/Peripheral/src/ch32v4x7_pwr.o
+ .debug_aranges
+                0x000002b8      0x188 obj/Peripheral/src/ch32v4x7_rcc.o
+ .debug_aranges
+                0x00000440       0xf8 obj/Peripheral/src/ch32v4x7_usart.o
+ .debug_aranges
+                0x00000538       0x30 obj/Startup/startup_ch32v4x7.o
+ .debug_aranges
+                0x00000568      0x108 obj/User/FATFS/usb_disk.o
+ .debug_aranges
+                0x00000670       0xb8 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .debug_aranges
+                0x00000728       0x60 obj/User/cart.o
+ .debug_aranges
+                0x00000788       0x28 obj/User/ch32v4x7_it.o
+ .debug_aranges
+                0x000007b0       0x20 obj/User/main.o
+ .debug_aranges
+                0x000007d0       0x58 obj/User/nextor.o
+ .debug_aranges
+                0x00000828       0x18 obj/User/nextor_rom.o
+ .debug_aranges
+                0x00000840       0x20 obj/User/psram.o
+ .debug_aranges
+                0x00000860       0xa8 obj/User/raw_disk.o
+ .debug_aranges
+                0x00000908       0x28 obj/User/system_ch32v4x7.o
+ .debug_aranges
+                0x00000930       0x20 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .debug_aranges
+                0x00000950       0x20 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+ .debug_aranges
+                0x00000970       0x18 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+
+.debug_ranges   0x00000000     0x1e08
+ .debug_ranges  0x00000000       0x80 obj/Debug/debug.o
+ .debug_ranges  0x00000080       0x10 obj/Debug/quiet_printf.o
+ .debug_ranges  0x00000090      0x170 obj/Peripheral/src/ch32v4x7_gpio.o
+ .debug_ranges  0x00000200       0xf8 obj/Peripheral/src/ch32v4x7_psram.o
+ .debug_ranges  0x000002f8       0xb8 obj/Peripheral/src/ch32v4x7_pwr.o
+ .debug_ranges  0x000003b0      0x1b8 obj/Peripheral/src/ch32v4x7_rcc.o
+ .debug_ranges  0x00000568       0xe8 obj/Peripheral/src/ch32v4x7_usart.o
+ .debug_ranges  0x00000650       0x28 obj/Startup/startup_ch32v4x7.o
+ .debug_ranges  0x00000678      0xb80 obj/User/FATFS/usb_disk.o
+ .debug_ranges  0x000011f8      0x218 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .debug_ranges  0x00001410      0x160 obj/User/cart.o
+ .debug_ranges  0x00001570       0x18 obj/User/ch32v4x7_it.o
+ .debug_ranges  0x00001588       0x28 obj/User/main.o
+ .debug_ranges  0x000015b0      0x3f0 obj/User/nextor.o
+ .debug_ranges  0x000019a0      0x170 obj/User/psram.o
+ .debug_ranges  0x00001b10      0x2b0 obj/User/raw_disk.o
+ .debug_ranges  0x00001dc0       0x48 obj/User/system_ch32v4x7.o
+
+.debug_line     0x00000000    0x16f04
+ .debug_line    0x00000000      0x707 obj/Debug/debug.o
+ .debug_line    0x00000707       0x6f obj/Debug/quiet_printf.o
+ .debug_line    0x00000776     0x5398 obj/Peripheral/src/ch32v4x7_gpio.o
+ .debug_line    0x00005b0e      0xa2d obj/Peripheral/src/ch32v4x7_psram.o
+ .debug_line    0x0000653b      0x983 obj/Peripheral/src/ch32v4x7_pwr.o
+ .debug_line    0x00006ebe     0x1612 obj/Peripheral/src/ch32v4x7_rcc.o
+ .debug_line    0x000084d0      0xe86 obj/Peripheral/src/ch32v4x7_usart.o
+ .debug_line    0x00009356      0x134 obj/Startup/startup_ch32v4x7.o
+ .debug_line    0x0000948a     0x4b99 obj/User/FATFS/usb_disk.o
+ .debug_line    0x0000e023     0x1ec1 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .debug_line    0x0000fee4     0x1198 obj/User/cart.o
+ .debug_line    0x0001107c      0x17e obj/User/ch32v4x7_it.o
+ .debug_line    0x000111fa      0x214 obj/User/main.o
+ .debug_line    0x0001140e     0x25d4 obj/User/nextor.o
+ .debug_line    0x000139e2       0xf0 obj/User/nextor_rom.o
+ .debug_line    0x00013ad2      0xb08 obj/User/psram.o
+ .debug_line    0x000145da     0x1403 obj/User/raw_disk.o
+ .debug_line    0x000159dd      0x845 obj/User/system_ch32v4x7.o
+ .debug_line    0x00016222      0xb3a /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .debug_line    0x00016d5c      0x15f /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+ .debug_line    0x00016ebb       0x49 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+
+.debug_str      0x00000000     0x3c52
+ .debug_str     0x00000000     0x3c52 obj/Debug/debug.o
+                                0x5ca (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/Debug/quiet_printf.o
+                                0x1b0 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/Peripheral/src/ch32v4x7_gpio.o
+                                0x5ec (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/Peripheral/src/ch32v4x7_psram.o
+                                0x6a2 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/Peripheral/src/ch32v4x7_pwr.o
+                                0x54e (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/Peripheral/src/ch32v4x7_rcc.o
+                                0x8e7 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/Peripheral/src/ch32v4x7_usart.o
+                                0x7b5 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/Startup/startup_ch32v4x7.o
+                                 0x58 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/FATFS/usb_disk.o
+                               0x10e3 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/USB_Host/ch32v407_usbhs_host.o
+                                0x880 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/cart.o
+                                0xbf2 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/ch32v4x7_it.o
+                                0x333 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/main.o
+                                0x318 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/nextor.o
+                                0x69c (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/nextor_rom.o
+                                0x233 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/psram.o
+                                0x59b (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/raw_disk.o
+                                0x520 (size before relaxing)
+ .debug_str     0x00003c52        0x0 obj/User/system_ch32v4x7.o
+                                0x3b8 (size before relaxing)
+ .debug_str     0x00003c52        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+                                0x2e1 (size before relaxing)
+ .debug_str     0x00003c52        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+                                0x299 (size before relaxing)
+ .debug_str     0x00003c52        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+                                0x22e (size before relaxing)
+
+.comment        0x00000000       0x57
+ .comment       0x00000000       0x57 obj/Debug/debug.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/Debug/quiet_printf.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/Peripheral/src/ch32v4x7_gpio.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/Peripheral/src/ch32v4x7_psram.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/Peripheral/src/ch32v4x7_pwr.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/Peripheral/src/ch32v4x7_rcc.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/Peripheral/src/ch32v4x7_usart.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/FATFS/usb_disk.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/USB_Host/ch32v407_usbhs_host.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/cart.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/ch32v4x7_it.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/main.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/nextor.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/nextor_rom.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/psram.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/raw_disk.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 obj/User/system_ch32v4x7.o
+                                 0x20 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+                                 0x27 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+                                 0x27 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+                                 0x13 (size before relaxing)
+ .comment       0x00000057        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+                                 0x13 (size before relaxing)
+
+.note.GNU-stack
+                0x00000000        0x0
+ .note.GNU-stack
+                0x00000000        0x0 obj/Debug/debug.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/Debug/quiet_printf.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/Peripheral/src/ch32v4x7_gpio.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/Peripheral/src/ch32v4x7_psram.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/Peripheral/src/ch32v4x7_pwr.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/Peripheral/src/ch32v4x7_rcc.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/Peripheral/src/ch32v4x7_usart.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/FATFS/usb_disk.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/cart.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/ch32v4x7_it.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/main.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/nextor.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/nextor_rom.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/psram.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/raw_disk.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/User/system_ch32v4x7.o
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+ .note.GNU-stack
+                0x00000000        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+
+.riscv.attributes
+                0x00000000       0xad
+ .riscv.attributes
+                0x00000000       0xad obj/Debug/debug.o
+ .riscv.attributes
+                0x000000ad       0xad obj/Debug/quiet_printf.o
+ .riscv.attributes
+                0x0000015a       0xad obj/Peripheral/src/ch32v4x7_gpio.o
+ .riscv.attributes
+                0x00000207       0xad obj/Peripheral/src/ch32v4x7_psram.o
+ .riscv.attributes
+                0x000002b4       0xad obj/Peripheral/src/ch32v4x7_pwr.o
+ .riscv.attributes
+                0x00000361       0xad obj/Peripheral/src/ch32v4x7_rcc.o
+ .riscv.attributes
+                0x0000040e       0xad obj/Peripheral/src/ch32v4x7_usart.o
+ .riscv.attributes
+                0x000004bb       0xad obj/User/FATFS/usb_disk.o
+ .riscv.attributes
+                0x00000568       0xad obj/User/USB_Host/ch32v407_usbhs_host.o
+ .riscv.attributes
+                0x00000615       0xad obj/User/cart.o
+ .riscv.attributes
+                0x000006c2       0xad obj/User/ch32v4x7_it.o
+ .riscv.attributes
+                0x0000076f       0xad obj/User/main.o
+ .riscv.attributes
+                0x0000081c       0xad obj/User/nextor.o
+ .riscv.attributes
+                0x000008c9       0xad obj/User/nextor_rom.o
+ .riscv.attributes
+                0x00000976       0xad obj/User/psram.o
+ .riscv.attributes
+                0x00000a23       0xad obj/User/raw_disk.o
+ .riscv.attributes
+                0x00000ad0       0xad obj/User/system_ch32v4x7.o
+ .riscv.attributes
+                0x00000b7d       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+ .riscv.attributes
+                0x00000c2a       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+ .riscv.attributes
+                0x00000cd7       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-puts.o)
+ .riscv.attributes
+                0x00000d84       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wbuf.o)
+ .riscv.attributes
+                0x00000e31       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-wsetup.o)
+ .riscv.attributes
+                0x00000ede       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-impure.o)
+ .riscv.attributes
+                0x00000f8b       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-freer.o)
+ .riscv.attributes
+                0x00001038       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mallocr.o)
+ .riscv.attributes
+                0x000010e5       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-mlock.o)
+ .riscv.attributes
+                0x00001192       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fflush.o)
+ .riscv.attributes
+                0x0000123f       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-findfp.o)
+ .riscv.attributes
+                0x000012ec       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fwalk.o)
+ .riscv.attributes
+                0x00001399       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-makebuf.o)
+ .riscv.attributes
+                0x00001446       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-stdio.o)
+ .riscv.attributes
+                0x000014f3       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-closer.o)
+ .riscv.attributes
+                0x000015a0       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-reent.o)
+ .riscv.attributes
+                0x0000164d       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-fstatr.o)
+ .riscv.attributes
+                0x000016fa       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-isattyr.o)
+ .riscv.attributes
+                0x000017a7       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-lseekr.o)
+ .riscv.attributes
+                0x00001854       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-readr.o)
+ .riscv.attributes
+                0x00001901       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-sbrkr.o)
+ .riscv.attributes
+                0x000019ae       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libg_nano.a(libc_a-writer.o)
+ .riscv.attributes
+                0x00001a5b       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(close.o)
+ .riscv.attributes
+                0x00001b08       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(fstat.o)
+ .riscv.attributes
+                0x00001bb5       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(isatty.o)
+ .riscv.attributes
+                0x00001c62       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(lseek.o)
+ .riscv.attributes
+                0x00001d0f       0xad /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/../../../../riscv32-wch-elf/lib/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libnosys.a(read.o)
+
+.debug_frame    0x00000000     0x1918
+ .debug_frame   0x00000000       0xa8 obj/Debug/debug.o
+ .debug_frame   0x000000a8       0x28 obj/Debug/quiet_printf.o
+ .debug_frame   0x000000d0      0x184 obj/Peripheral/src/ch32v4x7_gpio.o
+ .debug_frame   0x00000254      0x1fc obj/Peripheral/src/ch32v4x7_psram.o
+ .debug_frame   0x00000450      0x11c obj/Peripheral/src/ch32v4x7_pwr.o
+ .debug_frame   0x0000056c      0x2fc obj/Peripheral/src/ch32v4x7_rcc.o
+ .debug_frame   0x00000868      0x210 obj/Peripheral/src/ch32v4x7_usart.o
+ .debug_frame   0x00000a78      0x748 obj/User/FATFS/usb_disk.o
+ .debug_frame   0x000011c0      0x334 obj/User/USB_Host/ch32v407_usbhs_host.o
+ .debug_frame   0x000014f4       0xc8 obj/User/cart.o
+ .debug_frame   0x000015bc       0x30 obj/User/ch32v4x7_it.o
+ .debug_frame   0x000015ec       0x28 obj/User/main.o
+ .debug_frame   0x00001614       0xc0 obj/User/nextor.o
+ .debug_frame   0x000016d4       0x48 obj/User/psram.o
+ .debug_frame   0x0000171c      0x1b4 obj/User/raw_disk.o
+ .debug_frame   0x000018d0       0x48 obj/User/system_ch32v4x7.o
+
+.debug_loclists
+                0x00000000      0xc10
+ .debug_loclists
+                0x00000000      0xc10 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+
+.debug_rnglists
+                0x00000000       0xb7
+ .debug_rnglists
+                0x00000000       0xb7 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+
+.debug_line_str
+                0x00000000      0x126
+ .debug_line_str
+                0x00000000      0x126 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_udivdi3.o)
+                                 0xf8 (size before relaxing)
+ .debug_line_str
+                0x00000126        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(save-restore.o)
+                                 0xda (size before relaxing)
+ .debug_line_str
+                0x00000126        0x0 /opt/riscv-toolchain/RISC-V Embedded GCC15/bin/../lib/gcc/riscv32-wch-elf/15.2.0/rv32imac_zaamo_zalrsc_zba_zbb_zbc_zbs_zvbb_zve32x_zve64x_zvkb_zvl32b_zvl64b_xw/ilp32/libgcc.a(_clz.o)
+                                 0xf8 (size before relaxing)
